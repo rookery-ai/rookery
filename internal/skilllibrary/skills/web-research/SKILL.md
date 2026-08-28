@@ -38,8 +38,9 @@ a table's rows, every link, a repeated card — parse the HTML.
 
 - Locate the data by a stable anchor (a heading, a label, an id), not by position. Page
   layouts change; "the third div" breaks silently.
-- A page that comes back nearly empty is usually JavaScript-rendered. Switch to the
-  playwright-browser skill rather than retrying the fetch.
+- A page that comes back nearly empty is usually JavaScript-rendered. Use `browser_read`
+  on the same URL rather than retrying the fetch — it opens the page in a real browser
+  and returns what actually rendered. `web_fetch` will tell you when this is the case.
 - Extract what was asked for and stop. Dumping the whole page into your reasoning wastes
   the run and truncates the real answer.
 

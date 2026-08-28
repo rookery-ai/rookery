@@ -36,6 +36,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.PUT("/agents/:id/skills", s.apiSaveAgentSkills)
 	g.PUT("/agents/:id/connections", s.apiSaveAgentConnections)
 	s.registerApprovalRoutes(g)
+	s.registerBrowserRoutes(g)
 
 	// Design/SSE family: unchanged legacy handlers, unchanged legacy error shapes.
 	g.POST("/agents/design", s.handleDesignChat)
@@ -199,6 +200,16 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 		"missing_secrets":         orEmpty(d.MissingSecrets),
 		"running":                 d.Running,
 		"live_run":                d.LiveRun,
+		// `needs_irreversible` is what decides whether the page shows a
+		// permission at all: an agent that only reads pages must never be handed
+		// a switch about payments, or the switch stops meaning anything. The
+		// availability flag travels with it so a host without a browser does not
+		// offer a permission for something that cannot happen.
+		"browser": map[string]any{
+			"available":          s.browserMgr != nil && s.browserMgr.Available().OK,
+			"irreversible":       d.Agent.BrowserIrreversible,
+			"needs_irreversible": d.Agent.BrowserNeedsIrreversible,
+		},
 	}
 }
 

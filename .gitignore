@@ -20,3 +20,6 @@ dist/
 # compiled dev harnesses — never commit
 /livecheck
 *.pid
+
+# Stray binaries from `go build ./cmd/...` (writes into the repo root).
+/rookery

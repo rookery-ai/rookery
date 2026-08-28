@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -240,7 +241,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.ScriptRan = tools.authoredScriptRan()
 			res.UsedConnectionIDs = tools.usedConnectionIDs()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
-			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+			res.BrowserWantedIrreversible = tools.browserWantedIrreversible
 			res.OfferedTools = offered
 			res.ToolTrace = toolTrace
 			// A model that finished of its own accord was not cut short. Stated
@@ -314,6 +315,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptRan = tools.authoredScriptRan()
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
 		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+		res.BrowserWantedIrreversible = tools.browserWantedIrreversible
 		res.OfferedTools = offered
 		res.ToolTrace = toolTrace
 		// Why the loop ended, reported by the engine rather than inferred from whatever
@@ -650,6 +652,18 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		mcpCaller: c.mcpCaller,
 		mcpParker: c.mcpParker,
 		boundMCP:  c.boundMCP,
+
+		browser:    c.browser,
+		notifyUser: c.notifyUser,
+		// The acting grants come from the caller, but the BUILD-PHASE flag is
+		// derived here from the same marker verifyBuild reads. Deriving it
+		// rather than trusting the caller matters: a build must refuse acting
+		// even if whoever assembled the policy forgot, and this is the one place
+		// that already knows a build is in progress.
+		browserPolicy: browser.Policy{
+			BuildPhase:        c.extraEnv[buildphase.EnvVar] != "",
+			AllowIrreversible: c.browserPolicy.AllowIrreversible,
+		},
 
 		usedConnIDs:      map[string]bool{},
 		usedMCPServerIDs: map[string]bool{},

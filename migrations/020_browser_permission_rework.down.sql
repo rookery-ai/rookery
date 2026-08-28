@@ -1,0 +1,7 @@
+-- Deliberately empty.
+--
+-- Restoring browser_acting would bring back a column nothing reads, defaulting
+-- to 0 — so every agent would appear to have lost a permission it no longer
+-- needs, which is a worse state than the one this migration leaves. The
+-- browser_irreversible grants the owner made are untouched by this migration and
+-- survive it either way.

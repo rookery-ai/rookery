@@ -1,0 +1,8 @@
+-- Deliberately empty.
+--
+-- These columns are additive with safe defaults, and the safe default is the
+-- restrictive one: a build that predates them simply never reads them, and an
+-- agent whose grants were dropped would fall back to "may not act", which is the
+-- correct direction to fail. Dropping them would silently discard permissions
+-- the owner granted deliberately, so a later re-upgrade would leave agents that
+-- look configured and are not.

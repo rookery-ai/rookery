@@ -14,7 +14,7 @@ import (
 // opening a conversation that cannot answer that question is worse than no
 // button.
 func TestChatPromptCarriesThePlatformPrimer(t *testing.T) {
-	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", nil)
+	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", nil, false)
 
 	if !strings.Contains(got, "<platform_context>") {
 		t.Fatal("the chat prompt must carry the platform primer")
@@ -31,7 +31,7 @@ func TestChatPromptCarriesThePlatformPrimer(t *testing.T) {
 // with "right now you are an AGENT run" — false, and an invitation to emit the
 // [CHAT]/[STATE] output-protocol markers at a human.
 func TestChatPromptDoesNotClaimToBeAnAgentRun(t *testing.T) {
-	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", nil)
+	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", nil, false)
 
 	if strings.Contains(got, "you are an AGENT run") {
 		t.Error("the chat prompt must not describe itself as an agent run")
@@ -59,7 +59,7 @@ func TestAgentPromptsStillDescribeAnAgentRun(t *testing.T) {
 // surfaces, from the one mapping.
 func TestChatPromptNamesConnectedChatApps(t *testing.T) {
 	apps := ChatAppsForPlatforms([]string{"telegram"})
-	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", apps)
+	got := BuildChatSystemPrompt("/vaults/w1", "api", nil, nil, "", apps, false)
 	if !strings.Contains(strings.ToLower(got), "telegram") {
 		t.Error("a connected chat app must be named in the chat prompt")
 	}

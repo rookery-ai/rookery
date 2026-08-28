@@ -224,7 +224,7 @@ func TestStateFileHasExactlyOneRestorer(t *testing.T) {
 func TestDryRunPromptCarriesTheVaultRoot(t *testing.T) {
 	const root = "/data/vaults/ws1"
 	got := dryRunPrompt("Watches a page.", prompts.BackendToolCalling, "[Current context]\n",
-		root, root+"/agents/draft_watcher", nil)
+		root, root+"/agents/draft_watcher", nil, false)
 
 	if !strings.Contains(got, root) {
 		t.Fatal("the dry run's prompt no longer names the vault root, so the rehearsal is " +

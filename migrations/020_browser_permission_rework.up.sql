@@ -1,0 +1,24 @@
+-- Rework the browser permission model down to the one decision that is really
+-- the owner's.
+--
+-- browser_acting ("this agent may click and type at all") is removed because
+-- testing showed it gated nothing. Asked to log into a site, an agent simply did
+-- it with `bash` and `curl` — eleven calls, not one browser tool — so the switch
+-- withheld one route to something the agent could do anyway by another. It cost
+-- the owner a decision about a task they had just described in words, and left
+-- the impression that something was being guarded.
+--
+-- What replaces it is browser_needs_irreversible: not a permission, a FINDING.
+-- It records that this agent's work involves something that cannot be undone,
+-- so the permission is shown on its page only when it is actually relevant,
+-- rather than on every agent forever.
+--
+-- The finding is set from two places: the designer declaring it when the agent
+-- is built, and a run being refused an irreversible action. It is deliberately
+-- ADDITIVE and never cleared automatically -- an edit that drops the declaration
+-- (a weak model omitting a header, say) must not silently retract a warning the
+-- owner has already acted on. The GRANT beside it, browser_irreversible, is only
+-- ever changed by the owner: nothing in a build or a run may turn it on, and
+-- nothing may turn it off behind their back.
+ALTER TABLE agents DROP COLUMN browser_acting;
+ALTER TABLE agents ADD COLUMN browser_needs_irreversible INTEGER NOT NULL DEFAULT 0;

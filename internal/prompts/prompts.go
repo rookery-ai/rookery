@@ -94,6 +94,19 @@ type DesignSystemParams struct {
 	UserProfile        string          // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string
 	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	// SiteFeasibility is what a real browser found at the URLs the user just
+	// mentioned: reachable, behind a login, or behind a bot wall. Empty when no
+	// URL was mentioned or no browser is installed. Injected rather than
+	// discovered, because the design conversation has no browser tool of its own
+	// — the same arrangement KBManifest uses for retrieval.
+	SiteFeasibility string
+	// BrowserAvailable tells the DESIGNER that agents can drive a real browser.
+	// Without it the designer denies the capability outright and refuses to build
+	// — which it did, to a user's face, while suggesting they use Selenium.
+	BrowserAvailable bool
+	// BackendType selects the wording of the browser block (native tools vs the
+	// CLI command form), matching how the other prompts describe it.
+	BackendType string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -957,6 +970,22 @@ Two things follow, and both shape what you may promise the user:
 	// coder all see the same description of the platform (KB, secrets, chats, reminders,
 	// connected chat apps + commands, output protocol, schedule).
 	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, ""))
+	// The designer has to know what an agent can actually DO in a browser, and
+	// this was the one surface it was missing.
+	//
+	// Chat, the build prompt and the runtime prompt all carried this block; the
+	// design conversation did not — so the designer had no idea agents can click
+	// or fill forms, and told a user outright that "this platform's agents can't
+	// click buttons", refused to build, and suggested Selenium instead. It was
+	// confident and wrong, on the FIRST surface anyone meets. A capability the
+	// designer does not know about does not exist as far as users are concerned.
+	//
+	// acting=true because it is describing what the agent it designs will be able
+	// to do; declare=false because the designer writes a plan, not AGENT.md — the
+	// header belongs to the build prompt.
+	if p.BrowserAvailable {
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true, false), browserBinPlaceholder, ""))
+	}
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(fmt.Sprintf("<connected_platforms_summary>\nThe user has connected: %s.\n"+
 			"When the user says \"send to Telegram\", \"notify me\", \"post a message\", or similar — they mean: the system will route the agent's output to their connected platform automatically. No bot token, chat ID, or messaging setup is needed or should be mentioned.\n"+
@@ -1112,6 +1141,7 @@ External services: none | <service name and what for>
 Connections: none | <the provider/label accounts from <available_connections> this will use, comma-separated>
 Skills: none | <the skill names from <available_skills> this needs, comma-separated>
 MCP servers: none | <the server names from <available_mcp_servers> this will call, comma-separated>
+Irreversible actions: no | yes — <what exactly cannot be undone: what it pays, orders, transfers or deletes>
 [/TECHNICAL SPEC]
 </your_job>
 
@@ -1163,6 +1193,12 @@ runtime rather than assuming these exact paths persist forever.
 there as it runs.
 `)
 	}
+	// After the knowledge base, because a site the user named is more specific
+	// than anything retrieval turned up and a weak model weights later text more
+	// heavily.
+	if p.SiteFeasibility != "" {
+		sb.WriteString(p.SiteFeasibility)
+	}
 	sb.WriteString("</knowledge_base>\n\n")
 
 	// External services the agent can act on are surfaced by the <available_connections>
@@ -1207,6 +1243,10 @@ type ImplementationParams struct {
 	// steered only by an advisory History note, and a weak model regenerates the same
 	// unverifiable script — the loop this flag exists to break.
 	ForceTier1 bool
+	// BrowserAvailable tells the BUILD coder the browser exists. Without it a weak
+	// model writes a Playwright script by hand — the exact failure the native tool
+	// replaces — or concludes a JavaScript-rendered site cannot be read at all.
+	BrowserAvailable bool
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -1226,6 +1266,13 @@ func (p ImplementationParams) capabilitySpec() string {
 	// Tell the BUILD coder about the native connector tools it has for the workspace's
 	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	if p.BrowserAvailable {
+		// Acting is described at build time even though a build may not itself
+		// click: the agent being WRITTEN will act on its scheduled runs, so the
+		// plan has to account for it. The build-phase refusal is enforced in
+		// browser.CheckAct, not by hiding the capability here.
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true, true), browserBinPlaceholder, p.ConnectorBin))
+	}
 	sb.WriteString(availableSkillsBlock(p.Skills))
 	// LAST, so it is the most recent instruction the model reads — this is an override of
 	// the tier machinery above, and a weak model weights later text more heavily.
@@ -1877,6 +1924,13 @@ type CoderPromptParams struct {
 	// ConnectorBin is the absolute path to the rookery binary a CLI coder invokes as
 	// `<bin> connector exec …`. Empty falls back to bare "rookery" (relies on PATH).
 	ConnectorBin string
+	// BrowserAvailable reports whether this host has the browser runtime, so the
+	// prompt never advertises a tool the model would then fail to call.
+	BrowserAvailable bool
+	// BrowserActing reports whether this agent may click and type, as opposed to
+	// only reading rendered pages. Described separately because the refusals are
+	// worded to be reported to the user rather than retried.
+	BrowserActing bool
 }
 
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
@@ -2082,6 +2136,9 @@ before acting on assumptions about the user. Use your available file capabilitie
 	}
 
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	if p.BrowserAvailable {
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, p.BrowserActing, false), browserBinPlaceholder, p.ConnectorBin))
+	}
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.
@@ -2269,7 +2326,7 @@ User input: %s`, nowStr, timezone, input)
 // write_file/edit_file/list_dir/search_files/glob function calls executed by the host. The
 // tool set is intentionally file-only in both cases — the chat can read, create, and edit
 // notes, but cannot delete, rename, or run shell commands (no web_search/run_script here).
-func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string, chatApps []ChatAppInfo) string {
+func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string, chatApps []ChatAppInfo, browserAvailable bool) string {
 	var sb strings.Builder
 	mappedBackend := MapCoderBackend(backendType)
 	// Chat used to open straight into "you are a helpful assistant" with no
@@ -2387,6 +2444,13 @@ only your final reply, so make sure your reply actually answers the question.`, 
 		sb.WriteString("\n")
 		sb.WriteString(connectedToolsBlock(conns, connToolNames, mappedBackend, connectorBin))
 	}
+	// Chat gets READING only: acting is exec-gated, for the same reason chat has
+	// no run_script. A human is typing in real time with no approval gate, so a
+	// chat that could click "Pay" would hold the user against themselves.
+	if browserAvailable {
+		sb.WriteString("\n")
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(mappedBackend, false, false), browserBinPlaceholder, connectorBin))
+	}
 	return sb.String()
 }
 
@@ -2395,11 +2459,15 @@ only your final reply, so make sure your reply actually answers the question.`, 
 // SkillDesignParams is the dynamic context injected into the skill-creator
 // design conversation system prompt.
 type SkillDesignParams struct {
-	SkillName          string
-	AvailableSkills    []SkillRef // core + user skills, for the designer's awareness
-	UserProfile        string
-	UserMemory         string
-	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	SkillName       string
+	AvailableSkills []SkillRef // core + user skills, for the designer's awareness
+	UserProfile     string
+	UserMemory      string
+	KBManifest      string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	// SiteFeasibility mirrors the agent designer's field of the same name: what a
+	// real browser found at the URLs the user mentioned. Both designers share one
+	// front end, so a probe present in only one of them is drift.
+	SiteFeasibility    string
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo
 	// BackendType selects the capabilities block in BuildSkillImplementationPrompt
@@ -2506,6 +2574,13 @@ supplies the real absolute path.
 		sb.WriteString("design the skill to create the note itself.\n\n")
 		sb.WriteString(p.KBManifest)
 		sb.WriteString("</knowledge_base_manifest>\n\n")
+	}
+
+	// After the knowledge base, for the same reason as in the agent designer: a
+	// site the user named is more specific than anything retrieval produced, and
+	// a weak model weights later text more heavily.
+	if p.SiteFeasibility != "" {
+		sb.WriteString(p.SiteFeasibility)
 	}
 
 	sb.WriteString(`<your_job>

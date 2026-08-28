@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/connectors"
@@ -58,16 +59,27 @@ func (s DesignState) String() string {
 
 // DesignSession holds all state for one in-progress agent creation or edit.
 type DesignSession struct {
-	WorkspaceID        string
-	AgentID            string
-	AgentName          string
-	State              DesignState
-	History            []db.ChatMessage   // full conversation fed to coder on every turn
-	Skills             []prompts.SkillRef // installed skills (name+description), loaded once on Start
-	ConnectedPlatforms []string           // e.g. ["telegram"] — loaded from platform_connections
-	UserProfile        string             // "[Current context]" block (date/time/timezone); identity lives in UserMemory
-	UserMemory         string             // bullet list of saved memory entries, loaded once on session start
-	CreatedAt          time.Time
+	WorkspaceID string
+	AgentID     string
+	AgentName   string
+	// feasibility caches site probes for this session so a conversation that
+	// keeps naming the same URL renders it once. Deliberately NOT persisted with
+	// the draft: a resumed conversation days later should look again, since the
+	// site may have changed — and a stale "blocked" would talk the user out of an
+	// agent that would now work.
+	feasibility *browser.FeasibilityCache
+	// DestructiveApproved records that the user approved a plan that declared
+	// irreversible actions. It is what turns the permission ON at save, so the
+	// agent works the first time instead of stopping halfway through its first
+	// run for consent the user has already given.
+	DestructiveApproved bool
+	State               DesignState
+	History             []db.ChatMessage   // full conversation fed to coder on every turn
+	Skills              []prompts.SkillRef // installed skills (name+description), loaded once on Start
+	ConnectedPlatforms  []string           // e.g. ["telegram"] — loaded from platform_connections
+	UserProfile         string             // "[Current context]" block (date/time/timezone); identity lives in UserMemory
+	UserMemory          string             // bullet list of saved memory entries, loaded once on session start
+	CreatedAt           time.Time
 
 	// Origin is the surface that created this session. Fixed at creation and
 	// never reassigned: the owner drives, the other surface may read. See
@@ -181,6 +193,15 @@ type dbDesignStore interface {
 	ListServiceConnections(ctx context.Context, workspaceID string) ([]db.ServiceConnection, error)
 	ListAgentConnections(ctx context.Context, agentID string) ([]db.ServiceConnection, error)
 	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
+
+	// MarkAgentNeedsIrreversible records that this agent's job involves an
+	// action that cannot be undone, so its page shows the permission for one.
+	MarkAgentNeedsIrreversible(id string) error
+
+	// SetAgentBrowserGrant turns the irreversible-actions permission on when the
+	// user approved a plan that declared one, so the agent works on its first run
+	// rather than stopping for consent already given.
+	SetAgentBrowserGrant(id string, irreversible bool) error
 }
 
 // mcpStore is the MCP slice of the database, kept as its own interface so the many
@@ -287,6 +308,47 @@ func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, age
 	}
 }
 
+// persistIrreversible records the agent's own declaration that its job involves
+// something that cannot be undone.
+//
+// Only ever SETS the flag. A later edit whose model omitted the header must not
+// retract a warning the owner may already have acted on — and since the flag
+// only decides whether a permission is DISPLAYED, leaving it set on an agent
+// that no longer needs it costs a visible switch, while wrongly clearing it
+// costs the owner their warning.
+func (f *Flow) persistIrreversible(agentID, agentMD string, approved bool) {
+	if f.db == nil || agentID == "" {
+		return
+	}
+	// Either source is enough to SHOW the permission: the build's own header, or
+	// the user having approved a plan that declared it. They disagree more often
+	// than one would like — a weak model drops the header from AGENT.md while the
+	// plan it just wrote said "yes" — and there the user's decision is the better
+	// evidence of what this agent is for.
+	if !approved && !ParseIrreversibleLine(agentMD) {
+		return
+	}
+	if err := f.db.MarkAgentNeedsIrreversible(agentID); err != nil {
+		slog.Warn("agentdesigner: mark agent needs irreversible permission",
+			"agent_id", agentID, "err", err)
+		return
+	}
+	if !approved {
+		// Declared, but never put to the user: show the permission, do not grant
+		// it. A header the model wrote about itself is not consent.
+		return
+	}
+	// The user read a plan saying this agent pays, orders or deletes, and pressed
+	// the button anyway. Granting here is what makes the agent work on its first
+	// run instead of stopping halfway for permission they already gave — the
+	// whole reason the question is asked during design rather than discovered
+	// afterwards. They can withdraw it on the agent's page.
+	if err := f.db.SetAgentBrowserGrant(agentID, true); err != nil {
+		slog.Warn("agentdesigner: grant approved irreversible permission",
+			"agent_id", agentID, "err", err)
+	}
+}
+
 // persistMCPServers is the MCP half of persistConnections, with identical semantics:
 // an explicit "# MCP:" header wins (including "none"), an agent that already has
 // bindings is left alone, and only a genuinely unbound agent falls back to the
@@ -376,14 +438,17 @@ type Flow struct {
 	// onBuildComplete delivers a detached build's outcome. See BuildCompleteFunc.
 	onBuildComplete BuildCompleteFunc
 
-	coderFor      func(workspaceID string) *coder.Coder
-	designer      *AgentDesigner
-	db            dbDesignStore
-	mcpDB         mcpStore
-	mcpCaller     mcp.Caller
-	mcpBoundFor   func(ctx context.Context, workspaceID string) []mcp.BoundServer
-	memStore      memoryStore  // optional; nil = no memory injected
-	vlt           *vault.Vault // optional; nil = no KB context injected
+	coderFor    func(workspaceID string) *coder.Coder
+	designer    *AgentDesigner
+	db          dbDesignStore
+	mcpDB       mcpStore
+	mcpCaller   mcp.Caller
+	mcpBoundFor func(ctx context.Context, workspaceID string) []mcp.BoundServer
+	memStore    memoryStore  // optional; nil = no memory injected
+	vlt         *vault.Vault // optional; nil = no KB context injected
+	// browser lets the design conversation find out what a site ACTUALLY looks
+	// like before a plan is approved. Optional; nil = no feasibility block.
+	browser       browser.Renderer
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 
 	// Self-managed OAuth connectors: when set, a build exposes the workspace's service
@@ -444,6 +509,16 @@ func (f *Flow) WithMemory(m memoryStore) *Flow {
 // WithVault attaches the vault so the designer's knowledge-base block (folder
 // structure + retrieved passages relevant to the conversation) is injected
 // into each design turn. nil = no KB context.
+// WithBrowser lets the design conversation probe a site the user mentions, so a
+// captcha or a bot wall is found while the plan is still a conversation rather
+// than after a six-minute build. The designer is never handed a browser TOOL —
+// the probe is run for it and injected as a block, mirroring how
+// vault.BuildKBContext supplies retrieval to a designer that has no search tool.
+func (f *Flow) WithBrowser(b browser.Renderer) *Flow {
+	f.browser = b
+	return f
+}
+
 func (f *Flow) WithVault(v *vault.Vault) *Flow {
 	f.vlt = v
 	return f
@@ -857,6 +932,11 @@ type DesignSnapshot struct {
 	// drift from the artifact it describes. See planFromHistory.
 	PendingSpec string
 	PlanReady   bool
+	// PlanDestructive reports that the settled plan involves something that
+	// cannot be undone. It is what lets the interface ask for permission WITH
+	// the build, while the user is reading the plan — rather than the user
+	// discovering it later from a run that stopped halfway.
+	PlanDestructive bool
 }
 
 // Snapshot returns a race-free view of the user's live in-memory session so a
@@ -897,6 +977,7 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 		PendingTools:     tools,
 		PendingSpec:      spec,
 		PlanReady:        planReady,
+		PlanDestructive:  planReady && SpecDeclaresIrreversible(spec),
 	}
 }
 
@@ -1245,6 +1326,21 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 	f.mu.Unlock()
 
 	if isApproval(input) {
+		// Record that the plan the user just approved was a destructive one.
+		//
+		// This is the consent, and it is captured HERE — at the moment they read
+		// the plan and pressed the button — rather than inferred later from
+		// AGENT.md. The distinction matters: a header the build happens to emit
+		// is the model's claim about itself, while this is the user's decision
+		// about a plan the interface showed them. Only the latter justifies
+		// turning the permission on for them.
+		f.mu.Lock()
+		if sess := f.sessions[workspaceID]; sess != nil {
+			if spec, ready := planFromHistory(sess.History); ready && SpecDeclaresIrreversible(spec) {
+				sess.DestructiveApproved = true
+			}
+		}
+		f.mu.Unlock()
 		return f.startGeneration(workspaceID)
 	}
 	if genFailed && isKeepAsIs(input) {
@@ -1454,6 +1550,18 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
+		// Appended to the same block the KB manifest uses rather than given a
+		// field of its own: both are "things looked up for the designer this
+		// turn", and a second field would need the prompt builder to know about
+		// browsers.
+		SiteFeasibility: browser.Feasibility(ctx, f.browser, &sess.feasibility, userMessage),
+		// Without this the designer denies the capability outright: it told a
+		// user "this platform's agents can't click buttons", refused to build,
+		// and pointed them at Selenium. Every other coder surface already carried
+		// the browser block; the design conversation — the first one anyone meets
+		// — was the only one that did not.
+		BrowserAvailable: f.browser != nil && f.browser.Available().OK,
+		BackendType:      prompts.MapCoderBackend(coderSvc.BackendType()),
 	})
 
 	// The design conversation gets the READ-ONLY tool subset: it can open a note,
@@ -1728,6 +1836,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		ConnectionTools:    connToolNames,
 		Skills:             sess.Skills,
 		ForceTier1:         forceTier1,
+		// Without this the build prompt never mentions the browser, so a weak
+		// model either hand-writes a Playwright script — the exact failure the
+		// native tools replace — or concludes a JavaScript-rendered site cannot
+		// be read at all and plans around a limitation that no longer exists.
+		BrowserAvailable: f.browser != nil && f.browser.Available().OK,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
@@ -1898,6 +2011,20 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// mutating actions like send). Parity with the run path (agentrunner.WithConnectors).
 	if bound := f.buildBoundConns(genCtx, workspaceID); len(bound) > 0 {
 		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
+	// The browser, for the same reason and with the same shape. Without this a
+	// build has no browser at all, so the rehearsal cannot open the page the
+	// agent is being written to read — and decideBuildOutcome then reports the
+	// "couldn't confirm" outcome the dry run exists to remove, on exactly the
+	// agents this feature was built for.
+	//
+	// A ZERO policy is passed deliberately, not an omission: acting during a
+	// build is refused by browser.CheckAct regardless of what a caller supplies
+	// (api_engine re-derives BuildPhase from the build marker), so this grants
+	// reading and nothing more. A rehearsal that cannot look at the page cannot
+	// rehearse; one that can click is the thing the boundary exists to stop.
+	if f.browser != nil && f.browser.Available().OK {
+		generationCoder = generationCoder.WithBrowser(f.browser, browser.Policy{})
 	}
 	// The same for MCP servers, and for the same reason: without it a build has no MCP
 	// tools at all, which silently disables TWO of the three binding paths — the model
@@ -2755,6 +2882,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
+	destructiveApproved := sess.DestructiveApproved
 	skillRefs := sess.Skills
 	f.mu.Unlock()
 
@@ -2785,6 +2913,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
@@ -2840,6 +2969,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
+	destructiveApproved := sess.DestructiveApproved
 	skillRefs := sess.Skills
 	f.mu.Unlock()
 
@@ -2857,6 +2987,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the

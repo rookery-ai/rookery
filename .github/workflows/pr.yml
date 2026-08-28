@@ -318,6 +318,24 @@ jobs:
           tags: rookery:pr
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # The runtime stage is rebuilt every time, and the reason is the scan
+          # below rather than correctness of the build.
+          #
+          # That stage's one RUN is `apt-get update && apt-get upgrade -y &&
+          # apt-get install …`. Its cache key is the command text plus the base
+          # image digest, neither of which changes when Debian publishes a
+          # security update — so the layer is reused, the upgrade never re-runs,
+          # and the image keeps shipping the old package. Trivy then correctly
+          # fails the build on a CVE that `apt-get upgrade` would already have
+          # fixed, and re-running the job changes nothing because it hits the
+          # same cache. That is exactly what happened with CVE-2026-14456
+          # (openssl), on a PR that touched no packaging at all.
+          #
+          # A gate that passes because a layer was cached is not measuring
+          # anything. Only this stage is excluded: the Go and UI build stages —
+          # the slow ones — still cache normally, so the cost is the few seconds
+          # apt takes.
+          no-cache-filters: runtime
 
       # Image mode complements the filesystem scan in the security job: that one
       # sees source manifests, this one sees the Debian base layer and the

@@ -29,6 +29,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/websearch"
 
 	"github.com/rookery-ai/rookery/internal/agentstate"
+	"github.com/rookery-ai/rookery/internal/browser"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
@@ -189,6 +190,28 @@ type hostToolSet struct {
 	// usedMCPServerIDs records servers whose tools were invoked (for build auto-bind),
 	// the sibling of usedConnIDs.
 	usedMCPServerIDs map[string]bool
+
+	// Browser. browser is nil when the subsystem is not wired, and its own
+	// Available() reports whether the runtime is actually installed — the two are
+	// different questions, the same split ROOKERY_CODER_MODE draws between policy
+	// and detection.
+	//
+	// browserPolicy carries the permissions this particular call runs under. It
+	// is enforced through browser.CheckAct rather than here, so the API engine
+	// and the CLI bridge cannot drift apart on what an agent is allowed to do.
+	browser       browser.Renderer
+	browserPolicy browser.Policy
+	// browserWantedIrreversible records that this run was REFUSED an
+	// irreversible browser action. It is surfaced on coder.Result so the agent
+	// row can remember it, which is what makes the permission appear on the
+	// agent's page instead of the owner having to work out why a run stopped.
+	// The same shape as usedConnIDs feeding auto-bind.
+	browserWantedIrreversible bool
+
+	// notifyUser delivers a message to the owner mid-run. See Coder.notifyUser
+	// for why this is not the progress sink: a scheduled run has no live
+	// subscriber, and [CHAT] only lands when the run ends.
+	notifyUser func(string)
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.
@@ -268,6 +291,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
 		},
 	}
+	tools = append(tools, h.browserTools()...)
 	if h.includeExecTools {
 		tools = append(tools,
 			llm.Tool{
@@ -649,6 +673,12 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Op        string            `json:"op"`
 		Order     string            `json:"order"`
 		OrderBy   string            `json:"order_by"`
+		WaitFor   string            `json:"wait_for"`
+		Ref       string            `json:"ref"`
+		Value     string            `json:"value"`
+		Key       string            `json:"key"`
+		TimeoutMS int               `json:"timeout_ms"`
+		Notify    string            `json:"notify"`
 	}
 	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
 	// plain decode rounds any id above 2^53 into a different id.
@@ -754,6 +784,19 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			return "error: " + err.Error()
 		}
 		return truncate(out)
+	case "browser_read":
+		return truncate(h.execBrowserRead(ctx, args.URL, args.WaitFor, args.Offset))
+	case "browser_open", "browser_click", "browser_fill", "browser_press", "browser_wait", "browser_page":
+		return truncate(h.dispatchBrowserAct(ctx, call.Name, browserCallArgs{
+			URL:       args.URL,
+			WaitFor:   args.WaitFor,
+			Ref:       args.Ref,
+			Value:     args.Value,
+			Key:       args.Key,
+			Offset:    args.Offset,
+			TimeoutMS: args.TimeoutMS,
+			Notify:    args.Notify,
+		}))
 	case "bash":
 		if !h.includeExecTools {
 			return "error: bash is not available"
@@ -1536,8 +1579,46 @@ func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, met
 	}
 	ct := resp.Header.Get("Content-Type")
 	header := fmt.Sprintf("[web_fetch %d %s %s]\n", resp.StatusCode, contentTypeMain(ct), u)
-	return header + renderWebBody(ct, u, data), false, nil
+	rendered := renderWebBody(ct, u, data)
+	return header + rendered + h.jsShellHint(ct, rendered), false, nil
 }
+
+// jsShellHint is how a model learns that a browser would help, at the exact
+// moment it is stuck.
+//
+// This is the half of the design that makes a SEPARATE browser tool work in
+// practice. Prompt guidance alone puts the routing rule thousands of tokens
+// away from the failure; silent escalation inside web_fetch would make an
+// ordinary fetch cost seconds and spawn Chromium invisibly, and would make this
+// tool's own description untrue. Naming the tool in the result splits the
+// difference: web_fetch stays exactly what it says it is, and the model is told
+// what to do instead.
+//
+// The hint is only added when a browser is actually available, so an install
+// without the runtime never advertises a tool it does not have.
+func (h *hostToolSet) jsShellHint(contentType, body string) string {
+	if h.browser == nil || !h.browser.Available().OK {
+		return ""
+	}
+	if !strings.Contains(strings.ToLower(contentTypeMain(contentType)), "html") {
+		return ""
+	}
+	if len(strings.Fields(body)) > minRenderedWords {
+		return ""
+	}
+	return "\n\n[this page returned almost no readable text, which usually means it renders its content with JavaScript. " +
+		"Use browser_read with the same URL to get the rendered page.]"
+}
+
+// minRenderedWords is the word count below which an HTML response is treated as
+// an unrendered shell.
+//
+// Counted in WORDS rather than bytes because the failure being detected is a
+// page of markup with no prose: an SPA shell is frequently several KB of
+// <script> and <link> tags, so a byte threshold would call it a full page.
+// Twenty is comfortably below any real article and comfortably above the
+// handful of words ("Loading…", a noscript notice) a shell typically carries.
+const minRenderedWords = 20
 
 // renderWebBody turns a response body into text the model can use. HTML and any
 // convertible document format go through internal/convert — so a fetched page
@@ -1700,7 +1781,18 @@ func (h *hostToolSet) searchProviders() []websearch.Provider {
 	if p := websearch.KeyedProvider("tavily", h.subprocessEnv["SEARCH_KEY_TAVILY"], ""); p != nil {
 		out = append(out, p)
 	}
-	return append(out, websearch.DefaultProviders(nil)...)
+	out = append(out, websearch.DefaultProviders(nil)...)
+	// The browser goes LAST. Every engine above it is a single HTTP request;
+	// this one is several seconds and a browser process, so it must only run
+	// when the cheap engines have all come back empty — which, for this cascade,
+	// is precisely the signal that they were served a JavaScript challenge
+	// rather than an answer.
+	if h.browser != nil && h.browser.Available().OK {
+		if r, ok := h.browser.(websearch.PageRenderer); ok {
+			out = websearch.WithBrowser(out, r)
+		}
+	}
+	return out
 }
 
 // ── bash ─────────────────────────────────────────────────────────────────────

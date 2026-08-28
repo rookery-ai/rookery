@@ -78,8 +78,14 @@ make build
 </picture>
 
 **100+ services** and **900+ curated actions**, over OAuth or an API key you
-paste — never a broker. **22 skills** built in, plus any you create the same
+paste — never a broker. **21 skills** built in, plus any you create the same
 conversational way.
+
+Agents and chat can also drive a **real headless browser**, so a page that only
+exists after JavaScript runs is readable like any other — and an agent you have
+given permission can sign in, fill forms and click through a flow, using
+passwords you have stored as secrets and never see in a transcript. Anything
+irreversible — paying, ordering, deleting — asks you first.
 
 Read more —
 [Workspaces](https://rookery.cloud/docs/concepts/workspaces) ·
@@ -112,6 +118,7 @@ Read more —
 | `ROOKERY_SYSTEM_KEY` | generated | hex key encrypting stored credentials |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
+| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private/loopback addresses (e.g. a self-hosted dashboard). Off by default — see the browser section |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind |
 | `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not chosen one |
 | `ROOKERY_CLAUDE_BIN` | — | **deprecated** alias for `ROOKERY_CODER_BIN`; still honoured, warns at startup |
@@ -119,6 +126,35 @@ Read more —
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
 a real hostname or `http://localhost`.
+
+### The browser
+
+Reading JavaScript-rendered pages needs a headless browser, which is a few
+hundred megabytes and therefore **not installed by default**. Without it
+everything else works and only those pages are unreadable; `/healthz` reports
+which state you are in.
+
+```bash
+rookery browser install     # Node driver + Chromium, once
+rookery browser status
+```
+
+It runs confined by the same Landlock sandbox as the coder, and all of its
+traffic goes through a proxy that refuses private and loopback addresses — the
+browser follows links chosen from search results and page content, and the
+loopback interface is where this server's own bridges and their tokens live.
+`ROOKERY_BROWSER_ALLOW_PRIVATE=1` turns that guard off if you specifically want
+an agent to read something on your own network.
+
+Agents read pages and interact with them — clicking, filling forms, signing in
+with passwords you have stored as secrets — with no configuration. **One thing
+needs your permission: an action that cannot be undone**, such as paying,
+ordering or deleting. When an agent's job involves one, its page says so and asks;
+until you allow it, the agent goes up to that step, stops, and tells you what it
+would have done.
+
+Note the limit of that: it guards the browser. An agent can already make web
+requests with a script, and no browser permission covers those.
 
 ## Platform support
 

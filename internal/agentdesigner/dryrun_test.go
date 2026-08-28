@@ -157,7 +157,7 @@ func TestRunGeneration_CreateBuildDryRunsTheAgent(t *testing.T) {
 // how the missing field would go unnoticed.
 func TestDryRunPromptRestrainsSendingAndCarriesTheBackend(t *testing.T) {
 	got := dryRunPrompt("Watches a page.", prompts.BackendToolCalling, "[Current context]\n",
-		"/vaults/ws1", "/vaults/ws1/agents/draft_x", nil)
+		"/vaults/ws1", "/vaults/ws1/agents/draft_x", nil, false)
 
 	if !strings.Contains(got, "tool-calling LLM") {
 		t.Error("BackendType did not reach the prompt: an api-engine workspace would be told " +

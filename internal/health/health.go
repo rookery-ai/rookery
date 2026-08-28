@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildinfo"
 	"github.com/rookery-ai/rookery/internal/sandbox"
 )
@@ -22,6 +23,13 @@ type Tools struct {
 	Ripgrep   bool `json:"rg"`
 	PDFToText bool `json:"pdftotext"`
 	Tesseract bool `json:"tesseract"`
+	// Browser is not a PATH lookup like the four above: it is a ~500 MB runtime
+	// in a cache directory, installed by `rookery browser install` rather than by
+	// any package manager. It is reported here so an operator can see at a glance
+	// why JavaScript-rendered pages are not being read, but it is deliberately
+	// NOT an onboard.HostTool — that type probes a binary on PATH, and the
+	// "four host tools" count is asserted across four delivery surfaces.
+	Browser bool `json:"browser"`
 }
 
 // Sandbox separates the operator's setting (Enabled) from the kernel's answer
@@ -60,6 +68,7 @@ func Detect(sandboxEnabled bool, coderMode string) Report {
 			Ripgrep:   have("rg"),
 			PDFToText: have("pdftotext"),
 			Tesseract: have("tesseract"),
+			Browser:   browser.Probe().OK,
 		},
 	}
 }

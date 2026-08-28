@@ -460,17 +460,17 @@ func (d *DB) CreateAgent(a *Agent) error {
 }
 
 func (d *DB) GetAgent(id string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_irreversible,browser_needs_irreversible FROM agents WHERE id=?`, id)
 	return scanAgent(row)
 }
 
 func (d *DB) GetAgentByName(workspaceID, name string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? AND name=?`, workspaceID, name)
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_irreversible,browser_needs_irreversible FROM agents WHERE workspace_id=? AND name=?`, workspaceID, name)
 	return scanAgent(row)
 }
 
 func (d *DB) ListAgents(workspaceID string) ([]*Agent, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? ORDER BY name`, workspaceID)
+	rows, err := d.Query(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_irreversible,browser_needs_irreversible FROM agents WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +493,27 @@ func (d *DB) UpdateAgentDescription(id, description string) error {
 	return err
 }
 
+// SetAgentBrowserGrant records the owner's permission for irreversible browser
+// actions. This is the only browser permission, and only the owner sets it.
+func (d *DB) SetAgentBrowserGrant(id string, irreversible bool) error {
+	_, err := d.Exec(`UPDATE agents SET browser_irreversible=?, updated_at=datetime('now') WHERE id=?`,
+		boolToInt(irreversible), id)
+	return err
+}
+
+// MarkAgentNeedsIrreversible records the FINDING that this agent's work involves
+// an action that cannot be undone, so the permission is surfaced on its page.
+//
+// Additive by design: it only ever sets the flag, never clears it. Both callers
+// are fallible — a designer declaration a weak model may omit on the next edit,
+// and a refusal that only happens on runs that get that far — so letting either
+// clear it would retract a warning the owner may already have acted on, silently
+// and for the wrong reason.
+func (d *DB) MarkAgentNeedsIrreversible(id string) error {
+	_, err := d.Exec(`UPDATE agents SET browser_needs_irreversible=1, updated_at=datetime('now') WHERE id=?`, id)
+	return err
+}
+
 func (d *DB) SetAgentActive(id string, active bool) error {
 	_, err := d.Exec(`UPDATE agents SET active=?, updated_at=datetime('now') WHERE id=?`, boolToInt(active), id)
 	return err
@@ -506,8 +527,9 @@ func (d *DB) DeleteAgent(id string) error {
 func scanAgent(s scanner) (*Agent, error) {
 	var a Agent
 	var createdAt, updatedAt string
-	var active int
-	err := s.Scan(&a.ID, &a.WorkspaceID, &a.Name, &a.Description, &active, &createdAt, &updatedAt)
+	var active, browserIrreversible, browserNeedsIrreversible int
+	err := s.Scan(&a.ID, &a.WorkspaceID, &a.Name, &a.Description, &active, &createdAt, &updatedAt,
+		&browserIrreversible, &browserNeedsIrreversible)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -515,6 +537,8 @@ func scanAgent(s scanner) (*Agent, error) {
 		return nil, err
 	}
 	a.Active = active == 1
+	a.BrowserIrreversible = browserIrreversible == 1
+	a.BrowserNeedsIrreversible = browserNeedsIrreversible == 1
 	a.CreatedAt = scanTime(createdAt)
 	a.UpdatedAt = scanTime(updatedAt)
 	return &a, nil

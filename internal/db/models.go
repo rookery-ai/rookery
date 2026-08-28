@@ -66,6 +66,18 @@ type Agent struct {
 	Active      bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+
+	// BrowserIrreversible is the owner's permission for actions that cannot be
+	// undone — paying, ordering, transferring, deleting. It is the ONLY browser
+	// permission: an agent may read and interact with pages without any grant,
+	// because it can already do the equivalent with bash and curl.
+	//
+	// BrowserNeedsIrreversible is not a permission but a FINDING: this agent's
+	// work involves such an action. It is what decides whether the permission is
+	// shown on the agent's page at all, so an agent that only reads never
+	// presents its owner with a switch about payments.
+	BrowserIrreversible      bool
+	BrowserNeedsIrreversible bool
 }
 
 type Skill struct {

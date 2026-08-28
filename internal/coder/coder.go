@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -73,6 +74,16 @@ type Result struct {
 	// UsedMCPServerIDs lists the MCP server IDs whose tools the API engine invoked during
 	// this call, the sibling of UsedConnectionIDs and consumed by the same auto-bind path.
 	UsedMCPServerIDs []string
+
+	// BrowserWantedIrreversible reports that this call was REFUSED an
+	// irreversible browser action — it tried to pay, order or delete something
+	// and did not have permission.
+	//
+	// It is carried out of the engine for the same reason UsedConnectionIDs is:
+	// the alternative is an owner reading a run log to work out why their agent
+	// stopped. Persisting it is what makes the permission appear on the agent's
+	// page, next to the run that needed it.
+	BrowserWantedIrreversible bool
 
 	// OfferedTools names the tools this run offered the model. Empty for a CLI coder.
 	// The runner uses it to recognise the model's own tool-call machinery leaking into
@@ -147,10 +158,25 @@ type Coder struct {
 	secretsLookup SecretsLookup // resolves the provider API key by secret name at run time
 	vlt           *vault.Vault  // vault for host-tool file operations (read/write/edit/list/run_script)
 	progress      func(string)  // optional live-progress sink (per tool-call milestone) for the API engine
-	buildSpec     BuildSpec     // what a BUILD must produce; zero value = AgentBuildSpec
+	// notifyUser delivers a message to the owner IMMEDIATELY, mid-run.
+	//
+	// It is not the same thing as progress, and the difference is why it exists.
+	// progress feeds the live view, which a scheduled run has no subscriber for —
+	// the scheduler wires SendOutput and no OnProgress at all. And [CHAT] is only
+	// delivered durably once the run ENDS. So an agent that stops to wait for a
+	// bank push had no way to tell anyone before it started waiting: the message
+	// arrived after the thing it was asking for.
+	//
+	// Nil on every surface that does not set it, in which case a tool asking to
+	// notify simply says it could not.
+	notifyUser func(string)
+	buildSpec  BuildSpec // what a BUILD must produce; zero value = AgentBuildSpec
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
 	// the API engine offers each connection's curated actions as native typed tools.
+	browser       browser.Renderer
+	browserPolicy browser.Policy
+
 	mcpCaller mcp.Caller
 	mcpParker mcp.Parker
 	boundMCP  []mcp.BoundServer
@@ -204,6 +230,28 @@ func (c *Coder) WithMCP(caller mcp.Caller, bound []mcp.BoundServer) *Coder {
 // by (server, tool) — but the semantics are identical, and both must be wired for the
 // same agent or changing which layer a capability comes from would change whether the
 // owner's approval requirement applies.
+// WithBrowser attaches the browser subsystem and the permissions this call runs
+// under.
+//
+// Policy is supplied by the caller because only it knows the situation: a
+// scheduled run of an agent the owner granted acting rights, a chat turn (no
+// acting, ever), or a build. The BUILD-PHASE half of the policy is re-derived
+// inside the engine from the build marker, so a caller that forgets it cannot
+// license a rehearsal to click things.
+// WithNotifier attaches immediate mid-run delivery to the owner. See notifyUser
+// for why this is distinct from WithProgress.
+func (c *Coder) WithNotifier(f func(string)) *Coder {
+	c2 := *c
+	c2.notifyUser = f
+	return &c2
+}
+
+func (c *Coder) WithBrowser(b browser.Renderer, pol browser.Policy) *Coder {
+	c2 := *c
+	c2.browser, c2.browserPolicy = b, pol
+	return &c2
+}
+
 func (c *Coder) WithMCPParker(p mcp.Parker) *Coder {
 	c2 := *c
 	c2.mcpParker = p
