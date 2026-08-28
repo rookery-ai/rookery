@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/rookery-ai/rookery/compare/v0.9.1...v0.10.0) (2026-08-28)
+
+
+### Features
+
+* **browser:** read and act on JavaScript-rendered pages ([#265](https://github.com/rookery-ai/rookery/issues/265)) ([99cd586](https://github.com/rookery-ai/rookery/commit/99cd5864502511cc9a7d62ed3b0e2e61de5ff3a2))
+
 ## [0.9.1](https://github.com/rookery-ai/rookery/compare/v0.9.0...v0.9.1) (2026-08-24)
 
 
