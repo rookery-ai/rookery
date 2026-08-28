@@ -456,6 +456,24 @@ func (r *Registry) Action(provider, name string) (Action, bool) {
 	return Action{}, false
 }
 
+// SetActionURLForTest repoints one action at a test server.
+//
+// Exported for the same reason agentdesigner's *ForTest helpers are: the test
+// that needs it lives in another package. It exists so the approval gate can be
+// exercised end to end — park, approve, assert the provider was called with the
+// stored arguments — without the test reaching Google. Tests in THIS package
+// mutate r.actions directly and need nothing from here.
+func (r *Registry) SetActionURLForTest(provider, name, url string) bool {
+	for i, a := range r.actions[provider] {
+		if a.Name == name {
+			a.Request.URL = url
+			r.actions[provider][i] = a
+			return true
+		}
+	}
+	return false
+}
+
 // BoundConn is a runner/UI-facing view of a connection an agent is bound to.
 type BoundConn struct {
 	ID, Provider, AccountLabel, AccountIdentity string
