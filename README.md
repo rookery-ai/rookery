@@ -134,6 +134,9 @@ hundred megabytes and therefore **not installed by default**. Without it
 everything else works and only those pages are unreadable; `/healthz` reports
 which state you are in.
 
+`rookery onboard` offers it during setup on Linux, macOS and Windows alike, and
+says nothing about it if you already have it. To install it separately:
+
 ```bash
 rookery browser install     # Node driver + Chromium, once
 rookery browser status
