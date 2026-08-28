@@ -653,7 +653,8 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		mcpParker: c.mcpParker,
 		boundMCP:  c.boundMCP,
 
-		browser: c.browser,
+		browser:    c.browser,
+		notifyUser: c.notifyUser,
 		// The acting grants come from the caller, but the BUILD-PHASE flag is
 		// derived here from the same marker verifyBuild reads. Deriving it
 		// rather than trusting the caller matters: a build must refuse acting

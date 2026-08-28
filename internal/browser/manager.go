@@ -177,6 +177,92 @@ func (m *Manager) ContextCount(ctx context.Context) (int, error) {
 	return facts.Contexts, nil
 }
 
+// waitSegment is how long ONE wait call may block inside the helper.
+//
+// It must stay comfortably under the manager's HTTP client timeout (3 minutes),
+// because a call that exceeds it fails at the transport and the error path stops
+// the helper — taking the page, and any login on it, with it. That is the worst
+// possible outcome for the case this exists to serve: an agent halfway through a
+// payment, waiting for a bank push, losing its session because it waited too
+// patiently.
+const waitSegment = 20 * time.Second
+
+// MaxWaitFor bounds a whole WaitFor, however long the caller asks for.
+//
+// Fifteen minutes is chosen against the real case rather than as a round number:
+// a bank push notification lands on a phone that may be in another room at 03:00,
+// and anything under a few minutes fails exactly when it matters. It is also
+// under the browser helper's own idle reaper, which each segment keeps at bay by
+// touching the session.
+const MaxWaitFor = 15 * time.Minute
+
+// WaitFor blocks until a page condition is met, polling in short segments.
+//
+// The segmenting is the point. A single long wait breaks three ways at once: it
+// exceeds the manager's transport timeout and kills the helper; it lets the
+// helper's idle reaper close the context underneath it, because lastUsed is
+// stamped when a call STARTS; and a timeout comes back as a failed tool call,
+// which counts against the engine's unproductive-turn budget. Polling turns one
+// fragile long call into many cheap ones, each of which refreshes the session.
+//
+// Returns matched=false with a nil error when the deadline passes without the
+// condition appearing. That is deliberately NOT an error: a wait that ends
+// without the thing happening is information the model must act on, and shaping
+// it as a failure would both trip the oscillation guard and read to the model as
+// a broken tool rather than an answer.
+func (m *Manager) WaitFor(ctx context.Context, session, condition string, total time.Duration) (Result, bool, error) {
+	if total <= 0 || total > MaxWaitFor {
+		total = MaxWaitFor
+	}
+	deadline := time.Now().Add(total)
+	var last Result
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return last, false, nil
+		}
+		seg := waitSegment
+		if remaining < seg {
+			seg = remaining
+		}
+		res, err := m.Act(ctx, ActRequest{
+			Session:   session,
+			Action:    ActionWait,
+			WaitFor:   condition,
+			TimeoutMS: int(seg / time.Millisecond),
+		})
+		if err == nil {
+			// The condition appeared within this segment.
+			return res, true, nil
+		}
+		last = res
+		// A segment that simply did not match is the expected case and is not a
+		// failure — only a dead helper or a cancelled run is. Distinguishing them
+		// matters: retrying forever against a helper that has gone would burn the
+		// whole deadline achieving nothing.
+		if ctx.Err() != nil {
+			return last, false, ctx.Err()
+		}
+		if isFatalWaitErr(err) {
+			return last, false, err
+		}
+	}
+}
+
+// isFatalWaitErr separates "the condition has not appeared yet" from "there is
+// no longer a browser to ask". Playwright reports the former as a timeout, which
+// is the one error this loop must swallow.
+func isFatalWaitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	if strings.Contains(s, "timeout") || strings.Contains(s, "exceeded") {
+		return false
+	}
+	return true
+}
+
 // CloseSession tears down a run's browser context.
 func (m *Manager) CloseSession(ctx context.Context, session string) {
 	if session == "" {

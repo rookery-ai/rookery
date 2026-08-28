@@ -77,9 +77,16 @@ func (h *hostToolSet) browserTools() []llm.Tool {
 		},
 		llm.Tool{
 			Name: "browser_wait",
-			Description: "Wait for the open page to finish changing before you read it again — after a click that loads data, " +
-				"or while a spinner is showing. Pass \"networkidle\", \"selector:<css>\", or \"text:<words>\".",
-			Parameters: rawSchema(`{"type":"object","properties":{"wait_for":{"type":"string"},"timeout_ms":{"type":"integer"}},"required":["wait_for"]}`),
+			Description: "Wait for the open page to change before you read it again — after a click that loads data, " +
+				"while a spinner is showing, or while something happens away from the page. " +
+				"Pass \"networkidle\", \"selector:<css>\", or \"text:<words>\". " +
+				"timeout_ms may be up to 15 minutes, which is what makes it usable for a step that needs the USER to do " +
+				"something — approving a payment in their banking app, for example. " +
+				"When you are waiting on the user like that, ALWAYS set notify to a short sentence telling them what to do " +
+				"(\"Approve the payment in your banking app\"); it is sent to them immediately, before the wait starts. " +
+				"Without it they have no idea you are waiting, and on a scheduled run nobody is watching. " +
+				"Returns whether the condition appeared, so a wait that ends without it is an answer, not a failure.",
+			Parameters: rawSchema(`{"type":"object","properties":{"wait_for":{"type":"string"},"timeout_ms":{"type":"integer","description":"up to 900000 (15 minutes)"},"notify":{"type":"string","description":"message sent to the user immediately, before waiting — use whenever the wait depends on them doing something"}},"required":["wait_for"]}`),
 		},
 		llm.Tool{
 			Name:        "browser_page",
@@ -191,6 +198,9 @@ type browserCallArgs struct {
 	Key       string
 	Offset    int
 	TimeoutMS int
+	// Notify is a message sent to the user BEFORE the wait begins, for a wait
+	// that depends on them doing something.
+	Notify string
 }
 
 // dispatchBrowserAct maps one browser tool name onto the acting choke point.
@@ -217,9 +227,7 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionRead, Offset: a.Offset}, "", browser.PageContext{})
 
 	case "browser_wait":
-		return h.execBrowserAct(ctx, browser.ActRequest{
-			Action: browser.ActionWait, WaitFor: a.WaitFor, TimeoutMS: a.TimeoutMS,
-		}, "", browser.PageContext{})
+		return h.execBrowserWait(ctx, session, a)
 
 	case "browser_press":
 		// A keypress carries no ref, but the PAGE still has to be judged — this

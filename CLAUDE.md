@@ -2311,6 +2311,31 @@ blocking POST with no SSE, so every probe is spinner time); the cache is
 deliberately **not** persisted with the draft, since a conversation resumed days
 later should look again and a stale "blocked" is worse than no hint.
 
+**A step that needs the USER — a bank-app push — is a WAIT, not an approval.**
+Nothing comes back to the agent: the bank tells the merchant, and the page
+changes on its own, so the agent only has to notice. `Manager.WaitFor` polls in
+`waitSegment` (20s) slices up to `MaxWaitFor` (15 min) instead of blocking one
+long call, and the segmenting is load-bearing three times over: a single call
+past the manager's 3-minute HTTP timeout fails at the TRANSPORT and the error
+path calls `m.stop()`, destroying the page and its login; `lastUsed` is stamped
+when a call STARTS, so a long call lets the helper's own idle reaper close the
+context underneath it; and a timed-out wait returns an `error:` result, which
+`noteCall` records as a failed call against `maxUnproductiveStreak` (6), so
+polling by hand would end the run. An unmet wait therefore returns a NON-error
+result that also tells the model not to simply wait again.
+
+**`browser_wait`'s `notify` exists because [CHAT] cannot reach the user in
+time.** `[CHAT]` is delivered durably only when a run ENDS, and the scheduler
+wires `SendOutput` with **no `OnProgress` at all** — so an agent that stopped at
+a payment step to ask for a push approval could not tell anyone until after the
+wait it was asking about. On a 03:00 cron run the message reached nobody, ten
+minutes late. `Coder.WithNotifier` is deliberately distinct from `WithProgress`
+for that reason: progress feeds a live view that a scheduled run has no
+subscriber for. The runner wires it to `SendOutput` plus an inbox record, since a
+chat message scrolls away and the owner may only look hours later. A surface with
+no notifier makes the tool SAY the message went nowhere, because a model told its
+message was delivered will not repeat it at the end of the run.
+
 **Not built, deliberately:** cross-run login persistence. A run holds one browser
 context for its duration, so login-then-act works within a run; persisting
 `StorageState` between runs would create a new credential store at rest (cookies

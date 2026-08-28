@@ -207,6 +207,11 @@ type hostToolSet struct {
 	// agent's page instead of the owner having to work out why a run stopped.
 	// The same shape as usedConnIDs feeding auto-bind.
 	browserWantedIrreversible bool
+
+	// notifyUser delivers a message to the owner mid-run. See Coder.notifyUser
+	// for why this is not the progress sink: a scheduled run has no live
+	// subscriber, and [CHAT] only lands when the run ends.
+	notifyUser func(string)
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.
@@ -673,6 +678,7 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Value     string            `json:"value"`
 		Key       string            `json:"key"`
 		TimeoutMS int               `json:"timeout_ms"`
+		Notify    string            `json:"notify"`
 	}
 	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
 	// plain decode rounds any id above 2^53 into a different id.
@@ -789,6 +795,7 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			Key:       args.Key,
 			Offset:    args.Offset,
 			TimeoutMS: args.TimeoutMS,
+			Notify:    args.Notify,
 		}))
 	case "bash":
 		if !h.includeExecTools {

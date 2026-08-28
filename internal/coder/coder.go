@@ -158,7 +158,19 @@ type Coder struct {
 	secretsLookup SecretsLookup // resolves the provider API key by secret name at run time
 	vlt           *vault.Vault  // vault for host-tool file operations (read/write/edit/list/run_script)
 	progress      func(string)  // optional live-progress sink (per tool-call milestone) for the API engine
-	buildSpec     BuildSpec     // what a BUILD must produce; zero value = AgentBuildSpec
+	// notifyUser delivers a message to the owner IMMEDIATELY, mid-run.
+	//
+	// It is not the same thing as progress, and the difference is why it exists.
+	// progress feeds the live view, which a scheduled run has no subscriber for —
+	// the scheduler wires SendOutput and no OnProgress at all. And [CHAT] is only
+	// delivered durably once the run ENDS. So an agent that stops to wait for a
+	// bank push had no way to tell anyone before it started waiting: the message
+	// arrived after the thing it was asking for.
+	//
+	// Nil on every surface that does not set it, in which case a tool asking to
+	// notify simply says it could not.
+	notifyUser func(string)
+	buildSpec  BuildSpec // what a BUILD must produce; zero value = AgentBuildSpec
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
 	// the API engine offers each connection's curated actions as native typed tools.
@@ -226,6 +238,14 @@ func (c *Coder) WithMCP(caller mcp.Caller, bound []mcp.BoundServer) *Coder {
 // acting, ever), or a build. The BUILD-PHASE half of the policy is re-derived
 // inside the engine from the build marker, so a caller that forgets it cannot
 // license a rehearsal to click things.
+// WithNotifier attaches immediate mid-run delivery to the owner. See notifyUser
+// for why this is distinct from WithProgress.
+func (c *Coder) WithNotifier(f func(string)) *Coder {
+	c2 := *c
+	c2.notifyUser = f
+	return &c2
+}
+
 func (c *Coder) WithBrowser(b browser.Renderer, pol browser.Policy) *Coder {
 	c2 := *c
 	c2.browser, c2.browserPolicy = b, pol

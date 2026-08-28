@@ -71,6 +71,19 @@ or a web request instead.
 
 In a TEST RUN you may do everything except that last step. When you reach it you will be
 told to stop; finish by describing exactly what you would have done in a real run.
+
+WHEN THE STEP NEEDS THE USER. Some payments finish on the user's phone — a banking app
+asks them to approve, and the page only changes once they do. You cannot do that part,
+and you do not need to: just wait for the page to change.
+
+Use browser_wait with a long timeout (up to 15 minutes) and ALWAYS set notify to a short
+sentence telling them what to do — "Approve the payment in your banking app". That
+message reaches them immediately, before the wait begins. Without it they are not
+watching, nothing tells them you are stuck, and on a scheduled run there is nobody there
+at all.
+
+If the wait ends and nothing happened, do NOT just wait again. Say plainly what did not
+arrive and where the payment got to, so the user knows whether it went through.
 `
 	}
 	if declare {

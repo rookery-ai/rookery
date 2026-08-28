@@ -566,6 +566,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// than no permission at all. Reading needs no grant; acting needs one the
 	// owner set deliberately.
 	if r.browser != nil && r.browser.Available().OK {
+		// Immediate mid-run delivery, so an agent that stops to wait for the user
+		// can actually reach them. [CHAT] only lands when the run ENDS and the
+		// scheduler wires no live-progress sink, so without this a "approve the
+		// payment on your phone" message arrived after the wait it was asking
+		// about — to nobody, on a 03:00 run.
+		if input.SendOutput != nil {
+			send := input.SendOutput
+			agentName := agent.Name
+			runID := input.AgentID
+			coderSvc = coderSvc.WithNotifier(func(msg string) {
+				send(msg)
+				// Recorded in the inbox too: a chat message scrolls away, and the
+				// owner may only look hours later at why the agent was waiting.
+				r.recordInbox(input, agent, runID, msg, "ok")
+				slog.Info("agentrunner: agent notified the user mid-run",
+					"agent", agentName, "chars", len(msg))
+			})
+		}
 		pol := browser.Policy{AllowIrreversible: agent.BrowserIrreversible}
 		coderSvc = coderSvc.WithBrowser(r.browser, pol)
 		if r.browserBridge != nil && r.browserBridge.Addr() != "" {
