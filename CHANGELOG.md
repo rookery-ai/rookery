@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/rookery-ai/rookery/compare/v0.10.0...v0.11.0) (2026-08-28)
+
+
+### Features
+
+* **onboard:** offer the browser during setup, and stay quiet when it is there ([#270](https://github.com/rookery-ai/rookery/issues/270)) ([9b8721e](https://github.com/rookery-ai/rookery/commit/9b8721ec1eefe0827d82405312cf30fb5b827e8c))
+
 ## [0.10.0](https://github.com/rookery-ai/rookery/compare/v0.9.1...v0.10.0) (2026-08-28)
 
 
