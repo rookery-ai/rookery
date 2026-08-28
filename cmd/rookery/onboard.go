@@ -80,6 +80,11 @@ func (o *onboarder) run(username, password string) error {
 		return err
 	}
 	o.stepHostTools()
+	// After the host tools, because it is the same kind of decision — an
+	// optional capability the install degrades without — and before the coder,
+	// which is the first step that asks the owner to go and do something
+	// elsewhere.
+	o.stepBrowser()
 	o.stepCoder()
 	if err := o.stepService(); err != nil {
 		return err

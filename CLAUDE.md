@@ -2109,6 +2109,28 @@ count is asserted across four delivery surfaces. A missing runtime yields
 advertising a tool the host cannot execute is worse than omitting it, because
 the model spends turns on it and reports a platform fault to the user.
 
+**`rookery onboard` offers it, and says NOTHING when it is already installed**
+(`cmd/rookery/onboard_browser.go`). The silence is the part worth keeping: this
+is a several-hundred-megabyte opt-in most installs will never have, and setup
+output is only read while it stays short enough to read — so an owner who
+already has it gets no line about it, unlike `stepHostTools`, which reports "all
+present". The step works identically on all three platforms because the install
+is a Go call into the Playwright driver, which fetches the right Node build and
+Chromium for the host — no package manager involved, unlike the host-tool step.
+Only Linux needs shared libraries afterwards, which is why
+`browser.SystemDepsHint` returns `""` off Linux rather than the caller branching
+on `GOOS`; an unrecognised Linux package manager falls back to naming the
+libraries. `--yes` installs it, consistent with the host tools and the service.
+
+**`/healthz` reports `tools.browser` and deliberately does NOT warn about it.**
+The other four host tools are *expected* to be present — `install.sh` offers
+them, the container ships them, both package formats recommend them — so an
+absence is a deviation worth reporting. A warning that fires on virtually every
+default install is how a warnings list stops being read, and it would devalue
+the four that mean something. `TestNoWarningsWhenHealthy` catches a regression
+here; the comment in `Warnings()` says why the entry is absent, because adding
+one looks like an obvious omission being fixed.
+
 **Chromium runs in a SANDBOXED HELPER PROCESS, and that was verified before it
 was designed around.** `playwright-go` drives the Node driver from whatever
 process calls it, so the naive implementation puts a browser rendering untrusted

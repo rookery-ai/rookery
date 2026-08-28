@@ -102,5 +102,16 @@ func (r Report) Warnings() []string {
 	if !r.Tools.Tesseract {
 		w = append(w, "tesseract not found — image OCR is unavailable")
 	}
+	// Tools.Browser is deliberately NOT warned about, though it sits in the same
+	// struct as the four above.
+	//
+	// Those four are expected to be present: install.sh offers them, the
+	// container ships them, and both package formats recommend them — so their
+	// absence is a deviation worth reporting. The browser is the opposite: a
+	// several-hundred-megabyte opt-in that most installs will never have, so a
+	// warning here would fire on virtually every default install. That is how a
+	// warnings list stops being read, and it would devalue the four that mean
+	// something. Absence is reported as a plain fact in Tools.Browser, offered
+	// during onboarding, and logged once at startup.
 	return w
 }
