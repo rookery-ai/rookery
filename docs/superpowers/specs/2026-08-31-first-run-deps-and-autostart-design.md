@@ -126,16 +126,21 @@ Two Windows-specific rules, both load-bearing:
 ### B. The resolver is made true for the whole process by augmenting PATH
 
 Rather than convert eight call sites in six packages to the new resolver — and
-leave the ninth, written later, silently wrong — `main.go` gains a `Before`
-hook that resolves the host tools once and **prepends any directory that
-contributed a tool to the process `PATH`**.
+leave the ninth, written later, silently wrong — `main.go` resolves the host
+tools once at startup and **appends any directory that contributed a tool to
+the process `PATH`**.
+
+Appended rather than prepended: these directories are only ever derived from
+tools PATH could not already resolve, so there is nothing to shadow, and
+appending leaves a deliberate operator override in front of anything inferred
+here.
 
 Every existing `exec.LookPath` consumer then becomes correct with no edit, the
 sandbox grant in `internal/coder/hosttools.go` resolves the same interpreter
 the guardrail will run, and `/healthz` and `onboard` cannot disagree, because
 by construction they are asking the same question of the same environment.
 
-Three constraints on the hook:
+Three constraints:
 
 - It **skips the two internal helper commands** (`__sandbox-exec` and the
   browser host). Those re-exec a command they were handed; changing the
@@ -182,21 +187,48 @@ Resolution order:
 
 **One thing must be stated plainly rather than discovered later: detecting a
 system Chrome removes the ~115 MiB Chromium download, not the whole ~200 MB.**
-Playwright drives a system browser through its own Node driver, so the driver
-(~70 MB) is required whatever is found. The installer prompt must say what it
-is actually about to download, and `Install` therefore takes the resolved
-choice so it can fetch the driver alone (`SkipInstallBrowsers`) when a system
-browser will be used.
+Playwright drives a system browser through its own Node driver — `host.go`
+cannot launch anything until `driver/package/cli.js` exists — so the driver
+(~70 MB) is required whatever is found. `Channel` and `ExecutablePath` replace
+the browser build, never the driver. The installer prompt must therefore say
+what it is actually about to download, and `Install` takes the resolved choice
+so it can fetch the driver alone when a system browser will be used.
 
-**The loopback-proxy guard is engine-specific, and that is a security property,
-not a detail.** `host.go` routes the browser through a local proxy and forces
-loopback through it too, because Chromium bypasses the proxy for localhost by
-default and this install's own connector, KB and MCP bridges — and their bearer
-tokens — listen there. The Chromium flag that enforces it has no Firefox
-equivalent; Firefox needs the `network.proxy.allow_hijacking_localhost`
-preference, set through `FirefoxUserPrefs` at launch. Each engine therefore
-carries its own hardening explicitly, and an engine whose hardening cannot be
-applied is **refused with a named reason rather than launched unprotected**.
+`Channel` is preferred over `ExecutablePath` wherever both would work, because
+playwright-go's own documentation warns that `ExecutablePath` is unsupported
+("use at your own risk") while `Channel` explicitly names `chrome` and
+`msedge`.
+
+Four constraints found while mapping this, each of which would otherwise have
+been discovered as a regression:
+
+- **`Probe()` today checks for a *directory*, not a binary.** `hasChromium`
+  looks for a `chromium-*` directory under the browsers cache, so `Probe().OK`
+  is already compatible with `ChromiumExecutable()` returning `""`. The
+  resolution layer must resolve an executable — `pdfengine.go`'s
+  newest-revision-first walk is the function to build on, not `hasChromium`.
+- **PDF export needs a Chromium-family binary PATH, not merely a working
+  browser.** `internal/export/pdf.go` shells out directly to
+  `browser.ChromiumExecutable()`, outside Playwright. So resolving to Firefox
+  would leave rendering working and silently break PDF export. Chromium-family
+  therefore stays the preferred engine, and a resolved system Chrome must
+  surface its path and not only its channel name.
+- **The loopback-proxy guard is engine-specific, and it is a security property.**
+  `host.go` routes the browser through a local proxy and forces loopback through
+  it too, because Chromium bypasses the proxy for localhost by default and this
+  install's own connector, KB and MCP bridges — and their bearer tokens — listen
+  there. The Chromium flag has no Firefox equivalent; Firefox needs the
+  `network.proxy.allow_hijacking_localhost` preference set through
+  `FirefoxUserPrefs`. Each engine carries its own hardening explicitly, and an
+  engine whose hardening cannot be applied is **refused with a named reason
+  rather than launched unprotected**. The only test that asserts this behaviour
+  (`TestBrowserCannotReachLoopbackWhenGuarded`) sits behind the `browser` build
+  tag and does not run in CI, so per-engine verification is a release gate for
+  Firefox and WebKit, not a footnote.
+- **A system browser writes outside the sandbox's writable set.** The browser
+  host's Landlock spec grants RW on scratch and the Playwright caches only; a
+  system Chrome wants a profile and crash directory, so one must be pointed at
+  scratch and granted, or the launch fails under the default `Sandboxed=true`.
 
 Non-goal: driving a system Firefox or Safari. Playwright's Firefox and WebKit
 are patched builds and its own documentation does not support substituting the
@@ -300,12 +332,21 @@ a platform we cannot run should not present itself as verified.
 
 ## Delivery
 
-Two pull requests, both branched from `main` rather than stacked, because a
-stacked PR runs zero checks in this repository:
+Three pull requests, each branched from `main` rather than stacked, because a
+stacked PR runs zero checks in this repository. They are sequenced because the
+second and third both touch the installer scripts.
 
-1. **Dependencies** — the resolver, PATH augmentation, the browser resolution
-   layer, both installers' dependency steps, and onboard going quiet.
-2. **Autostart** — `rookery service`, the Windows task, `ServiceFor`, and the
-   installers' autostart prompt.
+1. **Host tools** — the resolver, PATH augmentation, the Python spelling
+   alignment across `install.ps1` and `internal/onboard`, and setup
+   re-resolving after an install instead of advising a new terminal. This is
+   the whole of defects 1 and 2, and it ships first because it is the reported
+   complaint and it needs nothing from the other two.
+2. **Browser** — the resolution layer above, and the installers' browser step.
+   Larger than it looks: it changes the only launch site in the codebase, and
+   the engines beyond Chromium cannot be verified by anything CI runs.
+3. **Autostart** — `rookery service`, the Windows logon task, `ServiceFor`, and
+   the installers' autostart prompt.
 
-(2) touches both installer scripts, so it rebases onto (1).
+Splitting (1) out is deliberate rather than tidy. Bundling it with the browser
+work would put a change we can fully verify on Linux behind one we cannot
+verify at all.

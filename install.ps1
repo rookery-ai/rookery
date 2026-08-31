@@ -108,11 +108,16 @@ $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 # Chocolatey or Scoop. Poppler is the one whose package id is not obvious —
 # oschwartz10612.Poppler is the maintained Windows build, and it is what ships
 # pdftotext.exe.
+#
+# `Names` is a list, not a single command, because python.org's distribution —
+# which is what Python.Python.3.13 installs — ships python.exe and py.exe and no
+# python3.exe. Probing one spelling is what let this script and `rookery
+# onboard` disagree about whether Python was installed at all.
 $HostTools = @(
-    @{ Command = 'python';    Winget = 'Python.Python.3.13';       Purpose = 'agent-tool AST guardrail (without it, generated scripts run unchecked)' }
-    @{ Command = 'rg';        Winget = 'BurntSushi.ripgrep.MSVC';  Purpose = 'knowledge-base search' }
-    @{ Command = 'pdftotext'; Winget = 'oschwartz10612.Poppler';   Purpose = 'PDF text extraction' }
-    @{ Command = 'tesseract'; Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images' }
+    @{ Names = @('python', 'python3', 'py'); Winget = 'Python.Python.3.13';       Purpose = 'agent-tool AST guardrail (without it, generated scripts run unchecked)'; Verify = $true }
+    @{ Names = @('rg');                      Winget = 'BurntSushi.ripgrep.MSVC';  Purpose = 'knowledge-base search' }
+    @{ Names = @('pdftotext');               Winget = 'oschwartz10612.Poppler';   Purpose = 'PDF text extraction' }
+    @{ Names = @('tesseract');               Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images' }
 )
 
 function Test-Command {
@@ -120,10 +125,32 @@ function Test-Command {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+# Stock Windows ships an App Execution Alias at
+# %LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe which Get-Command resolves
+# happily and which opens the Microsoft Store instead of running Python. So a
+# tool marked Verify is proved by RUNNING it: existence alone would let this
+# script decide Python is present and skip installing it, leaving the AST
+# guardrail disabled with nothing said. internal/onboard applies the same rule,
+# for the same reason.
+function Test-Tool {
+    param([hashtable]$Tool)
+    foreach ($name in $Tool.Names) {
+        if (-not (Test-Command $name)) { continue }
+        if (-not $Tool.Verify) { return $true }
+        try {
+            $out = & $name --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and "$out" -match 'Python') { return $true }
+        } catch {
+            # A stub that refuses to run is not the tool.
+        }
+    }
+    return $false
+}
+
 function Install-HostTools {
     if ($NoTools -or $env:ROOKERY_NO_TOOLS -eq '1') { return }
 
-    $missing = @($HostTools | Where-Object { -not (Test-Command $_.Command) })
+    $missing = @($HostTools | Where-Object { -not (Test-Tool $_) })
     if ($missing.Count -eq 0) {
         Write-Step "Host tools: all present"
         return
@@ -132,7 +159,7 @@ function Install-HostTools {
     Write-Step "Host tools"
     Write-Host "  Rookery runs without these, but some features quietly degrade:"
     foreach ($t in $missing) {
-        Write-Host ("    {0,-10} {1}" -f $t.Command, $t.Purpose)
+        Write-Host ("    {0,-10} {1}" -f $t.Names[0], $t.Purpose)
     }
     Write-Host ""
 
