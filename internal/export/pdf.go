@@ -97,15 +97,14 @@ func onPath(bin string) func() (string, bool) {
 // temp-file path in its header.
 //
 // --disable-dev-shm-usage is here for the same reason internal/browser/host.go
-// sets it: a container's /dev/shm defaults to 64 MB, which a full Chromium
-// exceeds, and it then hangs rather than reporting anything. The symptom is the
-// worst available — the process sits there until pdfTimeout kills it, so the
-// error surfaces as "signal: killed" after 30 seconds with nothing naming shared
-// memory. It cost a red CI gate to find: TestToPDFWithARealEngine failed on
-// every runner whose image ships /usr/bin/chromium, and passed everywhere the
-// bundled headless shell was used instead, because that build does not touch
-// /dev/shm the same way. The flag makes Chromium fall back to a temp file and is
-// harmless where /dev/shm is large enough.
+// sets it: a CONTAINER's /dev/shm defaults to 64 MB, which a full Chromium
+// exceeds, and it then crashes on content-heavy pages. Rookery ships a container
+// image, so this is a real target rather than a hypothetical one.
+//
+// It is deliberately NOT the fix for the hang that findPDFEngine addresses — a
+// GitHub-hosted VM runner sizes /dev/shm from RAM, so this flag is inert there.
+// Adding it here on that theory was a wrong first diagnosis; it is kept because
+// it is correct for the container case, not because it fixed anything observed.
 func chromiumArgs(binPath, in, out string) (string, []string) {
 	return binPath, []string{
 		"--headless",
@@ -178,15 +177,54 @@ var pdfEngines = []pdfEngine{
 	},
 }
 
-// findPDFEngine returns the first supported renderer available, together with
-// its resolved executable path.
+// findPDFEngine returns the first supported renderer that is present AND can
+// actually run, together with its resolved executable path.
+//
+// Being on PATH is not the same as working, and the difference is expensive
+// here. A name on PATH can be a wrapper that never renders anything — on Ubuntu
+// `/usr/bin/chromium` is frequently a snap shim — and the failure mode is the
+// worst available: it does not error, it HANGS, so the export sits there until
+// pdfTimeout kills it and reports `signal: killed` after 30 seconds. Nothing in
+// that message suggests the engine was the wrong one, and because the check was
+// "does the name resolve", the next export picks the same broken engine again.
+//
+// This is the same class of defect as the Windows Python launcher stub that
+// `internal/onboard` rejects by running the candidate: existence is not
+// evidence. Verifying costs one `--version` per export on the happy path (tens
+// of milliseconds) and bounds the unhappy path at engineProbeTimeout instead of
+// pdfTimeout — after which the NEXT engine gets a turn, which is the behaviour
+// the ordered list was written for and never had.
 func findPDFEngine() (pdfEngine, string, bool) {
 	for _, eng := range pdfEngines {
-		if p, ok := eng.locate(); ok {
-			return eng, p, true
+		p, ok := eng.locate()
+		if !ok || !engineRuns(p) {
+			continue
 		}
+		return eng, p, true
 	}
 	return pdfEngine{}, "", false
+}
+
+// engineProbeTimeout bounds the "can you run at all" check. It is far shorter
+// than pdfTimeout on purpose: this asks a binary to print its version, which is
+// immediate for anything healthy, so a slow answer IS the answer.
+const engineProbeTimeout = 5 * time.Second
+
+// engineRuns is a package variable for the same reason lookPath and runEngine
+// are: a test describing a host it is not running on has a path but no binary
+// there to execute.
+var engineRuns = engineRunsReal
+
+// engineRunsReal reports whether a located renderer actually executes.
+//
+// Every engine in pdfEngines accepts --version, and none of them renders
+// anything or touches the filesystem in response, which is what makes this safe
+// to call before committing to one.
+func engineRunsReal(binPath string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), engineProbeTimeout)
+	defer cancel()
+
+	return exec.CommandContext(ctx, binPath, "--version").Run() == nil
 }
 
 // ToPDF renders the note to HTML (the same document ToHTML produces) and converts

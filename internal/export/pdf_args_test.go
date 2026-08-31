@@ -10,12 +10,11 @@ import (
 // This looks like belt and braces and is not. Each of these was added because
 // its absence produced a failure that named something else entirely:
 //
-//   - --disable-dev-shm-usage: a container's /dev/shm defaults to 64 MB, which a
-//     full Chromium exceeds, and it then HANGS. The process sits there until
-//     pdfTimeout kills it, so the report is "signal: killed" after 30 seconds
-//     with nothing pointing at shared memory. It failed on every CI runner whose
-//     image ships /usr/bin/chromium while passing wherever the bundled headless
-//     shell was picked instead, which reads exactly like a flaky test.
+//   - --disable-dev-shm-usage: a CONTAINER's /dev/shm defaults to 64 MB, which a
+//     full Chromium exceeds, and it then crashes on content-heavy pages. Rookery
+//     ships a container image, so this is a real target. (It is not what fixes
+//     the hang findPDFEngine addresses — a VM runner sizes /dev/shm from RAM, so
+//     the flag is inert there.)
 //   - --no-sandbox: Chromium refuses to start as root without a usable sandbox
 //     namespace, which is the normal case inside a container.
 //   - --no-pdf-header-footer: without it every exported page is stamped with the
