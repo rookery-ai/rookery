@@ -48,6 +48,36 @@ type Options struct {
 	SourceURL string // where the bytes came from, recorded in the result
 }
 
+// AssetRefScheme prefixes the destination of an image the converter extracted
+// from inside a document. The bytes travel in Result.Assets; the markdown
+// carries "rookery-asset:<index>" until a caller that owns storage rewrites it
+// to a real path (vault.ImportFile does this, for every ingest door).
+//
+// A distinct scheme rather than a plausible relative path, deliberately: if a
+// caller ignores Assets, the reference is VISIBLY unresolved instead of silently
+// pointing at a file that does not exist — a broken link that names its own
+// cause beats one that looks like an ordinary missing image.
+const AssetRefScheme = "rookery-asset:"
+
+// Asset is a file extracted from inside a converted document — an image
+// embedded in a .docx, a picture on a slide.
+//
+// It exists because internal/convert must stay a pure function of its input: no
+// vault, no filesystem, no host state. That purity is what makes it testable
+// against golden fixtures and identical across hosts, so the converter cannot
+// write these anywhere itself. It hands them back instead, and the caller that
+// already owns storage decides where they land.
+type Asset struct {
+	// Name is a suggested file name, taken from the document's own part name
+	// where there is one. Callers must not trust it as a path — it is sanitised
+	// at the point of writing, like any other uploaded file name.
+	Name string
+	// ContentType is sniffed from the bytes, not read from the container's
+	// metadata, which is frequently absent or wrong.
+	ContentType string
+	Data        []byte
+}
+
 // Result is a converted document.
 type Result struct {
 	Markdown  string   // the converted body; never empty on a nil error
@@ -55,6 +85,9 @@ type Result struct {
 	Kind      Kind     // the format that was detected and converted
 	Extractor string   // which code path produced Markdown (e.g. "pure-go", "pdftotext")
 	Warnings  []string // non-fatal quality notes, surfaced to the user in note frontmatter
+	// Assets are files extracted from inside the document, referenced from
+	// Markdown as AssetRefScheme + the asset's index in this slice.
+	Assets []Asset
 }
 
 // ToMarkdown detects the format of data and converts it to markdown. It returns
