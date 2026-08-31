@@ -45,7 +45,7 @@ type Formats struct {
 
 // AvailableFormats reports the formats this host can currently produce.
 func AvailableFormats() Formats {
-	_, ok := findPDFEngine()
+	_, _, ok := findPDFEngine()
 	return Formats{HTML: true, DOCX: true, PDF: ok}
 }
 
