@@ -214,8 +214,16 @@ Properties:
 
 **Phase 0 — safety.** `rookery backup` to a passphrase-encrypted `.rkb`, plus a raw
 copy of `rookery.db` and a `git`-tracked dump of the fixture rows to preserve
-(the Stripe row, both schedule rows). Verify the backup with `rookery backup verify`
-before anything destructive. This is what makes every later step reversible.
+(the Stripe row, both schedule rows). Then `rookery backup verify <name>`, which
+**decrypts and checksums the snapshot without restoring it** — so it proves both the
+passphrase and the archive's integrity, which is the whole reason this step exists.
+An unverified backup is an assumption, and Phase 2 is irreversible without a real one.
+
+**Phase 0b — deploy from a known checkout.** The server currently on `:8080` is the
+`feat+browser-automation` worktree, and local `main` is 24 commits behind it. Deploy
+from a checkout you can name before touching data: `make deploy` prints success even
+when another worktree's process is holding the port, so assert the running build is
+yours — `curl -s localhost:8080/healthz` must report the commit you just built.
 
 **Phase 1 — human-gated prerequisites** (front-loaded so they parallelize with the
 build; see below).
