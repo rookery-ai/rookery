@@ -25,7 +25,18 @@ import (
 //
 // Deliberately a plain path lookup with no side effects, so it can be called
 // from an availability probe — the same constraint that shaped Probe.
-func ChromiumExecutable() string { return chromiumExecutableIn(browsersDir()) }
+// It falls back to a Chromium-family browser the operator already has. Without
+// that, an install whose only browser is a system Chrome would render pages
+// perfectly well through Playwright and still report PDF export as
+// unavailable — the same "invisible working renderer" this function was written
+// to fix, reintroduced by the change that stopped downloading Chromium when one
+// was already present.
+func ChromiumExecutable() string {
+	if p := chromiumExecutableIn(browsersDir()); p != "" {
+		return p
+	}
+	return SystemChromiumExecutable()
+}
 
 // chromiumExecutableIn is the testable half: the caller supplies the browsers
 // directory, so a test can describe a cache layout without one being installed.

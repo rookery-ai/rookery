@@ -119,7 +119,16 @@ type Availability struct {
 // helper is unexported, it runs the driver to read its version, and — the
 // disqualifying part — it MkdirAlls the driver directory. A probe that creates
 // the thing it is probing for cannot be called from /healthz.
-func Probe() Availability { return probeAt(driverDir(), browsersDir()) }
+// It now answers from Resolve, so OK means "something can actually be
+// launched" rather than "a chromium- directory exists". The two used to differ:
+// hasChromium matched a DIRECTORY name, so a half-extracted cache reported the
+// browser as present while ChromiumExecutable returned "" and every render
+// failed. It also means an owner who already has Chrome or Edge is reported as
+// having a browser, because they do.
+func Probe() Availability {
+	c := Resolve()
+	return Availability{OK: c.OK, Reason: c.Reason}
+}
 
 func probeAt(driver, browsers string) Availability {
 	if driver == "" || browsers == "" {

@@ -27,13 +27,17 @@
 
 .PARAMETER NoTools
     Skip the host-tool step entirely.
+
+.PARAMETER NoBrowser
+    Skip the browser step entirely.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = $env:ROOKERY_VERSION,
     [string]$BinDir  = $env:ROOKERY_BIN_DIR,
     [switch]$Yes,
-    [switch]$NoTools
+    [switch]$NoTools,
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -182,6 +186,52 @@ function Install-HostTools {
     Write-Warn "newly installed tools appear on PATH in a NEW terminal, not this one."
 }
 
+# ── browser ──────────────────────────────────────────────────────────────────
+#
+# Offered here so `rookery onboard` does not have to.
+#
+# Unlike the host tools above, this is NOT a winget package. Playwright's
+# runtime is version-matched to the binary — its cache directory is named after
+# the Playwright version compiled in — so this script cannot fetch the right one
+# without hardcoding that version and breaking on every dependency bump. And
+# `winget install Google.Chrome` would not help: Rookery needs Playwright's own
+# driver whatever browser is present. So the binary just installed and verified
+# does the fetching, and it decides for itself whether an existing Chrome or
+# Edge makes the larger download unnecessary.
+function Install-Browser {
+    param([string]$Exe)
+
+    if ($NoBrowser -or $env:ROOKERY_NO_BROWSER -eq '1') { return }
+
+    # Nothing to say when the machine can already do this.
+    & $Exe browser status *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+
+    Write-Step "Browser (optional)"
+    Write-Host "  Lets agents read pages that only appear once JavaScript has run, and"
+    Write-Host "  lets them sign in and click through a flow. Everything else works without it."
+
+    $answer = 'n'
+    if ($Yes -or $env:ROOKERY_YES -eq '1') {
+        $answer = 'y'
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $answer = Read-Host "  Download it now? [y/N]"
+    } else {
+        Write-Host "  Later:  rookery browser install"
+        return
+    }
+
+    if ($answer -notmatch '^(y|yes)$') {
+        Write-Host "  Skipped. Later:  rookery browser install"
+        return
+    }
+
+    & $Exe browser install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "could not install it — run it yourself: rookery browser install"
+    }
+}
+
 # ── release resolution ───────────────────────────────────────────────────────
 
 if (-not $Version) {
@@ -269,6 +319,7 @@ try {
     }
 
     Install-HostTools
+    Install-Browser $dest
 
     Write-Host ""
     Write-Step "Done"
