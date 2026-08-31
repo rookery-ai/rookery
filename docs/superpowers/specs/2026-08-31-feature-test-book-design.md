@@ -32,6 +32,27 @@ are where this codebase has repeatedly shipped defects:
 
 ---
 
+## 0. First-run setup (P0 — only testable once)
+
+This section exists because the from-zero rebuild is the **only** opportunity to test
+it. An already-configured install cannot exercise onboarding, and this is the exact
+path a launch-day user walks. Run it deliberately, as a new user would, and resist
+scripting around any step.
+
+| ID | Charter | Expected | Evidence |
+|---|---|---|---|
+| TC-SETUP-1 | `rookery onboard` on an empty install, interactively | Keys generated, owner created, host tools reported, browser offered, service step completes; output stays short enough to actually read | terminal capture |
+| TC-SETUP-2 | `rookery onboard` where the browser runtime is **already** installed | Says **nothing** about it — the silence is deliberate | terminal capture |
+| TC-SETUP-3 | `rookery onboard --non-interactive` | Reports what to do; **prompts nothing, acts on nothing** | output |
+| TC-SETUP-4 | First sign-in, then the setup wizard through to Done | Completes; the coder step's **Skip** is present and works | screenshots |
+| TC-SETUP-5 | Finish the wizard **with** a coder configured | Done offers exactly one action — "Explore what you can do!" — which opens a chat with the opening question **already sent** | screenshot |
+| TC-SETUP-6 | Refresh that intro chat, and re-open it | The question is **not** re-asked and no second coder call is spent | transcript + log |
+| TC-SETUP-7 | Finish the wizard having **skipped** the coder | Done offers "Create your first agent" instead — never a chat with nothing behind it | screenshot |
+| TC-SETUP-8 | Ask that intro chat "what is the purpose of this platform?" | Answers about the platform's own features; **no `[CHAT]`/`[SILENT]`/`[STATE]` markers** | transcript |
+| TC-SETUP-9 | Create the first workspace and enter it | Master password prompted; icon picker offers 36 presets; an unset icon renders the default mark | screenshots |
+| TC-SETUP-10 | `rookery owner bootstrap` a second time | Refuses cleanly rather than creating a second owner | output |
+| TC-SETUP-11 | Reach the app before any workspace exists | Owner-scoped surfaces work; workspace-scoped ones return `no_workspace` rather than erroring opaquely | responses |
+
 ## A. Knowledge base (P0)
 
 | ID | Charter | Expected | Evidence |

@@ -1,8 +1,22 @@
 # Launch testbed: reset, workspace topology and demo seed
 
-**Status:** proposed
+**Status:** proposed — **§"Decision: rename and purge" is SUPERSEDED**, see below
 **Date:** 2026-08-31
-**Companions:** `2026-08-31-feature-test-book-design.md`, `2026-08-31-agent-designer-test-charter-design.md`
+**Companions:** `2026-08-31-three-workspace-testbed-runbook-design.md` (the executable
+plan), `2026-08-31-feature-test-book-design.md`,
+`2026-08-31-agent-designer-test-charter-design.md`
+
+> **Superseded decision.** This document originally designed a *credential-preserving*
+> reset — rename and purge `Personal` so its 17 OAuth connections survive in place.
+> The owner has chosen to **wipe the install to empty and rebuild from scratch**.
+> The rename-and-purge section and the connection fan-out below are therefore
+> **not the plan of record**; they are retained because the analysis behind them is
+> still the reason the from-zero path costs what it does, and because the decision is
+> worth being able to reverse. The plan of record is the runbook companion.
+>
+> Two consequences: every connection is re-consented by hand (~12 authorisations), and
+> the two fixtures this document proposed to *preserve* are **created deliberately**
+> instead — see the runbook's Stage 3, fixtures F1 and F2.
 
 ## Goal
 
@@ -102,7 +116,13 @@ Three caveats, each of which decides what may be copied:
 - **Copy deliberately, not wholesale.** `Testing` gets the full set because it is the
   crash-test tenant. `Work` gets only what its scenarios need (Google, SendGrid).
 
-### Fixtures preserved on purpose
+### Fixtures preserved on purpose — now created on purpose
+
+> Superseded along with the decision above. On the from-zero path these two are
+> **built deliberately** (runbook Stage 3, F1 and F2) rather than salvaged. The
+> analysis of *why each is a good fixture* still stands and is why they are recreated
+> at all; a preserved fixture would also have made the testbed unreproducible, since
+> nothing could rebuild it after the next teardown.
 
 Two live artefacts are better test fixtures than anything synthetic, and both must
 survive the purge:
@@ -265,7 +285,7 @@ reverse *before* Phase 2 and expensive after.
 
 | Decision | Rationale | Cost of the alternative |
 |---|---|---|
-| Rename+purge `Personal` rather than delete it | Preserves 17 connections, 7 secrets, the Telegram bot, with zero crypto handling | A true delete costs ~12 OAuth re-consents and re-entering every secret |
+| ~~Rename+purge `Personal` rather than delete it~~ **OVERTURNED — full wipe chosen** | Would have preserved 17 connections, 7 secrets and the Telegram bot with zero crypto handling | The wipe costs ~12 OAuth re-consents and retyping every secret. It buys a reproducible testbed that depends on no salvaged artefact, and it puts the first-run setup path — the one a launch-day user walks — under test |
 | Secrets re-entered by hand, not migrated | ~3 keys; migrating means writing crypto plumbing | ~40 lines of Go handling master passwords, for two minutes of typing |
 | `Work` on `America/New_York` | Makes timezone bugs visible in one screenshot | Same-zone tenants make a wrong conversion indistinguishable from a right one |
 | `Testing` gets copies of live connections | Real credentials find real bugs; mocks find mock bugs | Genuine risk: a misbehaving test agent acts on a live account. Mitigated by the build-phase guard and approval gating, not eliminated |
