@@ -107,6 +107,14 @@ func docxToMarkdown(data []byte, opt Options) (Result, error) {
 	var sb strings.Builder
 	for _, p := range paras {
 		if p.IsTable {
+			// A table MUST start on a fresh block. A list item ends with a
+			// single "\n", so a table written straight after one was parsed as
+			// a continuation of that bullet: the entire table collapsed into
+			// the list item as literal text ("- A rating | Name | Value | …")
+			// and every row was lost. Found by the fidelity corpus, which is
+			// exactly the shape of defect it exists to catch — the note also
+			// opened read-only, but the data loss was the worse half.
+			ensureBlankLine(&sb)
 			writeTable(&sb, p.Rows)
 			sb.WriteString("\n")
 			continue
@@ -123,9 +131,21 @@ func docxToMarkdown(data []byte, opt Options) (Result, error) {
 			if res.Title == titleFromFilename(opt.Filename) || res.Title == "" {
 				res.Title = text
 			}
-			sb.WriteString("\n" + strings.Repeat("#", level) + " " + text + "\n\n")
+			// ensureBlankLine rather than a literal leading "\n": at the very
+			// start of a document that "\n" produced a note beginning with a
+			// blank line, and after a list item it produced only a single
+			// newline, which is not a block boundary.
+			ensureBlankLine(&sb)
+			sb.WriteString(strings.Repeat("#", level) + " " + text + "\n\n")
 		default:
-			sb.WriteString(text + "\n\n")
+			// A paragraph directly after a list item needs the same block
+			// boundary a table does, or it is absorbed into the bullet.
+			ensureBlankLine(&sb)
+			// The paragraph starts a line, so a leading "-" here would be read
+			// back as a bullet. Escaped only in this branch: the list branch
+			// above authors its own "- " marker, and the heading branch is
+			// already unambiguous.
+			sb.WriteString(escapeLeadingMarker(text) + "\n\n")
 		}
 	}
 	body := collapseBlankLines(sb.String())
@@ -134,6 +154,23 @@ func docxToMarkdown(data []byte, opt Options) (Result, error) {
 	}
 	res.Markdown = normalizeText(body)
 	return res, nil
+}
+
+// ensureBlankLine makes the buffer end at a block boundary, so whatever is
+// written next begins a new markdown block rather than continuing the previous
+// one. A no-op at the start of the document, so it never introduces a leading
+// blank line. Mirrors mdWriter.block() in html.go, which solves the same
+// problem for the HTML path.
+func ensureBlankLine(sb *strings.Builder) {
+	cur := sb.String()
+	if cur == "" || strings.HasSuffix(cur, "\n\n") {
+		return
+	}
+	if strings.HasSuffix(cur, "\n") {
+		sb.WriteString("\n")
+		return
+	}
+	sb.WriteString("\n\n")
 }
 
 // parseDocxParagraphs walks the document body, emitting one entry per paragraph
@@ -227,9 +264,18 @@ func parseDocxParagraphs(part []byte) ([]docxParagraph, error) {
 				var text string
 				if err := dec.DecodeElement(&text, &t); err == nil {
 					if b := target(); b != nil {
+						// A table cell is escaped later by escapeCell, which
+						// composes the same inline rules and adds the pipe
+						// handling. Escaping here too would double every
+						// backslash in the cell.
 						b.WriteString(text)
 					} else if cur != nil {
-						cur.Text += text
+						// Paragraph text is escaped as it ENTERS, before any
+						// markup is added to the paragraph. Escaping the
+						// assembled string instead would also escape the
+						// backslash of the hard break written by the "br" case
+						// below, turning a line break into a literal "\".
+						cur.Text += EscapeInline(text)
 					}
 				}
 			case "br":
@@ -410,7 +456,10 @@ func xlsxToMarkdown(data []byte, opt Options) (Result, error) {
 			continue
 		}
 		sheets++
-		fmt.Fprintf(&sb, "## %s\n\n", p.Name)
+		// A sheet name is user-chosen text ("Q1 <draft>", "Costs [2026]") and
+		// becomes a heading, so it takes the inline rules like any other
+		// document text. The cells below are handled by escapeCell.
+		fmt.Fprintf(&sb, "## %s\n\n", EscapeInline(p.Name))
 		if len(rows) > maxTableRows+1 {
 			// total/omitted count DATA rows (rows[0] is the header), matching
 			// tabular.go's truncation-warning precedent so both converters
@@ -708,6 +757,9 @@ func pptxToMarkdown(data []byte, opt Options) (Result, error) {
 		slides++
 		fmt.Fprintf(&sb, "## Slide %d\n\n", n)
 		for j, t := range texts {
+			// Slide text is document content and takes the inline rules; the
+			// "**" and "- " around it are markup this function authors.
+			t = EscapeInline(t)
 			if j == 0 {
 				sb.WriteString("**" + t + "**\n\n")
 				continue

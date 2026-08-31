@@ -10,6 +10,7 @@ package convert
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrUnsupportedFormat is returned by ToMarkdown when the input's format
@@ -102,14 +103,47 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 	}
 }
 
-// passthrough normalizes already-textual input. Markdown is returned as-is;
-// plain text is returned as-is too (it is valid markdown), so no information is
-// invented or lost.
+// passthrough normalizes already-textual input.
+//
+// The two kinds are deliberately NOT treated the same, though both arrive here
+// as text. A .md upload is markdown the user wrote: its asterisks and brackets
+// are intended as syntax, so it is returned byte-for-byte and any fidelity
+// problem in it is the author's own, exactly as for a note typed in the editor.
+//
+// A .txt upload is not markdown. Its characters are literal, and returning them
+// unescaped was the reason a plain text file containing "a < b" or a "[12]"
+// citation imported into a note that could not be edited: those round-trip
+// through the editor as "a &lt; b" and "\[12\]", the check fails, and the note
+// opens read-only. Escaping changes nothing a reader sees — it is the same text
+// once rendered — and makes the note editable.
+//
+// This does not attempt to stop plain text being INTERPRETED as markdown (a
+// line starting "# " still becomes a heading). That is long-standing behaviour,
+// it is what makes a pasted-in text file useful, and changing it is a separate
+// decision from making the result editable.
 func passthrough(data []byte, kind Kind, opt Options) Result {
+	body := normalizeText(string(data))
+	if kind == KindText {
+		body = escapeTextBlock(body)
+	}
 	return Result{
-		Markdown:  normalizeText(string(data)),
+		Markdown:  body,
 		Title:     titleFromFilename(opt.Filename),
 		Kind:      kind,
 		Extractor: "pure-go",
 	}
+}
+
+// escapeTextBlock applies the inline rules line by line, so that a leading "-"
+// is judged per line rather than once for the whole document. Blank lines are
+// preserved exactly, since they are what separate paragraphs.
+func escapeTextBlock(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if ln == "" {
+			continue
+		}
+		lines[i] = escapeLeadingMarker(EscapeInline(ln))
+	}
+	return strings.Join(lines, "\n")
 }

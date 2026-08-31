@@ -83,7 +83,7 @@ func (w *mdWriter) walk(n *html.Node) {
 	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		level := int(n.Data[1] - '0')
 		w.block()
-		w.sb.WriteString(strings.Repeat("#", level) + " " + squeeze(textOf(n)))
+		w.sb.WriteString(strings.Repeat("#", level) + " " + EscapeInline(squeeze(textOf(n))))
 		w.block()
 		return
 	case atom.P, atom.Div, atom.Section, atom.Blockquote:
@@ -141,11 +141,14 @@ func (w *mdWriter) walk(n *html.Node) {
 		}
 		href := attr(n, "href")
 		if href == "" || blockedHref(href) {
-			w.emit(text, leading)
+			w.emit(EscapeInline(text), leading)
 			w.pendingSpace = trailing
 			return
 		}
-		w.emit(fmt.Sprintf("[%s](%s)", text, href), leading)
+		// The label is prose and takes the inline rules; the destination is a
+		// path and takes its own (see escapeDestination) — inline-escaping a URL
+		// would turn "&" into an entity and break the link.
+		w.emit(fmt.Sprintf("[%s](%s)", EscapeInline(text), escapeDestination(href)), leading)
 		w.pendingSpace = trailing
 		return
 	case atom.Table:
@@ -154,16 +157,25 @@ func (w *mdWriter) walk(n *html.Node) {
 		w.block()
 		return
 	case atom.Img:
-		if alt := strings.TrimSpace(attr(n, "alt")); alt != "" {
+		// The alt text does NOT gate emission. This used to read
+		// `if alt := …; alt != ""`, wrapping the whole case — so an <img> with
+		// no alt attribute emitted nothing at all, src included, and the image
+		// vanished from the note with no warning. Empty alt is the common case
+		// in real pages and mail, so that silently dropped most imported
+		// images; an image with no description is still an image.
+		alt := strings.TrimSpace(attr(n, "alt"))
+		src := attr(n, "src")
+		if src == "" || blockedImageSrc(src) {
 			// A blocked source keeps the alt text as plain prose, matching how
 			// a blocked href keeps its link text: the destination is what is
-			// unsafe, not the words describing it.
-			if src := attr(n, "src"); src == "" || blockedImageSrc(src) {
-				w.emit(alt, false)
-			} else {
-				w.emit(fmt.Sprintf("![%s](%s)", alt, src), false)
+			// unsafe, not the words describing it. With no alt there is nothing
+			// to say, so nothing is written.
+			if alt != "" {
+				w.emit(EscapeInline(alt), false)
 			}
+			return
 		}
+		w.emit(fmt.Sprintf("![%s](%s)", EscapeInline(alt), escapeDestination(src)), false)
 		return
 	}
 	w.children(n)
@@ -182,6 +194,13 @@ func (w *mdWriter) inline(marker string, n *html.Node) {
 	if text == "" {
 		return
 	}
+	// Inside a code span the content is literal — the editor's serializer writes
+	// that mark with escaping disabled, so escaping here would put visible
+	// backslashes into the user's code. Emphasis content is ordinary prose and
+	// takes the inline rules like any other text.
+	if marker != "`" {
+		text = EscapeInline(text)
+	}
 	w.emit(marker+text+marker, leading)
 	w.pendingSpace = trailing
 }
@@ -199,8 +218,23 @@ func (w *mdWriter) text(s string) {
 		}
 		return
 	}
-	w.emit(sq, leading)
+	esc := EscapeInline(sq)
+	// A hyphen is only list syntax at the start of a block, so the check is made
+	// here — where the writer knows whether anything precedes it on this line —
+	// rather than inside EscapeInline, which sees a bare string and could not
+	// tell "-40 degrees" (prose) from a hyphen inside a sentence.
+	if w.atBlockStart() {
+		esc = escapeLeadingMarker(esc)
+	}
+	w.emit(esc, leading)
 	w.pendingSpace = trailing
+}
+
+// atBlockStart reports whether the next fragment would begin a line, which is
+// the only position where a leading "-" would be misread as a bullet.
+func (w *mdWriter) atBlockStart() bool {
+	cur := w.sb.String()
+	return cur == "" || strings.HasSuffix(cur, "\n")
 }
 
 // emit appends a fragment, inserting a single separator when the previous

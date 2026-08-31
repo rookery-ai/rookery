@@ -79,6 +79,12 @@ func pdfToMarkdown(data []byte, opt Options) (Result, error) {
 			"extracted without pdftotext; layout and column order may be imperfect — "+
 				"install poppler-utils on the host for higher-fidelity PDF text")
 	}
+	// paragraphize authors the markdown structure; the PDF's own characters are
+	// escaped inside it, per paragraph, so that a leading "-" is judged against
+	// the paragraph it actually starts. A PDF is full of the characters that
+	// break the editor round trip — bracketed citations like "[12]", footnote
+	// markers, "<" in code listings — so without this an academic paper reliably
+	// imported into a note that could not be edited.
 	res.Markdown = normalizeText(paragraphize(text))
 	return res, nil
 }
@@ -217,7 +223,7 @@ func paragraphize(text string) string {
 			}
 		}
 		if len(kept) > 0 {
-			out = append(out, strings.Join(kept, " "))
+			out = append(out, escapeLeadingMarker(EscapeInline(strings.Join(kept, " "))))
 		}
 	}
 	return strings.Join(out, "\n\n")

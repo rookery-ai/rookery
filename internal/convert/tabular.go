@@ -117,10 +117,23 @@ func writeRow(sb *strings.Builder, cells []string) {
 
 // escapeCell makes a value safe inside a markdown table: a literal pipe would
 // otherwise split the cell, and an embedded newline would break the row.
+//
+// It composes EscapeInline (see mdtext.go) rather than repeating it, because a
+// cell is document text like any other and was missing the same escapes: a cell
+// reading "a < b" round-tripped to "a &lt; b" in the editor and opened the whole
+// note read-only. The pipe rule stays HERE and deliberately not in EscapeInline
+// — a bare pipe in ordinary prose was measured to round-trip cleanly, so
+// escaping it everywhere would be noise in every paragraph that uses one.
 func escapeCell(s string) string {
-	s = strings.ReplaceAll(s, "|", `\|`)
+	// Collapse the CRLF pair first: replacing "\n" and "\r" independently turns
+	// one line break into two spaces.
+	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
+	// EscapeInline runs BEFORE the pipe escape so that the backslash it doubles
+	// is the one from the source text, not the one the pipe rule is about to add.
+	s = EscapeInline(s)
+	s = strings.ReplaceAll(s, "|", `\|`)
 	return strings.TrimSpace(s)
 }
 

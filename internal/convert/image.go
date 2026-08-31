@@ -49,7 +49,10 @@ func imageToMarkdownWith(data []byte, opt Options, bin string) (Result, error) {
 		Kind:      KindImage,
 		Extractor: "tesseract",
 		Title:     titleFromFilename(opt.Filename),
-		Markdown:  normalizeText(text),
+		// OCR output is document text like any other, and is if anything more
+		// likely to contain stray markdown-significant characters, since the
+		// engine guesses at glyphs it cannot read.
+		Markdown: escapeTextBlock(normalizeText(text)),
 	}
 	if strings.TrimSpace(text) == "" {
 		res.Warnings = append(res.Warnings, "OCR found no text in the image (it may be a photo or diagram)")
