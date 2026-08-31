@@ -1,7 +1,6 @@
 ## Metrics
 
 - First point
-
 - Second with **bold** and *italic*
 
 | Name | Value |

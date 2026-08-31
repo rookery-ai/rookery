@@ -93,12 +93,15 @@ func docxToMarkdown(data []byte, opt Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	part, err := readZipPart(zr, "word/document.xml")
+	const docxPartName = "word/document.xml"
+	part, err := readZipPart(zr, docxPartName)
 	if err != nil {
 		return Result{}, err
 	}
 
-	paras, err := parseDocxParagraphs(part)
+	media := newAssetCollector(zr)
+	rels := readRels(zr, docxPartName)
+	paras, err := parseDocxParagraphs(part, func(id string) string { return media.ref(rels, id) })
 	if err != nil {
 		return Result{}, err
 	}
@@ -149,10 +152,15 @@ func docxToMarkdown(data []byte, opt Options) (Result, error) {
 		}
 	}
 	body := collapseBlankLines(sb.String())
-	if strings.TrimSpace(body) == "" {
+	// A document that is nothing but pictures is now a legitimate result: it has
+	// no readable text, but it is not empty, and refusing it would put us back to
+	// discarding exactly the content this change exists to keep.
+	if strings.TrimSpace(body) == "" && len(media.assets) == 0 {
 		return Result{}, fmt.Errorf("convert: docx contained no readable text")
 	}
 	res.Markdown = normalizeText(body)
+	res.Assets = media.assets
+	res.Warnings = append(res.Warnings, media.warnings()...)
 	return res, nil
 }
 
@@ -195,7 +203,13 @@ func ensureBlankLine(sb *strings.Builder) {
 // at the exact position it occupied in the source, rather than detached to a
 // location after the whole outer table that no longer reflects which cell it
 // came from.
-func parseDocxParagraphs(part []byte) ([]docxParagraph, error) {
+// imageRef resolves an OOXML relationship id to a markdown destination for the
+// image behind it, or "" when there is none to embed. Passed in rather than
+// looked up here so parseDocxParagraphs keeps taking bytes and stays trivially
+// testable; a nil value means "extract no images".
+type imageRef func(relID string) string
+
+func parseDocxParagraphs(part []byte, imgRef imageRef) ([]docxParagraph, error) {
 	dec := xml.NewDecoder(bytes.NewReader(part))
 	var out []docxParagraph
 	var cur *docxParagraph
@@ -277,6 +291,28 @@ func parseDocxParagraphs(part []byte) ([]docxParagraph, error) {
 						// below, turning a line break into a literal "\".
 						cur.Text += EscapeInline(text)
 					}
+				}
+			case "blip":
+				// <a:blip r:embed="rId7"> is how a picture is referenced from
+				// the document body. Nothing read it before, so every embedded
+				// image was discarded without a word.
+				if imgRef == nil {
+					break
+				}
+				dest := imgRef(attrValue(t, "embed"))
+				if dest == "" {
+					break
+				}
+				// No alt text is available here (a docx keeps its description
+				// in a sibling <wp:docPr descr="…"> the decoder has already
+				// passed), so the reference is written with an empty label —
+				// which the editor round-trips fine, and which is honest about
+				// having no description rather than inventing one.
+				md := "![](" + dest + ")"
+				if b := target(); b != nil {
+					b.WriteString(md)
+				} else if cur != nil {
+					cur.Text += md
 				}
 			case "br":
 				// A manual line break (Shift+Enter) is a real separator, not
@@ -743,24 +779,40 @@ func pptxToMarkdown(data []byte, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	res := Result{Kind: KindPPTX, Extractor: "pure-go", Title: titleFromFilename(opt.Filename)}
+	media := newAssetCollector(zr)
 	var sb strings.Builder
 	slides := 0
 	for _, n := range slideNumbers(zr) {
-		part, err := readZipPart(zr, fmt.Sprintf("ppt/slides/slide%d.xml", n))
+		partName := fmt.Sprintf("ppt/slides/slide%d.xml", n)
+		part, err := readZipPart(zr, partName)
 		if err != nil {
 			continue
 		}
-		texts := extractDrawingText(part)
+		rels := readRels(zr, partName)
+		texts := extractDrawingText(part, func(id string) string { return media.ref(rels, id) })
 		if len(texts) == 0 {
 			continue
 		}
 		slides++
 		fmt.Fprintf(&sb, "## Slide %d\n\n", n)
-		for j, t := range texts {
+		titled := false
+		for _, e := range texts {
+			if e.isImage {
+				// Already markdown this function built, and a block of its own.
+				ensureBlankLine(&sb)
+				sb.WriteString(e.text + "\n\n")
+				continue
+			}
 			// Slide text is document content and takes the inline rules; the
 			// "**" and "- " around it are markup this function authors.
-			t = EscapeInline(t)
-			if j == 0 {
+			t := EscapeInline(e.text)
+			// The first TEXT run is the slide title. Keyed on that rather than
+			// on index 0, which after this change can be a picture — and a
+			// title-less slide whose first element is an image would otherwise
+			// have promoted its first bullet into a heading.
+			if !titled {
+				titled = true
+				ensureBlankLine(&sb)
 				sb.WriteString("**" + t + "**\n\n")
 				continue
 			}
@@ -772,6 +824,8 @@ func pptxToMarkdown(data []byte, opt Options) (Result, error) {
 		return Result{}, fmt.Errorf("convert: pptx contained no readable slide text")
 	}
 	res.Markdown = normalizeText(collapseBlankLines(sb.String()))
+	res.Assets = media.assets
+	res.Warnings = append(res.Warnings, media.warnings()...)
 	return res, nil
 }
 
@@ -798,9 +852,18 @@ func slideNumbers(zr *zip.Reader) []int {
 
 // extractDrawingText collects <a:t> values, one entry per <a:p> paragraph, so a
 // shape's runs join into a single line instead of fragmenting.
-func extractDrawingText(part []byte) []string {
+// drawingEntry is one item pulled off a slide: either a run of text or an
+// embedded picture. Typed rather than a bare string so the caller cannot
+// mistake one for the other — an image reference escaped as prose, or wrapped
+// in a bullet, stops being an image.
+type drawingEntry struct {
+	text    string
+	isImage bool
+}
+
+func extractDrawingText(part []byte, imgRef imageRef) []drawingEntry {
 	dec := xml.NewDecoder(bytes.NewReader(part))
-	var out []string
+	var out []drawingEntry
 	var cur strings.Builder
 	for {
 		tok, err := dec.Token()
@@ -812,23 +875,39 @@ func extractDrawingText(part []byte) []string {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Local == "t" {
+			switch t.Name.Local {
+			case "t":
 				var text string
 				if err := dec.DecodeElement(&text, &t); err == nil {
 					cur.WriteString(text)
+				}
+			case "blip":
+				// A picture on a slide is emitted as its own entry rather than
+				// inside the current paragraph: slide pictures are almost always
+				// standalone figures, and an image reference glued to the end of
+				// a bullet's text would render inside that bullet.
+				if imgRef == nil {
+					break
+				}
+				if dest := imgRef(attrValue(t, "embed")); dest != "" {
+					if s := strings.TrimSpace(cur.String()); s != "" {
+						out = append(out, drawingEntry{text: s})
+						cur.Reset()
+					}
+					out = append(out, drawingEntry{text: "![](" + dest + ")", isImage: true})
 				}
 			}
 		case xml.EndElement:
 			if t.Name.Local == "p" {
 				if s := strings.TrimSpace(cur.String()); s != "" {
-					out = append(out, s)
+					out = append(out, drawingEntry{text: s})
 				}
 				cur.Reset()
 			}
 		}
 	}
 	if s := strings.TrimSpace(cur.String()); s != "" {
-		out = append(out, s)
+		out = append(out, drawingEntry{text: s})
 	}
 	return out
 }

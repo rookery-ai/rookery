@@ -62,6 +62,40 @@ var skipTags = map[atom.Atom]bool{
 type mdWriter struct {
 	sb           strings.Builder
 	pendingSpace bool // previous fragment ended on whitespace; next emit needs a separator
+	// listStack is one frame per open <ul>/<ol>, innermost last. It carries what
+	// a list item needs and an <li> cannot see for itself: whether to write "-"
+	// or a number, which number, and how deep to indent. Without it every list
+	// was emitted as a flat sequence of "- " items, so an ordered list lost its
+	// numbering and a nested list lost its nesting.
+	listStack []*listFrame
+}
+
+// listFrame tracks one open list level.
+type listFrame struct {
+	ordered bool
+	// n counts items emitted at this level, so an ordered list numbers 1., 2.,
+	// 3. rather than repeating a marker.
+	n int
+}
+
+// marker returns the bullet or number for the next item at this level and
+// advances the counter.
+func (f *listFrame) marker() string {
+	f.n++
+	if f.ordered {
+		return fmt.Sprintf("%d. ", f.n)
+	}
+	return "- "
+}
+
+// listIndent is the indentation for the CURRENT nesting depth. Two spaces per
+// enclosing level is what the editor's serializer emits and therefore what
+// round-trips; a tab or four spaces would be re-parsed as a code block.
+func (w *mdWriter) listIndent() string {
+	if len(w.listStack) <= 1 {
+		return ""
+	}
+	return strings.Repeat("  ", len(w.listStack)-1)
 }
 
 func (w *mdWriter) walk(n *html.Node) {
@@ -86,7 +120,50 @@ func (w *mdWriter) walk(n *html.Node) {
 		w.sb.WriteString(strings.Repeat("#", level) + " " + EscapeInline(squeeze(textOf(n))))
 		w.block()
 		return
-	case atom.P, atom.Div, atom.Section, atom.Blockquote:
+	case atom.Blockquote:
+		// Blockquote used to share a case with <p>, so it emitted no ">" at all
+		// and a quotation was indistinguishable from the prose around it. The
+		// editor supports blockquotes (and callouts, which are a blockquote with
+		// a marker), so this is a construct it can represent and edit.
+		w.block()
+		var inner mdWriter
+		inner.children(n)
+		w.sb.WriteString(quotePrefix(strings.TrimSpace(inner.sb.String())))
+		w.block()
+		return
+	case atom.Details:
+		w.details(n)
+		return
+	case atom.Span:
+		// Only a span carrying a colour is a construct the editor can hold; any
+		// other span is presentational and falls through to its contents.
+		if w.span(n) {
+			return
+		}
+		w.children(n)
+		return
+	case atom.U, atom.Ins:
+		// The editor has a real underline mark whose serialized form is literally
+		// <u>…</u>, so this round-trips and stays editable.
+		w.inlineHTML("u", n)
+		return
+	case atom.P, atom.Section:
+		w.block()
+		w.children(n)
+		w.block()
+		return
+	case atom.Div:
+		// A <div> carrying an alignment is the editor's kbAlign node, whose
+		// serialized form is exactly this wrapper with a blank line inside.
+		if a := alignmentOf(n); a != "" {
+			w.block()
+			w.sb.WriteString(`<div align="` + a + "\">\n\n")
+			w.children(n)
+			w.block()
+			w.sb.WriteString("</div>")
+			w.block()
+			return
+		}
 		w.block()
 		w.children(n)
 		w.block()
@@ -105,9 +182,29 @@ func (w *mdWriter) walk(n *html.Node) {
 		w.sb.WriteString("---")
 		w.block()
 		return
-	case atom.Li:
+	case atom.Ul, atom.Ol:
+		// <ul>/<ol> previously had NO case at all, so only <li> was handled and
+		// every list — ordered or not, nested or not — came out as a flat run of
+		// "- " items. A numbered procedure imported as an unnumbered one.
 		w.block()
-		w.sb.WriteString("- ")
+		w.listStack = append(w.listStack, &listFrame{ordered: n.DataAtom == atom.Ol})
+		w.children(n)
+		w.listStack = w.listStack[:len(w.listStack)-1]
+		w.block()
+		return
+	case atom.Li:
+		// An <li> outside any list still has to render; a synthetic bullet frame
+		// keeps it a list item rather than dropping its marker.
+		if len(w.listStack) == 0 {
+			w.listStack = append(w.listStack, &listFrame{})
+			defer func() { w.listStack = w.listStack[:len(w.listStack)-1] }()
+		}
+		frame := w.listStack[len(w.listStack)-1]
+		// A single newline, not a blank line: the items of one list are a single
+		// block, and separating them with blank lines makes the list LOOSE,
+		// which the editor's serializer then rewrites as tight.
+		w.lineBreak()
+		w.sb.WriteString(w.listIndent() + frame.marker())
 		w.children(n)
 		w.sb.WriteString("\n")
 		return
@@ -129,7 +226,7 @@ func (w *mdWriter) walk(n *html.Node) {
 		// branch for the identical flaw this mirrors).
 		body := strings.TrimSpace(textOf(n))
 		fence := codeFence(body)
-		w.sb.WriteString(fence + "\n" + body + "\n" + fence)
+		w.sb.WriteString(fence + codeLanguage(n) + "\n" + body + "\n" + fence)
 		w.block()
 		return
 	case atom.A:
@@ -257,6 +354,19 @@ func hasEdgeSpace(s string) (leading, trailing bool) {
 		return false, false
 	}
 	return unicode.IsSpace(rune(s[0])), unicode.IsSpace(rune(s[len(s)-1]))
+}
+
+// lineBreak ensures the output is at the start of a line WITHOUT forcing a
+// blank one. List items need this: block() would separate them with a blank
+// line, making the list loose, which the editor then rewrites as tight — a
+// difference that opens the note read-only.
+func (w *mdWriter) lineBreak() {
+	w.pendingSpace = false
+	cur := w.sb.String()
+	if cur == "" || strings.HasSuffix(cur, "\n") {
+		return
+	}
+	w.sb.WriteString("\n")
 }
 
 // block ensures the output is at a blank-line boundary before the next block.

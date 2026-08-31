@@ -114,6 +114,21 @@ func TestFidelityCorpus(t *testing.T) {
 		{"markdown-passthrough", "doc.md", []byte(
 			"# Title\n\nA paragraph with **bold** text.\n\n- one\n- two\n")},
 
+		// The editor constructs. Each is emitted in the editor's OWN serialized
+		// spelling; getting one wrong round-trips to something different and
+		// opens the note read-only, so these files are the check on that.
+		{"html-constructs", "constructs.html", []byte(`<html><body>
+			<ol><li>First step</li><li>Second step</li></ol>
+			<ul><li>Top<ul><li>Nested</li></ul></li><li>Another</li></ul>
+			<blockquote><p>A quoted claim.</p><p>And a second paragraph.</p></blockquote>
+			<details><summary>More detail</summary><p>Hidden body.</p></details>
+			<div align="center"><p>Centred text</p></div>
+			<p>Some <u>underlined</u> words.</p>
+			<p>A <span style="color: #EF4444">red</span> word.</p>
+			<p>A <span style="background-color:#fef08a">highlighted</span> word.</p>
+			<pre><code class="language-go">if a &lt; b { return }</code></pre>
+		</body></html>`)},
+
 		{"docx-specials", "report.docx", buildZip(t, map[string]string{
 			"word/document.xml": `<?xml version="1.0"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
