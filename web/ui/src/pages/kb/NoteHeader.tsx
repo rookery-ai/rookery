@@ -85,7 +85,7 @@ function ExportMenu({ path }: { path: string }) {
           <DropdownMenuItem
             disabled
             onSelect={(e) => e.preventDefault()}
-            title="PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc)."
+            title="PDF export needs a renderer on the server. Run `rookery browser install` to install the bundled one, or install weasyprint, chromium, google-chrome, wkhtmltopdf or libreoffice."
           >
             PDF (unavailable)
           </DropdownMenuItem>
