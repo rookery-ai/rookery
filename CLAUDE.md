@@ -1015,6 +1015,28 @@ your first agent"**. Four things are load-bearing:
   not an agent run and that a request to say nothing wants a short sentence, not a marker.
   Deleting it from the agent surface would silence every agent on the install, so a test pins
   both halves.
+- **Fixing the surface and the protocol still left chat unable to answer the one question the
+  button invites, and the gap had the same shape a third time.** Everything in the primer
+  teaches the agent FILE — the `agents/<id>/` layout, `state.md`, the `# Suggested schedule:`
+  header — because an agent run needs it, while **nothing in `internal/prompts` named the agent
+  designer at all**. So a new owner who clicked *Explore what you can do!* and asked about
+  agents was told to create one by hand and write AGENT.md: the model was reciting this block,
+  because the file was the only concrete thing in its context and the designer did not exist as
+  far as it knew. A hand-written file is not a registered agent — no schedule row, no bound
+  connections, and it never runs — so the advice was not merely unhelpful. `platformContextBlock`
+  now carries an **`## Agents — how they are created`** section that is surface-split like the
+  output protocol: chat gets the navigation path (*Agents → New Agent → describe it in plain
+  language → Build*) plus an explicit ban on telling the owner to author AGENT.md or touch
+  `agents/`, and the **`## Agent schedule`** section drops the header syntax for chat while
+  keeping it for agents, since that line is the most file-shaped thing in the primer and chat
+  had been handed it verbatim. The agent surface is told about the designer too, for a different
+  reason: an agent that rewrites its own AGENT.md loses the change on the owner's next edit,
+  with neither side reporting the conflict. Both halves are pinned
+  (`internal/prompts/agentcreation_test.go`) — deleting the authoring detail from `SurfaceAgent`
+  would break every build — and a third test keeps the section out of the DESIGNER's own prompt,
+  which must not be told to point at the screen it is already running on. This is the same shape
+  as `TestInboxBlockPromisesNoChannelSelection`: a capability the product has, absent from the
+  prompt, yields a confident answer pointing somewhere else.
 - **The opening message is sent by `ChatWindow` AFTER navigation, never by the wizard before
   it.** `handleChatMessage` is a blocking coder call, so sending first would freeze the wizard
   on a dead button for as long as the model takes. Two guards make it once-only: a ref (per
