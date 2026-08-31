@@ -496,7 +496,8 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
-| `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one), json, and images (stub — no OCR). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); exporting markdown to other formats is a planned future KB action, not an agent capability. |
+| `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one, recovers `-layout` column blocks as markdown tables, and **falls back to OCR** via `pdftoppm`+`tesseract` when there is no usable text layer), json, and images (OCR via tesseract when installed; an honest stub naming what is missing when not). Embedded images are extracted from docx/pptx and returned in `Result.Assets` — the package stays pure, so the CALLER stores them (see "KB import fidelity" below). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); the sanctioned reverse is `internal/export`. |
+| `internal/export` | Markdown note → HTML, DOCX or PDF, the sanctioned reverse of `internal/convert` and a separate package precisely so convert stays into-markdown-only. HTML and DOCX are pure Go and always available; PDF shells out to a headless renderer. **The renderer is looked for in Playwright's cache BEFORE PATH** (`browser.ChromiumExecutable`), because the platform installs its own Chromium via `rookery browser install` and probing PATH alone reported "PDF unavailable" on a host whose `/healthz` said `"browser": true`. `pandoc` is deliberately NOT a supported engine: it cannot render HTML→PDF without a LaTeX engine it does not bundle, so probing it turned an honest "unavailable" into a button that failed with an opaque 500. Chromium's argv carries `--no-pdf-header-footer`, or every page is stamped with the print date and the source `file://` temp path. |
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
 | `internal/nethttp` | The single private-address dial guard (`GuardedClient`, `DenyPrivateAddr`, `IsBlockedIP`). Enforced at DIAL time via `net.Dialer.Control`, not by URL inspection — the only approach that catches a hostname RESOLVING into private space and every redirect hop. Blocks loopback/RFC1918/link-local/unique-local/CGNAT-tailscale/cloud-metadata, plus the NAT64/6to4/Teredo transition ranges that embed an IPv4 address (partial by nature — a network-specific NAT64 prefix cannot be enumerated). Load-bearing because chat can now reach the web and the loopback interface hosts the connector + KB bridges and their per-run bearer tokens. `internal/coder/netguard.go` delegates here; do not fork a second copy. |
 | `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
@@ -878,6 +879,55 @@ editor transaction while the bubble menu is unmounted, verified live before writ
 is the ONE clipboard write in the whole app for the reason given at its top (`navigator.clipboard`
 is undefined over plain HTTP on a LAN, the normal way to reach a self-hosted install) — a KB or chat
 surface reaching for `navigator.clipboard` directly instead is a bug, not a style choice.
+
+**KB import fidelity: a converter that emits the wrong markdown makes the note
+UNEDITABLE, not merely untidy.** `checkFidelity` (`editor.ts`) round-trips a
+note's body through a real parse/serialize cycle and compares; a mismatch opens
+it read-only, so no keystroke marks it dirty and no save path runs. Converters
+wrote extracted document text verbatim, and driving the real editor over 43
+realistic converter outputs, **17 failed** — a Word document saying `a < b`, a
+PDF citing `[12]`, a path like `C:\Users` each produced a note nobody could edit.
+`convert.EscapeInline` fixes that, and three of its properties are the kind that
+get "simplified" back into bugs:
+
+- **The escaped forms must be FIXED POINTS.** Changing the bytes is not enough;
+  the escaped form must itself round-trip, or escaping trades one unopenable note
+  for another. Each was verified against the real editor.
+- **The characters left ALONE are as load-bearing as the ones escaped**, and the
+  list is not the intuitive one. `_` survives untouched (escaping it puts a
+  backslash inside every `snake_case` identifier), and `&` must NOT be escaped —
+  `&amp;` round-trips back to a bare `&`, so escaping it CREATES the failure it
+  is meant to prevent.
+- **A table cell, a link label and a link destination take different rules.**
+  `escapeCell` adds the pipe; `escapeDestination` escapes parens and encodes
+  spaces and must never HTML-escape, since `&lt;` in a path is a broken path.
+
+**The fidelity corpus deliberately spans two languages, because neither half can
+check this alone.** The editor runs only in vitest under jsdom; the converters
+run only in Go. `TestFidelityCorpus` writes what `ToMarkdown` ACTUALLY produced
+into `internal/convert/testdata/fidelity/`, and `convertFidelity.test.ts` runs
+the real `checkFidelity` over those bytes. The frontend already had a test
+asserting converter-shaped markdown survives the editor — but its fixtures were
+hand-written approximations, so it pinned a string rather than the package, and
+Go had drifted away from it without ever failing. Regenerate with
+`go test ./internal/convert/ -run TestFidelityCorpus -update-fidelity`. It found
+a real docx bug within minutes of existing: a table written straight after a list
+item was absorbed INTO that bullet and every row was lost, because markdown
+continues a list item across a single newline.
+
+**Embedded images: `internal/convert` returns them, it does not store them.**
+The package is a pure function of its input, which is what makes it testable
+against golden fixtures — so it hands images back in `Result.Assets`, referenced
+as `rookery-asset:<n>`, and `vault.ImportFile` (the one choke point the web
+upload, chat attachments, `save_to_kb` and the CLI bridge all funnel through)
+writes them into `uploads/` and rewrites the references. That is the folder and
+path shape the editor's image picker and the export inliner already consume, so
+an extracted image renders, exports and can be re-inserted with no new storage
+location and no new route. A distinct SCHEME rather than a plausible relative
+path is deliberate: a caller that ignores `Assets` leaves a visibly unresolved
+reference instead of one that silently points at nothing. An `External`
+relationship target is ignored outright — following it would turn a document
+import into a network fetch.
 
 **Export fidelity is NOT uniform across the five constructs** — `internal/export`'s HTML/PDF/DOCX
 path (goldmark built without `html.WithUnsafe()`, so raw HTML is replaced with the literal comment
