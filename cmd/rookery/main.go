@@ -62,6 +62,7 @@ func main() {
 		Commands: []*cli.Command{
 			serveCmd(),
 			onboardCmd(),
+			serviceCmd(),
 			adminCmd(),
 			sandboxExecCmd(),
 			browserHostCmd(),

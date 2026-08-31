@@ -22,6 +22,17 @@ type ServiceSupport struct {
 	Kind string
 	// Foreground is how to run the server by hand on this platform.
 	Foreground string
+	// Restart is the command that restarts the managed service, and is empty
+	// when Managed is false.
+	//
+	// It is a field rather than a string built at the call site because there is
+	// exactly one call site — `rookery upgrade` — and it used to hardcode
+	// systemctl behind an `if svc.Managed` test. That was correct only while
+	// Linux was the sole managed platform: the moment Windows became one, the
+	// same branch would have told a Windows operator to run a command that does
+	// not exist there, which is the precise bug the comment at that call site
+	// records having already fixed once.
+	Restart string
 	// Note explains the situation when Managed is false.
 	Note string
 }
@@ -34,6 +45,7 @@ func ServiceFor(goos string) ServiceSupport {
 			Managed:    true,
 			Kind:       "systemd user unit",
 			Foreground: "rookery serve",
+			Restart:    "systemctl --user restart rookery.service",
 		}
 	case "darwin":
 		return ServiceSupport{
@@ -43,11 +55,26 @@ func ServiceFor(goos string) ServiceSupport {
 				"Run it in a terminal, or keep it alive with your own launchd agent.",
 		}
 	case "windows":
+		// A Task Scheduler task triggered at logon, not a Service Control
+		// Manager service.
+		//
+		// The constraint that decides this is not neatness: it has to work for a
+		// standard non-administrator, with no stored credentials, and reach a
+		// data directory under the user's own profile. An SCM service needs
+		// administrator rights to install and then runs as a different
+		// principal, which reintroduces exactly the problem the Linux side
+		// avoids by using a systemd USER unit. Relying on S4U would need a
+		// batch-logon right a standard user may not hold.
+		//
+		// Accepted cost, recorded rather than engineered around: a logon task
+		// running a console application shows a console window. Every way of
+		// hiding it trades a cosmetic problem for a credential prompt or an
+		// administrator requirement.
 		return ServiceSupport{
-			Kind:       "Windows service",
+			Managed:    true,
+			Kind:       "Windows logon task",
 			Foreground: "rookery serve",
-			Note: "Windows service registration is not built yet, so Rookery does not start at boot. " +
-				"Run it in a terminal, or wrap it with a tool such as NSSM yourself.",
+			Restart:    `schtasks /End /TN ` + TaskName + ` && schtasks /Run /TN ` + TaskName,
 		}
 	default:
 		return ServiceSupport{

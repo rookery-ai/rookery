@@ -240,7 +240,7 @@ non-public hostnames, so a `.lan` address fails Google's validation outright.
 | linux amd64/arm64 | Landlock | systemd **user** unit + `enable-linger` | 1 |
 | container (linux) | Landlock (verified ABI 8 under rootless Podman) | runtime-managed | 1 |
 | darwin amd64/arm64 | **none** | launchd (not yet shipped) | 2 |
-| windows amd64/arm64 | **none** | SCM (not yet shipped) | 2 |
+| windows amd64/arm64 | **none** | Task Scheduler logon task | 2 |
 
 **Off Linux there is no filesystem sandbox at all** — `sandbox.Supported()`
 returns false and callers do not wrap, so coder subprocesses run unconfined.
@@ -251,7 +251,49 @@ Linux + macOS) and `install.ps1` (Windows). Each does exactly one job: fetch the
 goreleaser archive for the detected platform, verify it against the release's
 `checksums.txt`, put the binary on `PATH`, offer the four host tools, and hand
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
-A Homebrew tap and Windows service registration remain deferred.
+A Homebrew tap remains deferred, as does launchd registration on macOS.
+
+**Windows autostart is a Task Scheduler logon task, not an SCM service, and
+`rookery service` is what registers it.** Windows had no autostart at all: the
+installer finished, the machine was restarted, and nothing came back — silently,
+because nothing had ever been registered. The mechanism is decided by one
+constraint: it must work for a standard non-administrator, with no stored
+credentials, and reach a data directory under the user's own profile. An SCM
+service needs administrator rights and then runs as a different principal, which
+reintroduces exactly the problem the Linux side avoids by using a systemd **user**
+unit; relying on `S4U` would need a batch-logon right a standard user may not
+hold. The accepted cost is a visible console window — every way of hiding it
+trades a cosmetic problem for a credential prompt or an elevation requirement.
+
+**Four Task Scheduler defaults are wrong for a long-running server and all four
+fail silently**, which is why `TaskXMLFor` sets them explicitly and a test pins
+each: `DisallowStartIfOnBatteries` defaults **true**, so on a laptop — the machine
+this project documents as its common case — the task usually would not start at
+all; `StopIfGoingOnBatteries` defaults **true**, killing the server when the
+charger is unplugged; `ExecutionTimeLimit` defaults to **72 hours**, after which
+the task is terminated with no error; and `MultipleInstancesPolicy` decides
+whether a second server is started that cannot bind the port. The XML is written
+**UTF-16 with a BOM** because the declaration says UTF-16 — schtasks rejects a
+mismatch with an "incorrectly formatted" error that names nothing useful — and
+paths and account names are XML-escaped, since `&` is legal in both.
+
+**`ServiceSupport.Restart` is a field, not a string built at the call site.**
+`rookery upgrade` hardcoded `systemctl --user restart` behind `if svc.Managed`,
+which was correct only while Linux was the sole managed platform; the moment
+Windows became one, the same branch would have told a Windows operator to run a
+command that does not exist — the precise bug the comment at that call site
+records having already fixed once for macOS and Windows.
+
+**The installers ASK and Go registers, and that boundary is load-bearing.**
+External dependencies (python3, ripgrep, Poppler, Tesseract) are ordinary OS
+packages and both installers install them directly through the host's package
+manager. Autostart is Rookery's own configuration — it means generating a unit or
+a task document against the binary's real path — so it lives in Go, where it is
+tested once and also serves the operator who installed from an rpm, a deb or a
+tarball and never ran a script. `packaging/autostart_test.go` fails if either
+script starts writing a unit or calling `schtasks` itself, because the tempting
+fix when something misbehaves is to inline it into the shell, where nothing can
+exercise it — `install.ps1` is not even syntax-checked here.
 
 **Everything after first install is a Go subcommand, not a third and fourth shell
 script.** `rookery upgrade` and `rookery uninstall` follow the rule above: the

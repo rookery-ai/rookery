@@ -27,13 +27,17 @@
 
 .PARAMETER NoTools
     Skip the host-tool step entirely.
+
+.PARAMETER NoService
+    Skip the autostart step entirely.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = $env:ROOKERY_VERSION,
     [string]$BinDir  = $env:ROOKERY_BIN_DIR,
     [switch]$Yes,
-    [switch]$NoTools
+    [switch]$NoTools,
+    [switch]$NoService
 )
 
 $ErrorActionPreference = 'Stop'
@@ -182,6 +186,47 @@ function Install-HostTools {
     Write-Warn "newly installed tools appear on PATH in a NEW terminal, not this one."
 }
 
+# ── autostart ────────────────────────────────────────────────────────────────
+#
+# Windows had no autostart at all: the installer finished, the operator
+# restarted the laptop, and nothing came back. Nothing reported that either —
+# agents simply stopped running.
+#
+# The registering is `rookery service install`, not PowerShell. The host tools
+# above are ordinary OS packages and this script installs them itself, but
+# autostart is Rookery's own configuration: it means generating a Task Scheduler
+# document against the binary's real path, and that belongs in Go where it is
+# unit-tested. This file is not even syntax-checked on the development host,
+# which is the last place that knowledge should live.
+function Install-Autostart {
+    param([string]$Exe)
+
+    if ($NoService -or $env:ROOKERY_NO_SERVICE -eq '1') { return }
+
+    Write-Step "Start automatically"
+    Write-Host "  Rookery can start when you sign in, so agents and reminders keep running."
+
+    $answer = 'n'
+    if ($Yes -or $env:ROOKERY_YES -eq '1') {
+        $answer = 'y'
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $answer = Read-Host "  Set that up now? [y/N]"
+    } else {
+        Write-Host "  Later:  rookery service install"
+        return
+    }
+
+    if ($answer -notmatch '^(y|yes)$') {
+        Write-Host "  Skipped. Later:  rookery service install"
+        return
+    }
+
+    & $Exe service install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "could not set it up — run it yourself: rookery service install"
+    }
+}
+
 # ── release resolution ───────────────────────────────────────────────────────
 
 if (-not $Version) {
@@ -269,6 +314,7 @@ try {
     }
 
     Install-HostTools
+    Install-Autostart $dest
 
     Write-Host ""
     Write-Step "Done"

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -49,10 +48,11 @@ func onboardCmd() *cli.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 			o := &onboarder{
-				cfg:    cfg,
-				auto:   cmd.Bool("yes"),
-				silent: cmd.Bool("non-interactive"),
-				in:     bufio.NewReader(os.Stdin),
+				cfg:        cfg,
+				configPath: cmd.Root().String("config"),
+				auto:       cmd.Bool("yes"),
+				silent:     cmd.Bool("non-interactive"),
+				in:         bufio.NewReader(os.Stdin),
 			}
 			return o.run(cmd.String("username"), cmd.String("password"))
 		},
@@ -60,10 +60,15 @@ func onboardCmd() *cli.Command {
 }
 
 type onboarder struct {
-	cfg    *config.Config
-	auto   bool // --yes: act without asking
-	silent bool // --non-interactive: report, never act on a prompt
-	in     *bufio.Reader
+	cfg *config.Config
+	// configPath is the --config flag as given, forwarded so a registered
+	// service reads the same configuration file this run just used. A scheduled
+	// task or a systemd unit does not run in the operator's directory, so a
+	// relative default would silently select something else.
+	configPath string
+	auto       bool // --yes: act without asking
+	silent     bool // --non-interactive: report, never act on a prompt
+	in         *bufio.Reader
 
 	// Collected as we go, and replayed in the closing summary. A setup that
 	// skipped three things and then says "Done" has told the user nothing.
@@ -329,6 +334,13 @@ func (o *onboarder) stepCoder() {
 	o.info("Pick one per workspace in Settings, or use the `api` kind instead.")
 }
 
+// stepService offers autostart, and delegates the registering to the same code
+// `rookery service install` runs.
+//
+// It used to carry its own copy of the systemd logic. Sharing it is what lets
+// the installers ask the question and hand the work to Go, and it means Windows
+// gained autostart here without this file learning anything about Task
+// Scheduler.
 func (o *onboarder) stepService() error {
 	o.step("Running the server")
 
@@ -339,69 +351,33 @@ func (o *onboarder) stepService() error {
 		return nil
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		o.info("Cannot resolve your home directory; start manually with: %s", svc.Foreground)
-		return nil
-	}
-	unitPath := onboard.SystemdUnitPath(home)
-	if _, err := os.Stat(unitPath); err == nil {
-		o.ok("systemd user unit already installed: %s", unitPath)
-		o.info("Control it with: systemctl --user restart rookery")
+	// Already registered says one line and moves on. Re-offering something the
+	// installer has already done is the whole complaint this change set exists
+	// to answer.
+	if installed, detail, err := autostartStatus(); err == nil && installed {
+		o.ok("already starts automatically (%s)", svc.Kind)
+		if detail != "" {
+			for _, line := range strings.Split(strings.TrimSpace(detail), "\n") {
+				o.info("%s", strings.TrimSpace(line))
+			}
+		}
 		return nil
 	}
 
-	o.info("A systemd user unit starts Rookery at login and restarts it on failure.")
-	if !o.ask("Install and enable it?") {
+	o.info("Rookery can start on its own when you sign in, using a %s.", svc.Kind)
+	o.info("Without it, agents and reminders only run while you have it open in a terminal.")
+	if !o.ask("Set that up?") {
 		o.info("Skipped. Start manually with: %s", svc.Foreground)
-		o.later("install the systemd user unit")
+		o.later("set up autostart: rookery service install")
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
-		return fmt.Errorf("create unit dir: %w", err)
+	if err := installAutostart(serviceEnvFor(o.cfg, o.configPath), os.Stdout); err != nil {
+		o.info("failed: %v", err)
+		o.later("set up autostart: rookery service install")
+		return nil
 	}
-
-	// The packaged unit hardcodes /usr/bin/rookery. Someone who installed via
-	// install.sh or an archive has the binary in ~/.local/bin, so copying that
-	// file would install a unit that starts nothing. Generate against the
-	// binary actually running this command instead.
-	self, err := os.Executable()
-	if err != nil {
-		self = "rookery"
-	}
-	unit := onboard.UnitFileFor(self, o.cfg.Data.Dir)
-	if packaged, ok := onboard.FindPackagedUnit(); ok && self == "/usr/bin/rookery" {
-		if b, err := os.ReadFile(packaged); err == nil {
-			unit = string(b)
-		}
-	}
-	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
-		return fmt.Errorf("write unit: %w", err)
-	}
-	o.ok("wrote %s", unitPath)
-
-	for _, args := range [][]string{
-		{"systemctl", "--user", "daemon-reload"},
-		{"systemctl", "--user", "enable", "--now", "rookery"},
-	} {
-		if err := runArgs(args); err != nil {
-			o.info("`%s` failed: %v", strings.Join(args, " "), err)
-			o.later("enable the service: systemctl --user enable --now rookery")
-			return nil
-		}
-	}
-	o.ok("service enabled")
-
-	// Without lingering, a user unit stops when the last session closes — so a
-	// headless box reboots and the scheduler never comes back. The failure is
-	// invisible until an agent silently misses its schedule.
-	if err := runArgs([]string{"loginctl", "enable-linger"}); err != nil {
-		o.info("Could not enable lingering; the server will stop when you log out.")
-		o.later("run: loginctl enable-linger")
-	} else {
-		o.ok("lingering enabled — survives logout and reboot")
-	}
+	o.ok("Rookery will start automatically")
 	return nil
 }
 
