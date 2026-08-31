@@ -95,11 +95,23 @@ func onPath(bin string) func() (string, bool) {
 // --no-pdf-header-footer is not cosmetic: without it Chromium stamps the print
 // date and the source file:// URL onto every page, so an exported note carried a
 // temp-file path in its header.
+//
+// --disable-dev-shm-usage is here for the same reason internal/browser/host.go
+// sets it: a container's /dev/shm defaults to 64 MB, which a full Chromium
+// exceeds, and it then hangs rather than reporting anything. The symptom is the
+// worst available — the process sits there until pdfTimeout kills it, so the
+// error surfaces as "signal: killed" after 30 seconds with nothing naming shared
+// memory. It cost a red CI gate to find: TestToPDFWithARealEngine failed on
+// every runner whose image ships /usr/bin/chromium, and passed everywhere the
+// bundled headless shell was used instead, because that build does not touch
+// /dev/shm the same way. The flag makes Chromium fall back to a temp file and is
+// harmless where /dev/shm is large enough.
 func chromiumArgs(binPath, in, out string) (string, []string) {
 	return binPath, []string{
 		"--headless",
 		"--no-sandbox",
 		"--disable-gpu",
+		"--disable-dev-shm-usage",
 		"--no-pdf-header-footer",
 		"--print-to-pdf=" + out,
 		in,
