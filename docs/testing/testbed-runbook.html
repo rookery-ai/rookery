@@ -1,0 +1,692 @@
+<title>Rookery Testbed Runbook</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#F5F7F9; --surface:#FFFFFF; --surface-2:#EDF1F5; --sunken:#E4EAF0;
+    --ink:#12171D; --body:#2C3540; --muted:#5D6B7A; --faint:#8493A3;
+    --line:#D9E1E9; --line-strong:#C2CDD8;
+    --ember:#C4560F; --ember-soft:#FBEDE3; --ember-line:#EFC7A9;
+    --ok:#1F6B4D; --ok-soft:#E4F1EA;
+    --warn:#8A5A00; --warn-soft:#FBF0DA;
+    --crit:#A81E17; --crit-soft:#FBE6E4;
+    --code-bg:#151C24; --code-ink:#DCE5EE; --code-faint:#7C8CA0;
+    --shadow:0 1px 2px rgba(18,23,29,.05),0 8px 24px -12px rgba(18,23,29,.18);
+    --r:10px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0D1116; --surface:#141A21; --surface-2:#1B222B; --sunken:#10161C;
+      --ink:#EEF3F8; --body:#C8D3DE; --muted:#93A1B1; --faint:#6F7E8F;
+      --line:#26303A; --line-strong:#37434F;
+      --ember:#F08840; --ember-soft:#2B1B10; --ember-line:#5A3418;
+      --ok:#5FC195; --ok-soft:#122A20;
+      --warn:#DCA43C; --warn-soft:#2A2011;
+      --crit:#F0736A; --crit-soft:#2E1614;
+      --code-bg:#0A0E13; --code-ink:#D3DDE8; --code-faint:#6A7A8C;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1116; --surface:#141A21; --surface-2:#1B222B; --sunken:#10161C;
+    --ink:#EEF3F8; --body:#C8D3DE; --muted:#93A1B1; --faint:#6F7E8F;
+    --line:#26303A; --line-strong:#37434F;
+    --ember:#F08840; --ember-soft:#2B1B10; --ember-line:#5A3418;
+    --ok:#5FC195; --ok-soft:#122A20;
+    --warn:#DCA43C; --warn-soft:#2A2011;
+    --crit:#F0736A; --crit-soft:#2E1614;
+    --code-bg:#0A0E13; --code-ink:#D3DDE8; --code-faint:#6A7A8C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--body);
+    font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15.5px; line-height:1.62; margin:0;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4{font-family:"Archivo",ui-sans-serif,system-ui,sans-serif;color:var(--ink);text-wrap:balance;margin:0;line-height:1.2}
+  code,kbd,pre{font-family:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--ember);text-underline-offset:2px}
+  :focus-visible{outline:2px solid var(--ember);outline-offset:2px;border-radius:3px}
+
+  .wrap{max-width:1320px;margin:0 auto;padding:0 28px 120px;display:grid;grid-template-columns:236px minmax(0,1fr);gap:44px;align-items:start}
+  @media(max-width:960px){.wrap{grid-template-columns:minmax(0,1fr);gap:0}}
+
+  /* ---------- masthead ---------- */
+  .mast{grid-column:1/-1;padding:52px 0 34px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:"JetBrains Mono",monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ember);margin:0 0 14px}
+  .mast h1{font-size:clamp(30px,4.4vw,46px);font-weight:700;letter-spacing:-.022em}
+  .mast p.lede{max-width:64ch;color:var(--muted);font-size:17px;margin:14px 0 0}
+  .mast-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .tag{font-family:"JetBrains Mono",monospace;font-size:11.5px;padding:4px 9px;border:1px solid var(--line-strong);border-radius:5px;color:var(--muted);background:var(--surface)}
+  .tag b{color:var(--ink);font-weight:500}
+
+  /* ---------- rail ---------- */
+  .rail{position:sticky;top:20px;align-self:start}
+  @media(max-width:960px){.rail{position:static;margin:26px 0 8px}}
+  .rail-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
+  .rail h4{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);font-weight:600;margin-bottom:12px}
+  .navlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+  .navlist a{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;padding:7px 8px;border-radius:6px;color:var(--body);text-decoration:none;font-size:13.5px}
+  .navlist a:hover{background:var(--surface-2);color:var(--ink)}
+  .navlist .n{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--faint)}
+  .navlist .c{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+  .navlist a.full .c{color:var(--ok)}
+  .navlist a.full .n{color:var(--ok)}
+
+  .meter{height:5px;background:var(--sunken);border-radius:99px;overflow:hidden;margin:14px 0 8px}
+  .meter i{display:block;height:100%;background:var(--ember);border-radius:99px;transition:width .3s ease;width:0}
+  .meter.done i{background:var(--ok)}
+  .rail-stat{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
+  .btn{margin-top:14px;width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);border-radius:6px;cursor:pointer}
+  .btn:hover{color:var(--crit);border-color:var(--crit)}
+
+  /* ---------- phases ---------- */
+  .phase{padding-top:52px;scroll-margin-top:20px}
+  .phase-head{display:flex;gap:16px;align-items:baseline;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:8px}
+  .phase-num{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ember);font-weight:500;flex:none}
+  .phase-head h2{font-size:26px;font-weight:700;letter-spacing:-.018em;flex:1}
+  .phase-time{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--faint);flex:none}
+  .phase-intro{color:var(--muted);max-width:70ch;margin:16px 0 0}
+
+  /* ---------- steps ---------- */
+  .step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-top:16px;overflow:hidden;box-shadow:var(--shadow)}
+  .step-top{display:grid;grid-template-columns:auto 1fr;gap:13px;padding:15px 18px;align-items:start}
+  .step-top label{display:flex;align-items:center;cursor:pointer;padding-top:1px}
+  .step-top input{appearance:none;width:19px;height:19px;border:1.5px solid var(--line-strong);border-radius:5px;background:var(--surface);cursor:pointer;flex:none;position:relative;transition:.15s}
+  .step-top input:hover{border-color:var(--ember)}
+  .step-top input:checked{background:var(--ok);border-color:var(--ok)}
+  .step-top input:checked::after{content:"";position:absolute;left:5.5px;top:2px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+  .step-title{font-family:"Archivo",sans-serif;font-weight:600;color:var(--ink);font-size:16.5px;line-height:1.34}
+  .step.done .step-title{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line-strong)}
+  .step-body{padding:0 18px 17px 50px}
+  .step-body>*+*{margin-top:11px}
+  .step-body p{margin:0;max-width:72ch}
+  .why{font-size:13.5px;color:var(--muted);border-left:2px solid var(--ember-line);padding-left:11px}
+  .why b{color:var(--ember);font-weight:600;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:2px}
+
+  /* ---------- code ---------- */
+  .cmd{position:relative;background:var(--code-bg);border-radius:8px;overflow:hidden}
+  .cmd pre{margin:0;padding:13px 52px 13px 15px;overflow-x:auto;color:var(--code-ink);font-size:13px;line-height:1.68}
+  .cmd .cp{position:absolute;top:8px;right:8px;font:inherit;font-family:"JetBrains Mono",monospace;font-size:10.5px;padding:4px 8px;background:rgba(255,255,255,.08);color:var(--code-faint);border:1px solid rgba(255,255,255,.13);border-radius:5px;cursor:pointer}
+  .cmd .cp:hover{color:#fff;background:rgba(255,255,255,.16)}
+  .cmd .cp.ok{color:#7BD6A8;border-color:#7BD6A8}
+  .out{background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:11px 14px;font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--muted);overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+  .out b{color:var(--ok);font-weight:500}
+  code:not(pre code){background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:4px;font-size:.87em;color:var(--ink);word-break:break-word}
+
+  /* ---------- callouts ---------- */
+  .note{border-radius:8px;padding:12px 15px;font-size:14px;border:1px solid}
+  .note p{margin:0;max-width:none}
+  .note p+p{margin-top:7px}
+  .note .lbl{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:500;display:block;margin-bottom:4px}
+  .note.i{background:var(--ember-soft);border-color:var(--ember-line);color:var(--body)} .note.i .lbl{color:var(--ember)}
+  .note.w{background:var(--warn-soft);border-color:var(--warn);color:var(--body)} .note.w .lbl{color:var(--warn)}
+  .note.c{background:var(--crit-soft);border-color:var(--crit);color:var(--body)} .note.c .lbl{color:var(--crit)}
+
+  /* ---------- tables ---------- */
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
+  th{text-align:left;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:500;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+  td{padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--body)}
+  tr:last-child td{border-bottom:0}
+  td b{color:var(--ink);font-weight:600}
+  .tw.compact table{min-width:400px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-family:"JetBrains Mono",monospace;font-size:10.5px;padding:2.5px 7px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .chip.e{background:var(--ember-soft);border-color:var(--ember-line);color:var(--ember)}
+
+  ul.tight{margin:0;padding-left:19px} ul.tight li{margin:4px 0;max-width:70ch}
+  hr.soft{border:0;border-top:1px dashed var(--line-strong);margin:22px 0}
+  .end{margin-top:60px;padding:26px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);text-align:center;color:var(--muted);font-size:14px}
+  @media print{.rail,.btn,.cp{display:none}.wrap{grid-template-columns:1fr}.step{break-inside:avoid}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Rookery · pre-launch verification</p>
+    <h1>Testbed Runbook</h1>
+    <p class="lede">Build a three-workspace Rookery testbed from nothing on a fresh host, with OAuth running through <code>localhost</code>. Work top to bottom — each phase assumes the one above is green. Your progress is saved in this browser.</p>
+    <div class="mast-meta">
+      <span class="tag">target <b>v0.11.0</b></span>
+      <span class="tag">public url <b>http://localhost:8080</b></span>
+      <span class="tag">workspaces <b>Testing · Personal · Work</b></span>
+      <span class="tag">charters <b>219</b></span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Phases">
+    <div class="rail-card">
+      <h4>Progress</h4>
+      <div class="meter" id="m-all"><i></i></div>
+      <div class="rail-stat"><span id="s-done">0 done</span><span id="s-all">0</span></div>
+      <ul class="navlist" id="nav"></ul>
+      <button class="btn" id="reset">Reset all progress</button>
+    </div>
+  </nav>
+
+  <main>
+
+  <!-- ================= PHASE 0 ================= -->
+  <section class="phase" id="p0">
+    <div class="phase-head"><span class="phase-num">00</span><h2>Host preparation</h2><span class="phase-time">~20 min</span></div>
+    <p class="phase-intro">A completely new host. Nothing here is Rookery-specific yet except the last two steps — the point is to reach a verified, empty install you can trust as a baseline.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="0.1"></label><div class="step-title">Confirm the host and reach it over SSH</div></div><div class="step-body">
+      <p>Linux gives you the filesystem sandbox; macOS and Windows do not, and this runbook assumes Landlock is present.</p>
+      <div class="cmd"><pre>uname -srm &amp;&amp; cat /etc/os-release | head -2</pre></div>
+      <div class="why"><b>Why</b>Off Linux, <code>sandbox.Supported()</code> is false and coder subprocesses run unconfined. Every isolation charter later assumes confinement is real.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="0.2"></label><div class="step-title">Open an SSH tunnel so <code>localhost</code> means the server</div></div><div class="step-body">
+      <p>This is the step that makes localhost OAuth work at all. Run it <em>on your laptop</em>, not the server, and leave it open for the whole runbook.</p>
+      <div class="cmd"><pre>ssh -L 8080:localhost:8080 &lt;user&gt;@&lt;new-host&gt;</pre></div>
+      <div class="note c"><span class="lbl">Read this before you start</span>
+        <p>OAuth redirect URIs are resolved <b>in your browser</b>. If you browse to <code>http://192.168.1.50:8080</code>, Google is handed a private IP and refuses it. The tunnel makes <code>http://localhost:8080</code> in your laptop's browser point at the server, so the URI Google receives is the one you registered.</p>
+        <p>Everything from here on assumes you open Rookery at <code>http://localhost:8080</code> and nothing else. Bookmark it now.</p>
+      </div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="0.3"></label><div class="step-title">Install Rookery</div></div><div class="step-body">
+      <div class="cmd"><pre>curl -fsSL https://rookery.cloud/install.sh | sh</pre></div>
+      <p>The installer fetches the release archive for your platform, verifies it against the release's <code>checksums.txt</code>, puts the binary on <code>PATH</code>, and offers the four host tools.</p>
+      <div class="why"><b>Under test</b>Accept the host tools when offered. This is the real first-install path and you only get to walk it once.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="0.4"></label><div class="step-title">Pin the public URL to localhost</div></div><div class="step-body">
+      <p>Set it before the first run so every OAuth callback is built against it.</p>
+      <div class="cmd"><pre>export ROOKERY_PUBLIC_URL=http://localhost:8080
+echo 'export ROOKERY_PUBLIC_URL=http://localhost:8080' &gt;&gt; ~/.bashrc</pre></div>
+      <div class="note i"><span class="lbl">Precedence</span><p>The instance URL in owner settings <b>overrides</b> this variable. If a connect flow later builds the wrong callback, check owner settings before you doubt the environment.</p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="0.5"></label><div class="step-title">Install the browser runtime</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery browser install</pre></div>
+      <p>Node plus the Playwright driver (134 MB) and Chromium (389 MB). Needed for the JS-page and search-fallback charters.</p>
+      <div class="note w"><span class="lbl">Linux only</span><p>Chromium needs shared libraries afterwards. If the install names missing ones, install them and re-run before moving on.</p></div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 1 ================= -->
+  <section class="phase" id="p1">
+    <div class="phase-head"><span class="phase-num">01</span><h2>Onboard &amp; first run</h2><span class="phase-time">~25 min</span></div>
+    <p class="phase-intro">The only phase that can never be repeated on a configured install. Walk it as a new user would and resist scripting around any step — this is the exact path a launch-day user takes.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="1.1"></label><div class="step-title">Run the interactive onboarding</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery onboard</pre></div>
+      <p>Generates keys, creates the owner, reports host tools, offers the browser, and offers a service unit.</p>
+      <div class="tw compact"><table><thead><tr><th>Watch for</th><th>Expected</th></tr></thead><tbody>
+        <tr><td><b>Browser step</b></td><td>Says <b>nothing</b> — it is already installed, and the silence is deliberate <span class="chip">TC-SETUP-2</span></td></tr>
+        <tr><td><b>Host tools</b></td><td>Reports "all present"</td></tr>
+        <tr><td><b>Length</b></td><td>Short enough to actually read <span class="chip">TC-SETUP-1</span></td></tr>
+      </tbody></table></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="1.2"></label><div class="step-title">Check the non-interactive mode reports without acting</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery onboard --non-interactive</pre></div>
+      <div class="out">Must describe what to do and <b>prompt nothing, change nothing</b>. <span style="color:var(--crit)">If it acts, that is a finding.</span> <span class="chip">TC-SETUP-3</span></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="1.3"></label><div class="step-title">Start the server and verify health</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery serve &amp;
+curl -s http://localhost:8080/healthz | python3 -m json.tool</pre></div>
+      <div class="out">{
+  "status": "<b>ok</b>",
+  "version": "v0.11.0",
+  "sandbox": { "supported": <b>true</b>, "enabled": <b>true</b>, "abi": 8 },
+  "coder_mode": "full",
+  "tools": { "python3": true, "rg": true, "pdftotext": true,
+             "tesseract": true, "browser": <b>true</b> }
+}</div>
+      <div class="note w"><span class="lbl">Do not proceed on a warning</span><p>A missing <code>python3</code> silently disables the agent-tool AST guardrail, so generated scripts run unchecked for the rest of the runbook. <span class="chip">TC-HLTH-1</span> <span class="chip">TC-HLTH-2</span></p></div>
+      <p><b>Record</b> version, commit, ABI and the five tool booleans. They head your results document.</p>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="1.4"></label><div class="step-title">Confirm a second owner is refused</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery owner bootstrap -u second -p irrelevant</pre></div>
+      <div class="out">Must refuse cleanly. Single-owner is the tenancy model — a second row is a bug. <span class="chip">TC-SETUP-10</span></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="1.5"></label><div class="step-title">Sign in and walk the setup wizard</div></div><div class="step-body">
+      <p>Open <code>http://localhost:8080</code> in your laptop's browser, through the tunnel.</p>
+      <ul class="tight">
+        <li>Before any workspace exists, owner surfaces work and workspace-scoped ones return <code>no_workspace</code> rather than an opaque error <span class="chip">TC-SETUP-11</span></li>
+        <li>The coder step has a working <b>Skip</b> <span class="chip">TC-SETUP-4</span></li>
+        <li>Finish <b>with</b> a coder → Done offers exactly one action, <b>"Explore what you can do!"</b>, opening a chat with the question already sent <span class="chip">TC-SETUP-5</span></li>
+        <li>Refresh that chat → the question is <b>not</b> re-asked and no second coder call is spent <span class="chip">TC-SETUP-6</span></li>
+      </ul>
+      <div class="why"><b>The one to actually read</b>Ask that chat "what is the purpose of this platform?" — the reply must contain <b>no</b> <code>[CHAT]</code>, <code>[SILENT]</code> or <code>[STATE]</code> markers. Thirty of 192 assistant rows leaked one on a live install. <span class="chip">TC-SETUP-8</span></div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 2 ================= -->
+  <section class="phase" id="p2">
+    <div class="phase-head"><span class="phase-num">02</span><h2>Credentials &amp; localhost OAuth</h2><span class="phase-time">~45 min</span></div>
+    <p class="phase-intro">Gather everything before building workspaces — each item blocks one. Most of the time here is spent waiting on third parties, so start the slow ones first.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="2.1"></label><div class="step-title">Register the Google OAuth client — one redirect URI for the whole family</div></div><div class="step-body">
+      <p>In Google Cloud Console → Credentials → <b>Create OAuth client ID</b> → <b>Web application</b>. Add exactly this authorized redirect URI:</p>
+      <div class="cmd"><pre>http://localhost:8080/dashboard/connectors/services/callback/google</pre></div>
+      <div class="note i"><span class="lbl">This is the payoff of localhost</span>
+        <p>Google accepts plain <code>http</code> <b>only</b> for loopback. On any other host it demands <code>https</code>, which on a home server means a reverse proxy and a real certificate. Through the tunnel, <code>localhost</code> is a first-class redirect target and none of that is needed.</p>
+        <p>Rookery's own preflight agrees: <code>localhost</code> classifies as <b>loopback</b>, not as a reserved name, so Google's <code>require_public_host</code> policy passes and the Connect button is not blocked.</p>
+      </div>
+      <div class="note w"><span class="lbl">One URI, not eight</span>
+        <p>The redirect URI is scoped to the OAuth <b>application</b>, not the service. Gmail, Calendar, Drive, Sheets, Docs, Tasks and YouTube are aliased children of the <code>google</code> app, so they all call back to <code>/callback/google</code>. Registering one URI covers the family; each service still consents separately.</p>
+        <p>Use the hostname <code>localhost</code>, not <code>127.0.0.1</code> — Google's web-application client type is fussier about the raw IP form.</p>
+      </div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="2.2"></label><div class="step-title">Create three Telegram bots</div></div><div class="step-body">
+      <p>Message <b>@BotFather</b> → <code>/newbot</code>, three times. Suggested names: <code>…_personal_bot</code>, <code>…_testing_bot</code>, <code>…_work_bot</code>.</p>
+      <div class="why"><b>Why three</b><code>platform_connections</code> is unique per <code>(workspace_id, platform)</code>. One token cannot serve two workspaces, so cross-workspace chat parity needs one bot each.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="2.3"></label><div class="step-title">Collect the API keys</div></div><div class="step-body">
+      <div class="tw"><table><thead><tr><th>Key</th><th>For</th><th>Why it is on the list</th></tr></thead><tbody>
+        <tr><td><b>OpenRouter</b></td><td>all three</td><td>The coder's own key — nothing thinks without it</td></tr>
+        <tr><td><b>A second LLM provider</b></td><td>Personal or Work</td><td>So the three workspaces do not share one provider</td></tr>
+        <tr><td><b>Stripe (test mode)</b></td><td>Testing</td><td>The overbind fixture — see phase 06</td></tr>
+        <tr><td><b>SendGrid</b> or Mailgun</td><td>Work, Testing</td><td>Email send, and the <code>public_write</code> approval gate</td></tr>
+        <tr><td><b>Notion</b></td><td>Testing</td><td>The <code>token_expiry: never</code> path</td></tr>
+        <tr><td><b>Brave Search</b></td><td>Testing</td><td>The keyed search provider ahead of the keyless cascade</td></tr>
+      </tbody></table></div>
+      <p>Open-Meteo and Wikipedia need no credential at all — they cover the keyless <code>auth.kind: none</code> path.</p>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="2.4"></label><div class="step-title">Stand up an MCP server on the LAN</div></div><div class="step-body">
+      <p>Any HTTP MCP server with a static bearer token. Note its URL and token.</p>
+      <div class="note i"><span class="lbl">Self-host it — do not point at a public one</span>
+        <p>MCP deliberately bypasses the private-address dial guard, exactly like connectors, so a LAN address works. The decisive advantage is that <b>you can change its tool list on purpose</b> — the only way to test that first-sync tools arrive enabled while later-sync tools arrive disabled, that a vanished tool is marked missing rather than deleted, and that an over-cap list says how many were held back.</p>
+        <p>A third-party server you cannot mutate tests about half of this surface.</p>
+      </div>
+      <div class="why"><b>Fresh ground</b>Zero MCP servers have ever been configured on a Rookery install. This whole area is unexercised.</div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 3 ================= -->
+  <section class="phase" id="p3">
+    <div class="phase-head"><span class="phase-num">03</span><h2>Personal — the launch-asset workspace</h2><span class="phase-time">~1 h</span></div>
+    <p class="phase-intro">Built first, because its content takes real effort and its screenshots gate the launch. This is the only workspace whose <em>content quality</em> is a requirement rather than a convenience.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="3.1"></label><div class="step-title">Create the workspace and set its identity</div></div><div class="step-body">
+      <div class="tw compact"><table><tbody>
+        <tr><td><b>Name</b></td><td><code>Personal</code></td></tr>
+        <tr><td><b>Icon</b></td><td>A distinct preset — it must be tellable from the others at 20 px in the rail</td></tr>
+        <tr><td><b>Master password</b></td><td>Distinct from the other two workspaces</td></tr>
+        <tr><td><b>Profile</b></td><td>Real name · Skopje · <code>Europe/Skopje</code> · English · a tone note</td></tr>
+        <tr><td><b>Coder</b></td><td><code>api</code> + a <b>strong</b> model</td></tr>
+      </tbody></table></div>
+      <div class="why"><b>Two deliberate choices</b>A distinct master password, or the isolation charter passes without proving anything. A strong model, because this workspace's prose is going into screenshots.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="3.2"></label><div class="step-title">Connect Google through localhost, end to end</div></div><div class="step-body">
+      <p>Connections → Google → paste the client ID and secret → Connect. Consent in the browser, land back in the app.</p>
+      <div class="tw compact"><table><thead><tr><th>Check</th><th>Expected</th></tr></thead><tbody>
+        <tr><td>Redirect URI shown in setup steps</td><td>Copyable <b>code</b>, not a link <span class="chip">TC-CONN-1</span></td></tr>
+        <tr><td>Preflight warnings</td><td>None — localhost is loopback</td></tr>
+        <tr><td>After consent</td><td>Status <b>ACTIVE</b>, redirected to the connections page</td></tr>
+      </tbody></table></div>
+      <div class="note c"><span class="lbl">If consent fails</span><p>Compare the URI Google reports with the one you registered, character for character. The commonest cause is browsing at the LAN IP instead of <code>localhost</code> — the tunnel exists precisely to prevent this.</p></div>
+      <p>Then connect <b>Spotify</b>, <b>Open-Meteo</b> and <b>Wikipedia</b>. Chosen because they render well — a connections page of recognisable, colourful logos is itself a screenshot.</p>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="3.3"></label><div class="step-title">Connect Telegram bot #1 and sweep the commands</div></div><div class="step-body">
+      <p>Paste the bot token, then DM the bot and run every command: <code>/agent</code> <code>/skill</code> <code>/run</code> <code>/secret</code> <code>/remind</code> <code>/chat</code> <code>/memory</code> <code>/pending</code>.</p>
+      <div class="out">Also send an unknown command and malformed arguments — a helpful error, never a crash. <span class="chip">TC-APP-2</span> <span class="chip">TC-APP-3</span></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="3.4"></label><div class="step-title">Seed the showcase knowledge base — about 50 notes</div></div><div class="step-body">
+      <p>It has to look like a real person's knowledge base after a year of use, not generated filler.</p>
+      <div class="cmd"><pre>README.md                            home note — columns, callout, links out
+memory/USER.md  SOUL.md  GENERAL.md  filled in properly, never placeholders
+notes/home-server/runbook.md         service table, code blocks, callouts
+notes/home-server/network-map.md     table + block alignment
+notes/projects/rookery-launch.md     task lists, toggles, a decision callout
+notes/projects/rookery-launch/pricing-research.md
+notes/reading/2026-reading-list.md   table w/ ratings, colour marks
+notes/reading/&lt;book&gt;.md  x4          backlinks into the list
+notes/travel/japan-2026.md           2-column layout w/ images, itinerary
+notes/recipes/*.md  x6               ingredient tables, resized images
+notes/finance/household-bills.md     table, a warning callout
+notes/meetings/2026-08-*.md  x8      action items, [[people]] backlinks
+notes/people/*.md  x5                backlink targets
+notes/health/training-log.md         date table
+notes/ideas/*.md  x6                 short, varied</pre></div>
+      <p>Between them these must exercise <b>callouts, toggle lists, block alignment, 2/3/4-column layouts, both colour marks, underline, resized images, a pipe-bearing table cell, wikilinks with live backlinks, code blocks and task lists</b> — each is a distinct serializer path and a distinct screenshot.</p>
+      <div class="note c"><span class="lbl">Write every note through the app, never onto disk</span>
+        <p>Save each note via the editor or <code>PUT /api/v1/kb/note</code>. A note whose markdown is not <b>canonical</b> opens <b>read-only</b> — and hand-authored callouts, toggles and alignment reliably produce the non-canonical spellings.</p>
+        <p>A read-only note looks broken in exactly the screenshot it was written for. Before leaving this phase, open all ~50 and confirm every one is editable. <span class="chip">TC-KB-9</span></p>
+      </div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="3.5"></label><div class="step-title">Build the two Personal agents</div></div><div class="step-body">
+      <div class="tw"><table><thead><tr><th></th><th>Ask it in these words</th><th>Exercises</th></tr></thead><tbody>
+        <tr><td><b>S8</b></td><td>"Turn my chats into proper notes in my knowledge base each night."</td><td>KB curation, vault write scope, live-editor adoption</td></tr>
+        <tr><td><b>S9</b></td><td>"Log into the water utility and tell me when a new bill is out."</td><td>Secret injection, monthly schedule, browser actions</td></tr>
+      </tbody></table></div>
+      <div class="why"><b>Say it like a person</b>Describe every agent the way a non-technical owner would. Never say "script", "cron" or "vault". A scenario that only works when phrased technically is itself a finding — write it down.</div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 4 ================= -->
+  <section class="phase" id="p4">
+    <div class="phase-head"><span class="phase-num">04</span><h2>Work — the second tenant</h2><span class="phase-time">~40 min</span></div>
+    <p class="phase-intro">Its job is to prove isolation and to make timezone behaviour visible.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="4.1"></label><div class="step-title">Create it on a deliberately foreign timezone</div></div><div class="step-body">
+      <div class="tw compact"><table><tbody>
+        <tr><td><b>Name</b></td><td><code>Work</code></td></tr>
+        <tr><td><b>Timezone</b></td><td><code>America/New_York</code> — deliberately not yours</td></tr>
+        <tr><td><b>Coder</b></td><td><code>api</code> on a <b>third</b> provider</td></tr>
+        <tr><td><b>Master password</b></td><td>Distinct again</td></tr>
+        <tr><td><b>Memory</b></td><td><code>memory/USER.md</code> in a work voice</td></tr>
+      </tbody></table></div>
+      <div class="note i"><span class="lbl">The whole reason for a foreign zone</span><p>A timezone bug and a correct conversion produce the <b>same wall-clock</b> when every tenant shares the server's zone. Six or seven hours of offset is what makes the difference visible in a single screenshot.</p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="4.2"></label><div class="step-title">Connect Google Workspace and SendGrid — and nothing else</div></div><div class="step-body">
+      <p>Consent again with the work account. Same registered redirect URI; a separate consent and a separate connection row.</p>
+      <div class="why"><b>Deliberately narrow</b>A second tenant with a different, smaller connection set is what makes the isolation and run-vs-build exposure charters mean anything.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="4.3"></label><div class="step-title">Connect Telegram bot #3 and seed ~20 work notes</div></div><div class="step-body">
+      <p><code>notes/clients/*.md</code>, <code>notes/meetings/*.md</code>, <code>notes/processes/onboarding.md</code>, <code>notes/processes/invoicing.md</code>. Small on purpose — it is the contrast case against Testing's bulk.</p>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="4.4"></label><div class="step-title">Build the three Work agents</div></div><div class="step-body">
+      <div class="tw"><table><thead><tr><th></th><th>Ask it in these words</th><th>Exercises</th></tr></thead><tbody>
+        <tr><td><b>S4</b></td><td>"Every morning, sort my unread mail and draft replies to the ones that need one — don't send anything."</td><td>Gmail connector, email triage, build-phase mutating guard</td></tr>
+        <tr><td><b>S5</b></td><td>"Send the weekly summary to my team, but let me approve it first."</td><td><code>public_write</code>, approval gate, park → approve</td></tr>
+        <tr><td><b>S6</b></td><td>"Every weekday at 8, tell me my calendar, the weather, and anything important in my notes."</td><td>Multi-connector, KB read, timezone, scheduled delivery</td></tr>
+      </tbody></table></div>
+      <div class="note c"><span class="lbl">The critical assertion in this phase</span><p>After S6 builds, read its schedule row. It must be <code>0 8 * * 1-5</code> with timezone <code>America/New_York</code>. If the model helpfully <b>pre-converted</b> to server time, that is the recorded bug that fired agents two hours early, twice. <span class="chip">TC-SCH-1</span></p></div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 5 ================= -->
+  <section class="phase" id="p5">
+    <div class="phase-head"><span class="phase-num">05</span><h2>Testing — the crash-test workspace</h2><span class="phase-time">~1 h</span></div>
+    <p class="phase-intro">Everything unpleasant lives here. Nothing in it needs to look good.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.1"></label><div class="step-title">Create it on a deliberately weak model</div></div><div class="step-body">
+      <div class="tw compact"><table><tbody>
+        <tr><td><b>Timezone</b></td><td><code>Europe/Skopje</code></td></tr>
+        <tr><td><b>Coder</b></td><td><code>api</code> + OpenRouter on a <b>cheap, weak</b> model</td></tr>
+        <tr><td><b>Secrets</b></td><td><code>CODER_KEY_OPENROUTER</code>, <code>SEARCH_KEY_BRAVE</code>, <code>TEST_LOGIN_PASSWORD</code></td></tr>
+      </tbody></table></div>
+      <div class="why"><b>Weak on purpose</b>The truncation caveat, the missing-header fallbacks and the verification nudge only ever fire on models that actually fail. A strong model here would leave all three untested.</div>
+      <p>Keep a <b>local CLI coder</b> configuration ready to switch to — you need it for the backend-parity runs in phase 07.</p>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.2"></label><div class="step-title">Connect the full fixture set</div></div><div class="step-body">
+      <p>Google · <b>Stripe (test mode)</b> · SendGrid · Notion · AdGuard at its LAN address · Open-Meteo · Wikipedia.</p>
+      <div class="why"><b>AdGuard earns its place</b>It sits at a private address, which proves connectors deliberately bypass the dial guard that the browser tools enforce.</div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.3"></label><div class="step-title">Add the MCP server and sync it</div></div><div class="step-body">
+      <p>Connections → MCP servers → add the URL and token → <b>Test &amp; sync</b>.</p>
+      <div class="out">The returned tool list <b>is</b> the review step — read the server-authored descriptions before enabling anything. First sync: tools arrive <b>enabled</b>. <span class="chip">TC-MCP-1</span> <span class="chip">TC-MCP-2</span></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.4"></label><div class="step-title">Generate the performance corpus</div></div><div class="step-body">
+      <p>Generate from a fixed random seed so two builds are byte-identical and timings compare.</p>
+      <div class="tw"><table><thead><tr><th></th><th>Fixture</th><th>Shape</th><th>Tests</th></tr></thead><tbody>
+        <tr><td><b>B1</b></td><td>reporting/api-transactions.md</td><td>~150 KB, ~100 rows, one JSON column ≈88% of bytes</td><td>Dominance warning, modest-column projection</td></tr>
+        <tr><td><b>B2</b></td><td>reporting/expenses-2026.md</td><td>10 000 rows x 8 modest columns</td><td>Group/sum/avg at scale</td></tr>
+        <tr><td><b>B3</b></td><td>handbook/platform-guide.md</td><td>~500 KB, 300+ headings</td><td>Heading outline, section reads</td></tr>
+        <tr><td><b>B4</b></td><td>edge/exactly-1mib.txt + over</td><td>Exactly 1 MiB, and 1 MiB + 1 byte</td><td>File-kind boundary</td></tr>
+        <tr><td><b>B5</b></td><td>edge/photo.bin</td><td>Non-UTF8 bytes</td><td>Binary download-only panel</td></tr>
+        <tr><td><b>B6</b></td><td>mesh/</td><td>200 notes, dense links, some broken</td><td>Backlinks, unresolved links</td></tr>
+        <tr><td><b>B7</b></td><td>archive/</td><td>~2000 notes, 25 folders, 8 deep</td><td>Tree, search latency, folder summary</td></tr>
+        <tr><td><b>B8</b></td><td>edge/unicode.md</td><td>Emoji, RTL, CJK, 200-char filename</td><td>Path handling, display</td></tr>
+        <tr><td><b>B9</b></td><td>edge/dates.md</td><td>Out-of-order month column</td><td>Date grouping by key, not value</td></tr>
+      </tbody></table></div>
+      <div class="note i"><span class="lbl">B1 is the most important file in the testbed</span><p>It reproduces the exact shape that exhausted a 30-turn budget and returned an <b>empty completion</b>: a file that is huge only because one column is a blob, while the nine columns that answer real questions total 8 KB. It is the fixture that proves the fix rather than merely exercising the code.</p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.5"></label><div class="step-title">Record the performance baseline</div></div><div class="step-body">
+      <p>Measure now, before any tuning, so a later regression has something to be a regression against.</p>
+      <div class="cmd"><pre>KB tree first paint          _______ ms
+search p50 / p95             _______ / _______ ms
+note open (500 KB doc)       _______ ms
+file map on B1 / B2          _______ / _______ ms
+table query group-by on B2   _______ ms</pre></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="5.6"></label><div class="step-title">Connect Telegram bot #2 and build the seven Testing agents</div></div><div class="step-body">
+      <div class="tw"><table><thead><tr><th></th><th>Ask it in these words</th><th>Tier</th></tr></thead><tbody>
+        <tr><td><b>S1</b></td><td>"Watch this page and tell me when it changes."</td><td>1</td></tr>
+        <tr><td><b>S2</b></td><td>Same, for a JavaScript-rendered site</td><td>1–2</td></tr>
+        <tr><td><b>S3</b></td><td>"Check pazar3 for VW Golf under €5000 in Skopje and message me only new ones."</td><td>2</td></tr>
+        <tr><td><b>S7</b></td><td>A task only the MCP server can do</td><td>1–2</td></tr>
+        <tr><td><b>S10</b></td><td>"How much did I spend last month, by category?" over B1</td><td>1</td></tr>
+        <tr><td><b>S11</b></td><td>"Only tell me if the disk goes over 80% — otherwise stay quiet."</td><td>1</td></tr>
+        <tr><td><b>S12</b></td><td>A parent agent that calls S1</td><td>1</td></tr>
+      </tbody></table></div>
+      <div class="note w"><span class="lbl">Judge the tier, not just the outcome</span><p>A helper script written for S1 or S11 is a <b>failure</b>, not a stylistic quibble — those are reasoning-only tasks and the platform is supposed to pick the simplest shape that solves them.</p></div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 6 ================= -->
+  <section class="phase" id="p6">
+    <div class="phase-head"><span class="phase-num">06</span><h2>The deliberate fixtures</h2><span class="phase-time">~30 min</span></div>
+    <p class="phase-intro">Seven shapes built on purpose. Two of them cannot be produced through the interface at all — which is exactly the point: they are the shapes that arrive from migration and from model error, not from a user.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="6.1"></label><div class="step-title">F1 — the credential overbind fixture</div></div><div class="step-body">
+      <p>In Testing, the Stripe connection's account label must be literally <code>test</code>. Then build a DNS or uptime watchdog agent and let the model write a connections header containing the word "test".</p>
+      <div class="note c"><span class="lbl">What must happen</span><p><b>Stripe must not be bound.</b> A binding is a grant of live payment credentials. The recorded bug matched the substring <code>test</code> against a short shared identity and gave a DNS watchdog the owner's Stripe access. <span class="chip">TC-BIND-1</span></p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="6.2"></label><div class="step-title">F2 — an empty schedule timezone</div></div><div class="step-body">
+      <p>Create a schedule normally, then blank its timezone directly in the database.</p>
+      <div class="cmd"><pre>UPDATE agent_schedules SET timezone='' WHERE agent_id='&lt;id&gt;';</pre></div>
+      <div class="why"><b>Why SQL</b>Every new schedule now writes a zone, so this row <b>cannot</b> arise from the interface. That is precisely the pre-migration shape under test: empty must mean the host's local zone, and must not re-time a schedule that was already correct. <span class="chip">TC-TZ-5</span></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="6.3"></label><div class="step-title">F3 — a corrupted agent state file</div></div><div class="step-body">
+      <p>Take a working agent's <code>state.md</code> and move its JSON <b>one line below</b> the fence. Then run the agent.</p>
+      <div class="note c"><span class="lbl">The most expensive bug on record</span><p>This exact shape made agents conclude they had never run, re-derive a baseline and go silent — permanently, invisibly, with <code>exit 0</code> and no warnings, at roughly <b>930k tokens an hour</b>. It must now recover, re-render the file canonically, and preserve any prose notes. <span class="chip">TC-RUN-9</span></p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="6.4"></label><div class="step-title">F4–F7 — the remaining four</div></div><div class="step-body">
+      <ul class="tight">
+        <li><b>F4</b> — a file of exactly 1 MiB and one of 1 MiB + 1 byte (file-kind boundary)</li>
+        <li><b>F5</b> — a file of raw non-UTF8 bytes (binary download-only panel)</li>
+        <li><b>F6</b> — several <code>google_*</code> connections all carrying the same address, so a family identity must not bind the whole family <span class="chip">TC-BIND-2</span></li>
+        <li><b>F7</b> — fixture B1 itself, already generated in phase 05</li>
+      </ul>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 7 ================= -->
+  <section class="phase" id="p7">
+    <div class="phase-head"><span class="phase-num">07</span><h2>Run the test waves</h2><span class="phase-time">the long pole</span></div>
+    <p class="phase-intro">219 charters live in the companion specs. This is the order to run them — cheap and structural first, expensive last.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="7.1"></label><div class="step-title">W2 — isolation and backup, immediately</div></div><div class="step-body">
+      <p>Do this the moment all three workspaces exist. It is five minutes, and if isolation is broken every later result is suspect.</p>
+      <ul class="tight">
+        <li>A Testing agent must not reach Personal's vault, the database, the config, or the system key</li>
+        <li>Entering Work with Personal's password is refused, and re-prompted on <b>every</b> switch</li>
+        <li>Global search in Testing returns only Testing content</li>
+        <li><code>rookery backup</code> then <code>rookery backup verify</code> — it decrypts and checksums without restoring, proving both the passphrase and the archive</li>
+      </ul>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="7.2"></label><div class="step-title">W3–W9 — the structural waves</div></div><div class="step-body">
+      <div class="tw"><table><thead><tr><th>Wave</th><th>Area</th><th>Where</th></tr></thead><tbody>
+        <tr><td>W3</td><td>Knowledge base</td><td>Testing, Personal</td></tr>
+        <tr><td>W4</td><td>Reminders &amp; timezones</td><td>Personal, <b>Work</b></td></tr>
+        <tr><td>W5</td><td>Connections &amp; the approval gate</td><td>Testing, Work</td></tr>
+        <tr><td>W6</td><td>MCP</td><td>Testing</td></tr>
+        <tr><td>W7</td><td>Chat, search, browser</td><td>Testing, Personal</td></tr>
+        <tr><td>W8</td><td>Skills</td><td>Testing</td></tr>
+        <tr><td>W9</td><td>Chat apps &amp; UI parity</td><td>all three</td></tr>
+      </tbody></table></div>
+      <div class="note w"><span class="lbl">Restart-dependent charters</span><p>Several need the server stopped: overdue reminders delivered on boot, an hourly agent collapsing three missed days into <b>one</b> run, and a run killed mid-flight retried <b>exactly once</b>. Batch them into a single restart rather than cycling the server repeatedly.</p></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="7.3"></label><div class="step-title">W10 — the agent designer charter</div></div><div class="step-body">
+      <p>The centerpiece, and the reason everything else runs first.</p>
+      <div class="note c"><span class="lbl">Budget before you start</span><p>A create build now runs a <b>dry run</b> — it executes the finished agent once before showing it to you. One measured build exceeded <b>1.5M tokens</b>. Finding a broken connector <em>during</em> an expensive build wastes the build, which is why W5 and W6 come first.</p></div>
+      <p>Test the cheap paths with <b>aborted</b> builds — approval-word matching, the plan-ready signal appearing and retracting, the blank-bubble case, and the dead-end invariant. Only the twelve scenarios run to completion.</p>
+      <div class="tw compact"><table><thead><tr><th>The one people miss</th><th>Expected</th></tr></thead><tbody>
+        <tr><td>Reply <code>"Approved"</code> at the review gate</td><td>It must <b>save</b>. If the word is unmatched it does not fail — it silently <b>rebuilds</b>, and nothing reports that.</td></tr>
+        <tr><td>Scroll up during a long build</td><td>The action bar stays reachable. This was diagnosed twice as logic and was layout.</td></tr>
+        <tr><td>In every reachable state</td><td>A button is visible <b>or</b> the composer is usable. Never neither.</td></tr>
+      </tbody></table></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="7.4"></label><div class="step-title">Record what each run cost</div></div><div class="step-body">
+      <div class="cmd"><pre>grep "agentrunner: run finished" logs/server.log
+grep "build_id=&lt;id&gt;"            logs/server.log
+grep "chat: turn finished"        logs/server.log</pre></div>
+      <div class="why"><b>Not only a test result</b>The portfolio's total token spend answers whether the designer is something people use casually or ration — which is a launch-copy fact worth knowing before you write the launch copy.</div>
+    </div></div>
+  </section>
+
+  <!-- ================= PHASE 8 ================= -->
+  <section class="phase" id="p8">
+    <div class="phase-head"><span class="phase-num">08</span><h2>Capture the launch assets</h2><span class="phase-time">~2 h</span></div>
+    <p class="phase-intro">Run the interface-polish wave immediately before this, never weeks earlier — it is the wave that decides whether the screenshots are usable.</p>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="8.1"></label><div class="step-title">Clear the polish gate</div></div><div class="step-body">
+      <ul class="tight">
+        <li>Every page at 1280, 1440, 1920 and 2560 wide — no dead gutter, no sideways page scroll</li>
+        <li>Light, dark, <b>and</b> the OS "system" default with no explicit choice — three states, not two</li>
+        <li>Every button shows a pointer cursor on hover</li>
+        <li>Every dialog honours its own width</li>
+        <li>Bubble-toolbar indicators <b>update</b> as you toggle, rather than freezing at mount</li>
+      </ul>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="8.2"></label><div class="step-title">Shoot the list</div></div><div class="step-body">
+      <p>From <b>Personal</b>, with <b>Work</b> for the multi-tenant shots. Both themes, at 1440 and 2560.</p>
+      <div class="tw compact"><table><tbody>
+        <tr><td>01</td><td>KB browser on a well-formatted note</td></tr>
+        <tr><td>02</td><td>Editor with the bubble toolbar and AI actions open</td></tr>
+        <tr><td>03</td><td>A callout / columns / toggle note</td></tr>
+        <tr><td>04</td><td>Agent designer mid-conversation, settled plan, Build button showing</td></tr>
+        <tr><td>05</td><td>The spec view</td></tr>
+        <tr><td>06</td><td>A finished build's review card</td></tr>
+        <tr><td>07</td><td>An agent run transcript with tool calls</td></tr>
+        <tr><td>08</td><td>Run list showing silent / failed / normal rows side by side</td></tr>
+        <tr><td>09</td><td>Connections page, logos and categories</td></tr>
+        <tr><td>10</td><td>MCP servers section</td></tr>
+        <tr><td>11</td><td>Inbox with notifications grouped by day</td></tr>
+        <tr><td>12</td><td>Workspace switcher, three distinct icons</td></tr>
+        <tr><td>13</td><td>Chat answering from the knowledge base</td></tr>
+        <tr><td>14</td><td>Telegram beside the same conversation in the app</td></tr>
+      </tbody></table></div>
+    </div></div>
+
+    <div class="step"><div class="step-top"><label><input type="checkbox" data-id="8.3"></label><div class="step-title">Take a final backup of the finished testbed</div></div><div class="step-body">
+      <div class="cmd"><pre>rookery backup
+rookery backup verify &lt;name&gt;</pre></div>
+      <p>You have spent hours building this state. Snapshot it so the next rebuild starts from something, and keep the archive off the box.</p>
+    </div></div>
+  </section>
+
+  <div class="end">All eight phases complete. Write up findings against the charter IDs, then decide what blocks launch.</div>
+
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var KEY="rookery.testbed.v1";
+  var PHASES=[
+    ["p0","Host preparation"],["p1","Onboard & first run"],["p2","Credentials & OAuth"],
+    ["p3","Personal"],["p4","Work"],["p5","Testing"],
+    ["p6","Fixtures"],["p7","Test waves"],["p8","Launch assets"]
+  ];
+
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY))||{}; }catch(e){ return {}; } }
+  function save(s){ try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){} }
+  var state=load();
+
+  var boxes=Array.prototype.slice.call(document.querySelectorAll('.step-top input[type=checkbox]'));
+
+  // ---- build the rail nav
+  var nav=document.getElementById('nav');
+  PHASES.forEach(function(p,i){
+    var li=document.createElement('li');
+    var a=document.createElement('a');
+    a.href='#'+p[0];
+    a.innerHTML='<span class="n">'+String(i).padStart(2,'0')+'</span><span>'+p[1]+'</span><span class="c" data-c="'+p[0]+'"></span>';
+    li.appendChild(a); nav.appendChild(li);
+  });
+
+  function refresh(){
+    var done=0;
+    boxes.forEach(function(b){
+      var on=!!state[b.dataset.id];
+      b.checked=on;
+      b.closest('.step').classList.toggle('done',on);
+      if(on) done++;
+    });
+    var total=boxes.length;
+    var pct=total?Math.round(done/total*100):0;
+    var m=document.getElementById('m-all');
+    m.firstElementChild.style.width=pct+'%';
+    m.classList.toggle('done',done===total&&total>0);
+    document.getElementById('s-done').textContent=done+' done';
+    document.getElementById('s-all').textContent=pct+'%';
+
+    PHASES.forEach(function(p){
+      var sec=document.getElementById(p[0]);
+      if(!sec) return;
+      var ins=sec.querySelectorAll('.step-top input[type=checkbox]');
+      var d=0; Array.prototype.forEach.call(ins,function(b){ if(state[b.dataset.id]) d++; });
+      var cell=document.querySelector('.c[data-c="'+p[0]+'"]');
+      if(cell){ cell.textContent=d+'/'+ins.length; }
+      var link=cell?cell.parentElement:null;
+      if(link){ link.classList.toggle('full',ins.length>0&&d===ins.length); }
+    });
+  }
+
+  boxes.forEach(function(b){
+    b.addEventListener('change',function(){
+      if(b.checked){ state[b.dataset.id]=1; } else { delete state[b.dataset.id]; }
+      save(state); refresh();
+    });
+  });
+
+  document.getElementById('reset').addEventListener('click',function(){
+    state={}; save(state); refresh();
+  });
+
+  // ---- copy buttons
+  document.querySelectorAll('.cmd').forEach(function(box){
+    var pre=box.querySelector('pre'); if(!pre) return;
+    var b=document.createElement('button');
+    b.className='cp'; b.type='button'; b.textContent='Copy';
+    b.addEventListener('click',function(){
+      var text=pre.textContent;
+      function ok(){ b.textContent='Copied'; b.classList.add('ok');
+        setTimeout(function(){ b.textContent='Copy'; b.classList.remove('ok'); },1400); }
+      function fallback(){
+        var ta=document.createElement('textarea');
+        ta.value=text; ta.setAttribute('readonly','');
+        ta.style.position='absolute'; ta.style.left='-9999px';
+        document.body.appendChild(ta); ta.select();
+        try{ document.execCommand('copy'); ok(); }
+        catch(e){ b.textContent='Copy failed'; setTimeout(function(){b.textContent='Copy';},1600); }
+        document.body.removeChild(ta);
+      }
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(ok,fallback);
+      } else { fallback(); }
+    });
+    box.appendChild(b);
+  });
+
+  refresh();
+})();
+</script>
