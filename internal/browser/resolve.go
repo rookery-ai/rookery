@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 )
 
@@ -260,19 +259,7 @@ func SystemChromiumExecutable() string {
 	return path
 }
 
-// managedBuilds lists the Playwright builds present, newest first, for
-// reporting. Used by `rookery browser status`.
-func managedBuilds(browsers string) []string {
-	entries, err := os.ReadDir(browsers)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() && strings.Contains(e.Name(), "-") {
-			out = append(out, e.Name())
-		}
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(out)))
-	return out
-}
+// A managedBuilds helper was written here and removed before merge: its comment
+// claimed `rookery browser status` used it, and nothing did. Go does not flag an
+// unused package-level function, so the build stayed green while the comment was
+// simply false.

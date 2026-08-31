@@ -2203,7 +2203,11 @@ Playwright's `Channel`**, then a managed Firefox. Four things are load-bearing:
   Playwright. Without that fallback, the change that stopped downloading Chromium
   would have left PDF export reporting "unavailable" on a host rendering pages
   perfectly well — reintroducing the exact invisible-working-renderer bug that
-  function was written to fix.
+  function was written to fix. **The fallback cannot cover a host whose only
+  browser is a managed Firefox**, which resolves and renders while PDF export
+  stays unavailable: PDF needs a Chromium binary and there is none. Recorded as a
+  gap rather than fixed, because it requires having installed Playwright's
+  Firefox deliberately, and `rookery browser install` resolves it.
 - **Each engine carries its OWN loopback hardening, and WebKit is refused by
   name.** The browser is routed through a guarded proxy, and every engine needs a
   different setting to stop it bypassing that proxy for localhost, where this

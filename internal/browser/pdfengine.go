@@ -31,6 +31,14 @@ import (
 // unavailable — the same "invisible working renderer" this function was written
 // to fix, reintroduced by the change that stopped downloading Chromium when one
 // was already present.
+//
+// KNOWN GAP, stated rather than papered over: the fallback cannot cover a host
+// whose ONLY browser is a managed Firefox. Resolve will drive it, so /healthz
+// reports a browser and pages render, while this returns "" and PDF export
+// reports unavailable — exactly the divergence above, in the one shape the
+// fallback cannot reach, because PDF needs a Chromium binary and there is none.
+// It requires having installed Playwright's Firefox deliberately, so it is rare
+// rather than impossible. `rookery browser install` fixes it by adding Chromium.
 func ChromiumExecutable() string {
 	if p := chromiumExecutableIn(browsersDir()); p != "" {
 		return p

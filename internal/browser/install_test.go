@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -61,14 +62,33 @@ func TestLinuxHintsNameTheLibrariesChromiumNeeds(t *testing.T) {
 
 // Probe must never create what it is probing for. It is called from /healthz and
 // from onboarding, and a probe with side effects would report "installed" on a
-// host where nothing had been installed.
+// host where nothing had been installed. (playwright-go's own driver check is
+// disqualified for exactly this reason: it MkdirAlls the directory it checks.)
+//
+// It drives resolveWith rather than the old probeAt, because Probe answers from
+// the resolver now. Left pointed at probeAt this test would have kept passing
+// while covering a function nothing reached — a gate still asking a question the
+// source had stopped answering, which is the shape CLAUDE.md records for
+// check_cli.
+//
+// bareHost describes a machine with no browser of its own, so the assertion is
+// not decided by whatever happens to be installed on the machine running it.
 func TestProbeReportsMissingWithoutCreatingAnything(t *testing.T) {
 	dir := t.TempDir()
-	av := probeAt(dir+"/driver", dir+"/browsers")
-	if av.OK {
+
+	got := resolveWith(dir+"/driver", dir+"/browsers", bareHost())
+
+	if got.OK {
 		t.Fatal("reported a runtime in an empty directory")
 	}
-	if !strings.Contains(av.Reason, "rookery browser install") {
-		t.Errorf("the reason does not name the fix: %q", av.Reason)
+	if !strings.Contains(got.Reason, "rookery browser install") {
+		t.Errorf("the reason does not name the fix: %q", got.Reason)
+	}
+	// Nothing may have been created by asking.
+	if _, err := os.Stat(dir + "/driver"); err == nil {
+		t.Error("probing created the driver directory")
+	}
+	if _, err := os.Stat(dir + "/browsers"); err == nil {
+		t.Error("probing created the browsers directory")
 	}
 }
