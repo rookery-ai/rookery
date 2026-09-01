@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router";
 import { MessageSquare, MessageSquarePlus } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
@@ -39,6 +39,40 @@ export default function ChatsPage() {
     const chat = await createChat.mutateAsync(undefined);
     setParams({ chat: chat.id });
   }
+
+  // ?new=1 is how a caller says "start one", as distinct from "show me my
+  // chats". Home's Start chat quick action is the only one that sets it: it
+  // used to link to a bare /chats and land on the empty state, so the control
+  // named Start chat started nothing.
+  //
+  // Keyed on the parameter rather than on "nothing is selected" because the
+  // icon rail links to a bare /chats — creating there would hand a user
+  // browsing their own history a fresh empty chat on every visit.
+  //
+  // The ref is not defensive: this effect depends on the mutation object,
+  // which changes as the request settles, and the chat list refetches
+  // underneath it — without the guard each of those mints another chat. Same
+  // shape as ChatWindow's streamOpenRef.
+  const creating = useRef(false);
+  useEffect(() => {
+    if (params.get("new") !== "1" || selected || creating.current) return;
+    creating.current = true;
+    void (async () => {
+      try {
+        const chat = await createChat.mutateAsync(undefined);
+        // replace: so Back leaves Chats rather than re-entering a URL that
+        // would create a second chat.
+        setParams({ chat: chat.id }, { replace: true });
+      } catch {
+        // Drop ?new=1 so the empty state shows rather than a blank page
+        // wearing a parameter that will never resolve. The list's own New
+        // chat button is the retry.
+        creating.current = false;
+        setParams({}, { replace: true });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, selected]);
 
   return (
     <>

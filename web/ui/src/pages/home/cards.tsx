@@ -41,7 +41,11 @@ export function QuickActions() {
       <Link to="/kb" className={secondary}>
         <BookOpen /> New note
       </Link>
-      <Link to="/chats" className={secondary}>
+      {/* ?new=1 rather than a bare /chats: this control says "start chat", and
+          the bare path lands on the list's empty state, which asks the user to
+          start one — so the button started nothing. It stays a Link (see
+          above), so ChatsPage does the creating. */}
+      <Link to="/chats?new=1" className={secondary}>
         <MessagesSquare /> Start chat
       </Link>
       <Link to="/connections" className={secondary}>
