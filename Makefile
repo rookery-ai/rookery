@@ -32,7 +32,7 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2
 GOTEST_TIMEOUT ?= 900s
 
 .PHONY: ui build-go build stop start deploy restart logs status clean test \
-        ci ci-fmt ci-vet ci-test ci-cross ci-ui ci-package docker-build docker-run hooks
+        ci-fmt ci-vet ci-test ci-cross ci-ui ci-docs ci-package docker-build docker-run hooks
 
 ## ui: build the SPA (web/ui/dist) — requires node; run before `build`
 ui:
@@ -99,10 +99,17 @@ docs-sync-selftest:
 clean:
 	rm -f $(BIN)
 
-## ci: run the same checks pr.yml runs, locally — catch it before you push
-ci: ci-fmt ci-vet ci-test ci-cross ci-ui ci-docs
-	@echo "all PR checks passed"
-
+# There is deliberately no aggregate `ci` target.
+#
+# It duplicated a fifteen-minute run the pipeline performs anyway on every push,
+# and it never covered four of the seven PR jobs — the Conventional-commit title
+# check needs the PR, and the security scan, container smoke test and package
+# smoke test were never in it — so a green local run never meant a green PR.
+# Nothing in .github/workflows invokes make; each job runs its steps directly.
+#
+# The targeted checks below stay, and they are the ones worth running: ci-fmt
+# and ci-vet are seconds, ci-docs is the documentation gate, and ci-package is
+# the only local way to exercise the deb/rpm artefacts.
 ci-fmt:
 	@unformatted="$$(gofmt -l . | grep -v '^\.claude/' || true)"; \
 	if [ -n "$$unformatted" ]; then \
@@ -135,9 +142,9 @@ ci-docs:
 
 ## ci-package: build a goreleaser snapshot and smoke-test the deb, rpm and tar.gz
 ##
-## Deliberately NOT part of `make ci`: a snapshot rebuilds the SPA and all six
-## binaries, so it runs in minutes rather than seconds. Run it when touching
-## packaging, the Dockerfile, or anything the binary reads at startup.
+## A snapshot rebuilds the SPA and all six binaries, so this runs in minutes
+## rather than seconds. Run it when touching packaging, the Dockerfile, or
+## anything the binary reads at startup.
 ci-package:
 	goreleaser release --clean --snapshot --skip=sign,sbom
 	CONTAINER_ENGINE=$(CONTAINER_ENGINE) scripts/smoke-package.sh dist

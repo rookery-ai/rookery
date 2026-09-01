@@ -50,8 +50,8 @@ make stop      # stop the running server
 make logs      # tail -f logs/server.log
 make status    # show running server process
 make test      # run the unit tests
-make ci        # the full PR gate — ~15 min. DON'T run this before a PR; the
-               # pipeline runs it anyway. Use the targeted ci-* targets instead.
+make ci-fmt / ci-vet / ci-ui / ci-docs   # targeted checks, seconds each
+               # There is no aggregate `ci` target — see the CI/CD section.
 make docker-build / docker-run   # slim container image (podman or docker)
 
 # Frontend (web/ui): build the SPA into the binary
@@ -105,7 +105,7 @@ target has a documentation obligation in both repositories.
 
 `make docs-sync-check` mechanises the checkable half — counts, variable
 names, command names, provider names, logo coverage — against the source
-rather than against other prose, and runs inside `make ci` (`ci-docs`); it
+rather than against other prose, and runs as `make ci-docs`; it
 resolves the website checkout via `ROOKERY_WEB_DIR`, then a sibling of the
 main checkout derived from git's common dir, then `~/rookery-web`, and skips
 website assertions when none of those exist — set `ROOKERY_WEB_DIR` to point
@@ -171,30 +171,31 @@ image pushes.**
      end-to-end gate** — this one covers the native deb/rpm/tar.gz artifacts;
      nothing had ever installed one before it existed, which is exactly how they
      shipped unable to open their own database. Run it locally with
-     `make ci-package` — it is deliberately excluded from `make ci` because a
-     snapshot build takes minutes.
-5. **Do NOT run `make ci` locally before opening a PR — the pipeline runs it,
-   and running it twice is pure waste.** `make ci` takes ~15 minutes here
-   (the `web` package alone measures ~343s under `-race`, 13× its non-race
-   time), and every one of those minutes is spent again on the runner. Push the
-   branch and read the result there.
+     `make ci-package` — it takes minutes, because a snapshot rebuilds the SPA
+     and all six binaries.
+5. **There is no aggregate `ci` target, and reproducing the pipeline locally is
+   not a step.** The gate runs here, on push. The removed target took ~15
+   minutes (the `web` package alone measures ~343s under `-race`, 13× its
+   non-race time) and every one of those minutes was spent again on the runner.
 
-   Run the **targeted** pieces instead, for the code you actually touched:
+   It also never covered four of the seven jobs: `Conventional commit title`
+   (needs the pull request, not anything runnable locally), `Security scan`,
+   `Container smoke test` and `Package smoke test`. So a green local run never
+   meant a green PR — which is the real reason it is gone, not merely the
+   duration. Nothing in `.github/workflows` invokes `make`; each job runs its
+   own steps, so removing the target changed no gate.
+
+   Run the **targeted** pieces for the code you actually touched:
    `make ci-fmt` / `ci-vet` / `ci-ui` / `ci-docs` are seconds each, and
    `go test ./internal/<pkg>/` is the fast inner loop. Those catch the
    formatting and obvious-breakage class of failure without paying for a
-   full-matrix run.
+   full-matrix run. The documentation check (`ci-docs`) runs as a step inside
+   the `Go build and test` job rather than as a job of its own, so the gate
+   count stays at seven.
 
-   For reference, what the full local `make ci` would have covered: `Go build
-   and test` and `Cross-compile` in full, and `Frontend` through typecheck/lint/
-   vitest but not the `vite build` step the CI job also runs. It never covered
-   four of the seven gates at all — `Conventional commit title` (needs the PR
-   title, not anything runnable locally), `Security scan`, `Container smoke
-   test`, and `Package smoke test` (available separately as `make ci-package`,
-   kept out of `make ci` because a snapshot build takes minutes). So a green
-   local run never meant a green PR anyway. The documentation check (`ci-docs`)
-   runs as a step inside the `Go build and test` job, not as a job of its own,
-   so the gate count stays at seven.
+   **The one exception is a stacked pull request** — one based on another branch
+   rather than `main` runs zero checks, so there the local targets are the only
+   signal available before the base merges.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,

@@ -13,7 +13,8 @@ merges are squashes and the title becomes the commit that lands on main.
 
 ## Checklist
 
-- [ ] `make ci` passes locally
+- [ ] Targeted checks run for what changed (`make ci-fmt` / `ci-vet` / `ci-ui` /
+      `ci-docs`) — the full gate runs here, not on your machine
 - [ ] Branch name matches `type/short-description`
 - [ ] Documentation updated if this touches a connector provider, a `ROOKERY_*`
       variable, a CLI subcommand, a core skill, a chat adapter, a backup

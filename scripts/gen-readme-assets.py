@@ -119,10 +119,14 @@ DARK = Palette(
 # --------------------------------------------------------------------------
 # Path data lifted verbatim from lucide-static v1.30.0 (ISC).
 #
-# The eleven feature icons are exactly the ones rookery-web's landing page
-# imports (src/pages/index.astro imports them from lucide-react directly — NOT
-# via FeatureSection.tsx, whose own ICONS map covers only six of them). The
-# twelfth, shield-check, is ours: Landlock has no card on the website.
+# The feature icons are the ones rookery-web's landing page imports
+# (src/pages/index.astro imports them from lucide-react directly — NOT via
+# FeatureSection.tsx, whose own ICONS map covers only six of them). Two are
+# ours: shield-check, because Landlock has no card on the website, and monitor,
+# which already stands for the browser in the architecture diagram below, so it
+# means the same thing in both images rather than adding a second glyph for it.
+# `layers` is kept although no card uses it now that Workspaces merged into
+# Sandboxing — this is a shared icon table, not a per-card list.
 #
 # The website is on lucide-react 1.29.0 while this is lucide-static 1.30.0, a
 # minor apart. Every one of these icons was compared child-shape by child-shape
@@ -389,9 +393,9 @@ def hero(p: Palette) -> str:
 # faster than the images get looked at.
 def feature_cards() -> list[tuple[str, str, str]]:
     return [
-        ("layers",          "Workspaces",     "Sealed, separate tenants."),
         ("book-text",       "Knowledge base", "Plain markdown on your disk."),
         ("bot",             "Agents",         "Describe it. It gets built."),
+        ("monitor",         "Browser control", "Agents drive a real browser."),
         ("puzzle",          "Skills",         f"{skill_count()} built in, ready to attach."),
         ("plug",            "Connections",    f"{provider_approx()} services. Your credentials."),
         ("terminal",        "MCP servers",    "Any server URL. Tools join in."),
@@ -400,7 +404,12 @@ def feature_cards() -> list[tuple[str, str, str]]:
         ("cpu",             "Models",         "Your CLI, a provider, or local."),
         ("key-round",       "Secrets",        "Encrypted, scoped per workspace."),
         ("calendar-clock",  "Scheduling",     "Say when in plain words."),
-        ("shield-check",    "Sandboxed",      "Landlock confines coders."),
+        # Workspaces and Sandboxed were two tiles saying one thing. The merged
+        # title names the mechanism and the body states the guarantee that holds
+        # on EVERY platform — process confinement is Linux-only, data isolation
+        # is not, and a twelve-word tile cannot carry that split honestly.
+        # concepts/workspaces.md states both halves properly.
+        ("shield-check",    "Sandboxing",     "Separate workspaces, fully isolated."),
     ]
 
 

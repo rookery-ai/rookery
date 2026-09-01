@@ -549,7 +549,16 @@ def _readme_assets_selftest() -> None:
         shutil.copy2(src, backup)
         original = src.read_bytes()
         try:
-            src.write_bytes(original.replace(b"Workspaces", b"Workspacez"))
+            # Appending is deliberate: the tamper must not depend on what the
+            # image SAYS. This used to replace the literal bytes "Workspaces",
+            # and became a silent no-op the day that feature card was merged
+            # into another one — the red case then wrote the file back
+            # unchanged, --check correctly passed, and the selftest failed
+            # while pointing at nothing. Worse, had the string survived
+            # somewhere incidental, the case would have gone on passing while
+            # asserting nothing at all. --check compares full text, so one
+            # added byte trips it whatever the cards happen to be called.
+            src.write_bytes(original + b"<!-- tampered -->")
             proc = subprocess.run(
                 [sys.executable, str(root / GEN_ASSETS), "--check"],
                 capture_output=True, text=True, cwd=root,
