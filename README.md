@@ -42,7 +42,8 @@ rookery onboard
 `iex` cannot pass arguments, so a specific version needs a script block:
 `& ([scriptblock]::Create((irm https://rookery.cloud/install.ps1))) -Version v0.2.0`.
 
-Windows has no filesystem confinement and no service registration yet — see
+Windows has no filesystem confinement. Autostart is a Task Scheduler logon task
+that `rookery service` registers for you — see
 [the Windows guide](https://rookery.cloud/docs/installation/windows).
 </details>
 
@@ -74,7 +75,7 @@ make build
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/features-dark.svg">
-  <img src="docs/assets/features.svg" alt="Workspaces, knowledge base, agents, skills, connections, MCP servers, chat, notifications, models, secrets, scheduling and sandboxing" width="100%">
+  <img src="docs/assets/features.svg" alt="Knowledge base, agents, browser control, skills, connections, MCP servers, chat, notifications, models, secrets, scheduling and sandboxing" width="100%">
 </picture>
 
 **100+ services** and **900+ curated actions**, over OAuth or an API key you
@@ -91,6 +92,7 @@ Read more —
 [Workspaces](https://rookery.cloud/docs/concepts/workspaces) ·
 [Knowledge base](https://rookery.cloud/docs/concepts/knowledge-base) ·
 [Agents](https://rookery.cloud/docs/concepts/agents) ·
+[Browser](https://rookery.cloud/docs/concepts/browser) ·
 [Skills](https://rookery.cloud/docs/concepts/skills) ·
 [Connections](https://rookery.cloud/docs/concepts/connections) ·
 [MCP servers](https://rookery.cloud/docs/concepts/mcp-servers) ·
@@ -177,8 +179,10 @@ it the agent-tool AST guardrail self-skips.
 
 Branch off `main`; `main` only ever advances through merged pull requests. Use
 [Conventional Commits](https://www.conventionalcommits.org/) — the PR title
-becomes the squashed commit and drives release versioning. Run the full gate
-locally first with `make ci`.
+becomes the squashed commit and drives release versioning. Push the branch and
+read the result from CI rather than reproducing it locally; `make ci-fmt`,
+`ci-vet`, `ci-ui` and `ci-docs` are the quick targeted checks worth running
+first.
 
 The three README images are generated —
 edit `scripts/gen-readme-assets.py`, never `docs/assets/*.svg`.

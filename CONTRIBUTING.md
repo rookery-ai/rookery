@@ -7,14 +7,24 @@ git clone https://github.com/rookery-ai/rookery.git
 cd rookery
 make hooks     # installs the commit-msg hook — see "Hooks" below
 make build     # builds the SPA into the binary, then the binary
-make ci        # the full local gate; run this before opening a PR
+make ci-fmt    # seconds; gofmt, and the one people forget
 ```
 
-`make ci` covers `gofmt`, `go vet`, `go test -race`, cross-compilation for all
-six GOOS/GOARCH pairs, the frontend typecheck/lint/tests, and the documentation
-sync check. It does **not** run the security scan, the container smoke test, or
-the package smoke test — those run in CI, and the last is available locally as
-`make ci-package` (kept out of `make ci` because a snapshot build takes minutes).
+**Do not try to reproduce the pipeline locally before opening a pull request.**
+There is no aggregate `ci` target, deliberately: it took about fifteen minutes,
+the pipeline runs the same work again on every push, and it never covered four
+of the seven PR jobs — the Conventional-commit title check needs the pull
+request itself, and the security scan, container smoke test and package smoke
+test were never part of it. A green local run never meant a green PR.
+
+Run the targeted checks for what you actually touched: `make ci-fmt`,
+`make ci-vet`, `make ci-ui` and `make ci-docs` take seconds each, and
+`go test ./internal/<pkg>/` is the fast inner loop. `make ci-package` builds a
+goreleaser snapshot and smoke-tests the deb, rpm and tar.gz — minutes, so run it
+when you touch packaging.
+
+The one case where reproducing CI locally is warranted is a **stacked** pull
+request: one based on another branch rather than `main` runs no checks at all.
 
 ## Branching
 
