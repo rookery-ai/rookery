@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/rookery-ai/rookery/compare/v0.13.0...v0.14.0) (2026-09-01)
+
+
+### Features
+
+* **web/agents:** describe an agent's schedule in plain language ([#287](https://github.com/rookery-ai/rookery/issues/287)) ([74302c1](https://github.com/rookery-ai/rookery/commit/74302c164ff4a0ce1b3ec5325bac758166cd216c))
+* **web/agents:** order the list newest-first and show each agent's last run ([#285](https://github.com/rookery-ai/rookery/issues/285)) ([78a4470](https://github.com/rookery-ai/rookery/commit/78a4470b16c676fdb04b01c3317ccc8106b64bf5))
+
+
+### Bug Fixes
+
+* **web/agents:** collapse the skills, connections and MCP panels ([#286](https://github.com/rookery-ai/rookery/issues/286)) ([5432acf](https://github.com/rookery-ai/rookery/commit/5432acf40f0cd0b409f6c0d4f020d21b030175cd))
+* **web/chats:** make Start chat open a chat, not the empty list ([#284](https://github.com/rookery-ai/rookery/issues/284)) ([f92cea2](https://github.com/rookery-ai/rookery/commit/f92cea2c0a315800e529ba81a8a282637e298e97))
+
+
+### Documentation
+
+* spec the four agent-surface affordance fixes ([#283](https://github.com/rookery-ai/rookery/issues/283)) ([c949b7a](https://github.com/rookery-ai/rookery/commit/c949b7ab301b07a22a6cc73e4d4536030cf382f5))
+
 ## [0.13.0](https://github.com/rookery-ai/rookery/compare/v0.12.0...v0.13.0) (2026-09-01)
 
 
