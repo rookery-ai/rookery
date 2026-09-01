@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0](https://github.com/rookery-ai/rookery/compare/v0.12.0...v0.13.0) (2026-09-01)
+
+
+### Features
+
+* **browser:** use a browser the owner already has ([#280](https://github.com/rookery-ai/rookery/issues/280)) ([1308b67](https://github.com/rookery-ai/rookery/commit/1308b670fb9379451f615e5c69906346aad4be36))
+* **service:** start Rookery automatically on Windows and Linux ([#279](https://github.com/rookery-ai/rookery/issues/279)) ([758f25a](https://github.com/rookery-ai/rookery/commit/758f25abcb3ce890d9acb2d4f375bf38cd848ed3))
+
+
+### Bug Fixes
+
+* **export:** fall through when a PDF engine cannot run ([#281](https://github.com/rookery-ai/rookery/issues/281)) ([43b8195](https://github.com/rookery-ai/rookery/commit/43b8195fa33a45567ae94b396ea848f30c068063))
+* **onboard:** find host tools the installer already put on the machine ([#278](https://github.com/rookery-ai/rookery/issues/278)) ([7264ebc](https://github.com/rookery-ai/rookery/commit/7264ebc4c7c879d4475e5039d0233720a680764c))
+* **prompts:** point chat at the agent designer instead of AGENT.md ([#277](https://github.com/rookery-ai/rookery/issues/277)) ([5ca0ddd](https://github.com/rookery-ai/rookery/commit/5ca0dddb996ebd9fe7e3c022b1e1f700334d1d61))
+
 ## [0.12.0](https://github.com/rookery-ai/rookery/compare/v0.11.0...v0.12.0) (2026-08-31)
 
 
