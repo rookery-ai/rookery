@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import { useAgentActions, type AgentSchedule } from "@/lib/agents";
+import { describeCronSentence } from "@/lib/cron";
 
 type ScheduleCardProps = {
   agentId: string;
@@ -46,6 +47,8 @@ export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
     }
   }
 
+  const description = describeCronSentence(cron);
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
       <h2 className="text-sm font-semibold">Schedule</h2>
@@ -56,6 +59,16 @@ export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
         value={cron}
         onChange={(e) => setCron(e.target.value)}
       />
+
+      {/* Reads the field the user is TYPING, not the saved schedule, so the
+          sentence confirms what is about to be saved rather than what already
+          was. describeCronSentence returns null for anything it cannot prove —
+          including every half-finished expression on the way to a valid one —
+          and nothing is rendered then: a flash of the wrong reading is worse
+          than no reading at all. */}
+      {description && (
+        <p className="text-xs text-muted-2">{description}</p>
+      )}
 
       {schedule && (
         <p className="text-xs text-muted-2">

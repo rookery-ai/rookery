@@ -291,6 +291,36 @@ test("schedule save posts the cron expression", async () => {
   });
 });
 
+// The card's whole reason for existing is that a cron expression is
+// unreadable to the audience this product is built for. The sentence tracks
+// the FIELD, not the saved schedule, so it confirms what is about to be saved.
+test("the schedule card describes the cron expression in plain language", async () => {
+  mockFetch();
+  wrap();
+
+  const cronInput = await screen.findByLabelText(/cron expression/i);
+  await userEvent.clear(cronInput);
+  await userEvent.type(cronInput, "0 8 * * 1,6");
+
+  expect(
+    await screen.findByText("Runs every Monday and Saturday at 08:00."),
+  ).toBeInTheDocument();
+});
+
+// Mid-typing the field holds expressions that are not yet schedules. A
+// confident reading of one is worse than silence, because the user cannot tell
+// it is wrong.
+test("the schedule card says nothing about an expression it cannot read", async () => {
+  mockFetch();
+  wrap();
+
+  const cronInput = await screen.findByLabelText(/cron expression/i);
+  await userEvent.clear(cronInput);
+  await userEvent.type(cronInput, "0 8 * *");
+
+  expect(screen.queryByText(/^Runs /)).toBeNull();
+});
+
 test("schedule save shows invalid_cron message inline on 400", async () => {
   mockFetch({
     "PUT /api/v1/agents/a1/schedule": () =>
