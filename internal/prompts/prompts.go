@@ -468,6 +468,41 @@ func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot str
 	}
 	sb.WriteString("\n")
 
+	// ── How agents get created ────────────────────────────────────────────────
+	//
+	// Surface-split for the same reason the output protocol is, and after a
+	// failure of the same shape. Everything above teaches the agent FILE — the
+	// agents/<id>/ layout, state.md, the schedule header — because an agent run
+	// needs it. Chat was given all of it and no way to CREATE an agent, so asked
+	// how to make one it answered with the only concrete thing in its context and
+	// told a brand-new owner to write AGENT.md by hand. It was reciting this
+	// block, exactly as it once defended the [CHAT] markers.
+	//
+	// Naming the designer is the fix; the explicit prohibition is what stops the
+	// model offering the file as a helpful alternative alongside it.
+	sb.WriteString("## Agents — how they are created\n")
+	switch surface {
+	case SurfaceChat:
+		sb.WriteString("The owner never writes an agent by hand. Rookery has an agent DESIGNER: a\n")
+		sb.WriteString("conversation that interviews them, writes the agent, tests it and shows a\n")
+		sb.WriteString("dry run before anything is saved.\n\n")
+		sb.WriteString("  Agents → New Agent → describe it in plain language → Build\n\n")
+		sb.WriteString("Editing works the same way — open the agent and describe the change. When\n")
+		sb.WriteString("the owner asks for an agent, or describes a task an agent should do, walk\n")
+		sb.WriteString("them through those steps and offer to help them word the description.\n")
+		sb.WriteString("You cannot create or edit an agent yourself. Point at the designer, and\n")
+		sb.WriteString("never tell the owner to write AGENT.md, create files or folders, or edit\n")
+		sb.WriteString("anything under agents/ by hand —\n")
+		sb.WriteString("the designer writes all of that, and a hand-made file is not a registered\n")
+		sb.WriteString("agent: it has no schedule, no bound connections and will never run.\n\n")
+	case SurfaceAgent:
+		sb.WriteString("You were written by the agent designer from a description the owner gave in\n")
+		sb.WriteString("plain language, and the owner edits you the same way. Your own AGENT.md is\n")
+		sb.WriteString("therefore not yours to rewrite: the next edit through the designer replaces\n")
+		sb.WriteString("it, and neither side reports the conflict. Record what you learn in state.md\n")
+		sb.WriteString("and in the knowledge base instead — those persist across every rebuild.\n\n")
+	}
+
 	// ── Output protocol ───────────────────────────────────────────────────────
 	//
 	// AGENT SURFACE ONLY, and the gate is the fix for a real leak. This section
@@ -499,11 +534,25 @@ func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot str
 	}
 
 	// ── Schedule ──────────────────────────────────────────────────────────────
+	//
+	// Gated for the same reason as the section above: the header line is the
+	// single most file-shaped thing in this primer, and handing chat its exact
+	// syntax is handing it a way to tell the owner to type a magic comment into
+	// a file. Chat still needs to know schedules EXIST — "run this every
+	// morning" is an ordinary request — so it gets the concept and the screen
+	// that sets it, not the syntax.
 	sb.WriteString("## Agent schedule\n")
-	sb.WriteString("Agents run on a cron schedule set in AGENT.md line 1.\n")
-	sb.WriteString("  # Suggested schedule: 0 9 * * *    — daily at 9am\n")
-	sb.WriteString("  # Suggested schedule: none          — no automatic schedule; run manually\n")
-	sb.WriteString("\"none\" is a valid and common choice for agents the user triggers manually.\n")
+	if surface == SurfaceChat {
+		sb.WriteString("An agent can run on a schedule (\"every morning at 9\") or only when the owner\n")
+		sb.WriteString("runs it by hand — both are ordinary choices. The schedule is agreed during\n")
+		sb.WriteString("the designer conversation and can be changed afterwards on the agent's own\n")
+		sb.WriteString("page. It is expressed in the owner's local time.\n")
+	} else {
+		sb.WriteString("Agents run on a cron schedule set in AGENT.md line 1.\n")
+		sb.WriteString("  # Suggested schedule: 0 9 * * *    — daily at 9am\n")
+		sb.WriteString("  # Suggested schedule: none          — no automatic schedule; run manually\n")
+		sb.WriteString("\"none\" is a valid and common choice for agents the user triggers manually.\n")
+	}
 	sb.WriteString("</platform_context>\n\n")
 
 	return sb.String()
