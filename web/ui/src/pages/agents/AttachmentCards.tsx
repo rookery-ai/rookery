@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { useAgentMCPServers, useSaveAgentMCPServers } from "@/lib/mcp";
+import { CollapsibleChecklist, type ChecklistItem } from "./CollapsibleChecklist";
 import {
   useAgentActions,
   // Aliased per Task 8's contract note: lib/agents exports the generic type
@@ -70,6 +71,29 @@ export function SkillsCard({
     attachedSkills.some((n) => !checked.has(n));
   const empty = coreSkills.length === 0 && allSkills.length === 0;
 
+  // Your skills first (priority 0), core second (1): when nothing is attached
+  // yet, a collapsed panel should offer the owner's own skills before the
+  // built-in pool. Sections keep the headings the card already had, and the
+  // list still reads Core-then-yours when expanded because the sections are
+  // emitted in this array's order.
+  const items = useMemo<ChecklistItem[]>(
+    () => [
+      ...coreSkills.map((sk) => ({
+        key: sk.name,
+        label: sk.name,
+        section: "Core",
+        priority: 1,
+      })),
+      ...allSkills.map((sk) => ({
+        key: sk.name,
+        label: sk.name,
+        section: "Your skills",
+        priority: 0,
+      })),
+    ],
+    [coreSkills, allSkills],
+  );
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
       <div className="flex items-center justify-between">
@@ -95,47 +119,12 @@ export function SkillsCard({
       {empty ? (
         <p className="text-xs text-muted-2">No skills available.</p>
       ) : (
-        <div className="flex flex-col gap-3">
-          {coreSkills.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">
-                Core
-              </p>
-              {coreSkills.map((sk) => (
-                <label
-                  key={sk.name}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked.has(sk.name)}
-                    onChange={() => toggle(sk.name)}
-                    className="size-3.5 rounded border-border"
-                  />
-                  {sk.name}
-                </label>
-              ))}
-            </div>
-          )}
-          {allSkills.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">
-                Your skills
-              </p>
-              {allSkills.map((sk) => (
-                <label key={sk.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked.has(sk.name)}
-                    onChange={() => toggle(sk.name)}
-                    className="size-3.5 rounded border-border"
-                  />
-                  {sk.name}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+        <CollapsibleChecklist
+          items={items}
+          checked={checked}
+          onToggle={toggle}
+          noun="skills"
+        />
       )}
     </div>
   );
@@ -191,6 +180,22 @@ export function ConnectionsCard({
     checked.size !== attachedConnectionIds.length ||
     attachedConnectionIds.some((id) => !checked.has(id));
 
+  // One flat, unlabelled section: every connection is the workspace's own, so
+  // there is no core-versus-yours split to draw here.
+  const items = useMemo<ChecklistItem[]>(
+    () =>
+      connections.map((c) => ({
+        key: c.id,
+        label: (
+          <>
+            <span className="capitalize">{c.provider}</span>
+            <span className="text-muted-2">— {c.account_label}</span>
+          </>
+        ),
+      })),
+    [connections],
+  );
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
       <div className="flex items-center justify-between">
@@ -224,20 +229,12 @@ export function ConnectionsCard({
           .
         </p>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {connections.map((c) => (
-            <label key={c.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checked.has(c.id)}
-                onChange={() => toggle(c.id)}
-                className="size-3.5 rounded border-border"
-              />
-              <span className="capitalize">{c.provider}</span>
-              <span className="text-muted-2">— {c.account_label}</span>
-            </label>
-          ))}
-        </div>
+        <CollapsibleChecklist
+          items={items}
+          checked={checked}
+          onToggle={toggle}
+          noun="connections"
+        />
       )}
     </div>
   );
@@ -267,6 +264,23 @@ export function MCPServersCard({ agentId }: { agentId: string }) {
 
   const dirty =
     checked.size !== attached.length || attached.some((id) => !checked.has(id));
+
+  // MCP was not named in the request, but it has the identical problem and
+  // sits in the same sidebar column — leaving it out would make one panel there
+  // behave differently for no reason a reader could infer.
+  const items = useMemo<ChecklistItem[]>(
+    () =>
+      servers.map((s) => ({
+        key: s.id,
+        label: (
+          <>
+            <span>{s.name}</span>
+            <span className="text-muted-2">— {s.active_tools} tools</span>
+          </>
+        ),
+      })),
+    [servers],
+  );
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
@@ -308,27 +322,19 @@ export function MCPServersCard({ agentId }: { agentId: string }) {
           .
         </p>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {servers.map((s) => (
-            <label key={s.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checked.has(s.id)}
-                onChange={() =>
-                  setChecked((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(s.id)) next.delete(s.id);
-                    else next.add(s.id);
-                    return next;
-                  })
-                }
-                className="size-3.5 rounded border-border"
-              />
-              <span>{s.name}</span>
-              <span className="text-muted-2">— {s.active_tools} tools</span>
-            </label>
-          ))}
-        </div>
+        <CollapsibleChecklist
+          items={items}
+          checked={checked}
+          onToggle={(id) =>
+            setChecked((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          noun="MCP servers"
+        />
       )}
     </div>
   );
