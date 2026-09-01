@@ -104,6 +104,54 @@ test("renders a card grid with name, chips, and created date", async () => {
   expect(runningCard.textContent).toContain("Running");
 });
 
+// ── Recency ─────────────────────────────────────────────────────────────────
+//
+// The list is ordered newest-first by the SERVER (apiListAgents), not here —
+// db.ListAgents keeps its name ordering for five other callers. So the page
+// must render the order it is given rather than imposing one of its own: a
+// client-side re-sort would look identical on this fixture and quietly
+// override whatever the server decided.
+test("renders agents in the order the server sent them", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Inbox Triager");
+
+  const names = screen.getAllByRole("link")
+    .map((el) => el.querySelector("h3")?.textContent)
+    .filter(Boolean);
+  expect(names).toEqual(agents.map((a) => a.name));
+});
+
+// "Last run" is the question you open this page with. It REPLACES the created
+// date rather than joining it — one date line per card.
+test("a card that has run shows its last run instead of its created date", async () => {
+  agents = [
+    { ...agents[0]!, last_run_at: "2026-07-17T06:10:00Z" },
+  ];
+  mockFetch();
+  wrap();
+
+  const card = (await screen.findByText("Inbox Triager")).closest("a")!;
+  expect(card.textContent).toContain("Last run 1h ago");
+  expect(card.textContent).not.toContain("Created");
+});
+
+// An agent that has never run has nothing else its date line could usefully
+// say, so it falls back. null is the server's real answer here; undefined only
+// ever means a response from an older build, and both must take this branch.
+test.each([
+  ["null", null],
+  ["absent", undefined],
+] as const)("a card with a %s last run falls back to its created date", async (_label, value) => {
+  agents = [{ ...agents[0]!, last_run_at: value }];
+  mockFetch();
+  wrap();
+
+  const card = (await screen.findByText("Inbox Triager")).closest("a")!;
+  expect(card.textContent).toContain("Created");
+  expect(card.textContent).not.toContain("Last run");
+});
+
 test("search filters the grid client-side", async () => {
   mockFetch();
   wrap();

@@ -25,8 +25,14 @@ function AgentCard({ agent }: { agent: Agent }) {
           <em className="text-muted-2/70">No description</em>
         )}
       </p>
+      {/* Last run rather than Created, falling back to Created when the agent
+          has never run. The card is a summary, so it gets one date line — and
+          "when did this last do anything" is the question you open this page
+          with, while an agent that has never run has nothing else to say. */}
       <p className="text-xs text-muted-2/80">
-        Created {timeAgo(agent.created_at)}
+        {agent.last_run_at
+          ? `Last run ${timeAgo(agent.last_run_at)}`
+          : `Created ${timeAgo(agent.created_at)}`}
       </p>
     </Link>
   );

@@ -9,6 +9,10 @@ export type Agent = {
   active: boolean;
   created_at: string;
   running: boolean;
+  // When the agent last STARTED a run; null if it never has. The server always
+  // sends the key (see apiAgent's comment), so `null` is the real "never ran"
+  // and `undefined` only ever means a response from an older build.
+  last_run_at?: string | null;
 };
 
 // Mirrors toAPIAgentDraft — nil draft serializes as JSON null.
