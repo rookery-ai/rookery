@@ -301,10 +301,26 @@ func (o *onboarder) stepHostTools() {
 			return
 		}
 	}
-	o.ok("installed")
-	if runtime.GOOS == "windows" {
-		o.info("Newly installed tools appear on PATH in a NEW terminal, not this one.")
+
+	// Re-resolve rather than announcing success and moving on.
+	//
+	// A package manager that has just installed a tool frequently leaves it
+	// somewhere this process's PATH does not reach — winget writes its shims to
+	// a directory resolved before they existed, and Tesseract's installer does
+	// not touch PATH at all. The old advice ("they appear in a NEW terminal")
+	// was true and useless: it asked the user to go away and come back, and the
+	// next run of setup would offer the same tools again anyway, because the
+	// probe was PATH and only PATH.
+	onboard.AugmentProcessPath()
+	if still := onboard.MissingOn(onboard.CurrentHost()); len(still) > 0 {
+		o.ok("installed")
+		for _, t := range still {
+			o.info("· %s is installed but could not be located; a new terminal may be needed", t.Bin)
+		}
+		o.later("confirm the host tools resolve in a new terminal")
+		return
 	}
+	o.ok("installed and in use")
 }
 
 // stepCoder reports rather than configures. Choosing a coder means choosing a
