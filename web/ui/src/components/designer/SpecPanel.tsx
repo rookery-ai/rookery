@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { describeCron } from "@/lib/cron";
 
 export type SpecPanelProps = {
   agentMD: string;
@@ -12,66 +13,20 @@ export type SpecPanelProps = {
   spec?: string;
 };
 
-const WEEKDAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-// parseSchedule translates only cron shapes we can PROVE are right — a
-// plausible-but-wrong plain-language schedule is worse than showing the raw
-// cron, because the user has no way to tell it's wrong. Anything outside
-// these four shapes falls back to the raw expression. Deliberately not a
-// general cron parser.
+// parseSchedule reads the "# Suggested schedule:" header and renders it in
+// plain language, falling back to the raw expression for anything describeCron
+// cannot prove — a plausible-but-wrong schedule is worse than the cron itself,
+// because the user has no way to tell it is wrong.
 //
-// The regexes below match *shape* only — they don't bound the captured
-// digits — so every branch re-checks the captured value against the field's
-// real range before trusting it: minute step 1–59 (a step of 0 isn't an
-// interval at all, and a step >59 in a 0-59 minute field only ever matches
-// minute 0 — i.e. it actually runs HOURLY, not "every 90 minutes"), hour
-// 0–23, weekday 0–7 (cron allows both 0 and 7 for Sunday). Out-of-range
-// values fall through to the raw-expression fallback rather than emitting
-// confidently wrong prose.
+// The translation lives in lib/cron so this panel and the agent page's schedule
+// card cannot drift into describing the same expression two different ways.
 export function parseSchedule(md: string): string | null {
   const m = md.match(/^#\s*Suggested schedule:\s*(.+?)\s*$/im);
   if (!m) return null;
   const cron = m[1]!.trim();
   if (!cron || /^none$/i.test(cron)) return null;
 
-  let mm = cron.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
-  if (mm) {
-    const step = Number(mm[1]);
-    if (step >= 1 && step <= 59) {
-      return step === 1 ? "every minute" : `every ${step} minutes`;
-    }
-    return `schedule: ${cron}`;
-  }
-
-  if (/^0\s+\*\s+\*\s+\*\s+\*$/.test(cron)) return "every hour";
-
-  mm = cron.match(/^0\s+(\d{1,2})\s+\*\s+\*\s+\*$/);
-  if (mm) {
-    const hour = Number(mm[1]);
-    if (hour >= 0 && hour <= 23) return `every day at ${mm[1]!.padStart(2, "0")}:00`;
-    return `schedule: ${cron}`;
-  }
-
-  mm = cron.match(/^0\s+(\d{1,2})\s+\*\s+\*\s+(\d)$/);
-  if (mm) {
-    const hour = Number(mm[1]);
-    const weekday = Number(mm[2]);
-    if (hour >= 0 && hour <= 23 && weekday >= 0 && weekday <= 7) {
-      const day = WEEKDAYS[weekday % 7]; // cron allows both 0 and 7 for Sunday
-      if (day) return `every ${day} at ${mm[1]!.padStart(2, "0")}:00`;
-    }
-    return `schedule: ${cron}`;
-  }
-
-  return `schedule: ${cron}`;
+  return describeCron(cron) ?? `schedule: ${cron}`;
 }
 
 function parseHeaderList(md: string, label: string): string[] {
