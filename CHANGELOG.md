@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/rookery-ai/rookery/compare/v0.14.0...v0.14.1) (2026-09-01)
+
+
+### Documentation
+
+* correct the Windows claim, add browser to the README, drop `make ci` ([#289](https://github.com/rookery-ai/rookery/issues/289)) ([42c02d6](https://github.com/rookery-ai/rookery/commit/42c02d64addf499faa3a8dc031a6e52971d851de))
+* lead the README with what Rookery is, and state the licence position ([#291](https://github.com/rookery-ai/rookery/issues/291)) ([1cf3e2e](https://github.com/rookery-ai/rookery/commit/1cf3e2e63cbb444e052b15989bd31b4788aa58c2))
+
 ## [0.14.0](https://github.com/rookery-ai/rookery/compare/v0.13.0...v0.14.0) (2026-09-01)
 
 
