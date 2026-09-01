@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -175,6 +176,8 @@ func TestToDOCX_XMLEscaping(t *testing.T) {
 }
 
 func TestAvailableFormats(t *testing.T) {
+	defer stubEngineRunsOK()()
+	defer stubBundledChromium("")()
 	// HTML and DOCX are always available regardless of host.
 	restore := stubLookPath(func(string) (string, error) { return "", errors.New("not found") })
 	defer restore()
@@ -201,6 +204,7 @@ func TestAvailableFormats(t *testing.T) {
 }
 
 func TestToPDF_NoEngine(t *testing.T) {
+	defer stubBundledChromium("")()
 	restore := stubLookPath(func(string) (string, error) { return "", errors.New("not found") })
 	defer restore()
 
@@ -211,6 +215,8 @@ func TestToPDF_NoEngine(t *testing.T) {
 }
 
 func TestToPDF_SuccessWithStubEngine(t *testing.T) {
+	defer stubEngineRunsOK()()
+	defer stubBundledChromium("")()
 	// Pretend chromium is installed.
 	restoreLP := stubLookPath(func(bin string) (string, error) {
 		if bin == "chromium" {
@@ -224,7 +230,7 @@ func TestToPDF_SuccessWithStubEngine(t *testing.T) {
 	// PDF bytes to the output path (the real engine's job).
 	fakePDF := []byte("%PDF-1.7\nstub\n%%EOF\n")
 	var gotEngine string
-	restoreRun := stubRunEngine(func(_ context.Context, eng pdfEngine, htmlPath, outPath string) error {
+	restoreRun := stubRunEngine(func(_ context.Context, eng pdfEngine, _, htmlPath, outPath string) error {
 		gotEngine = eng.bin
 		html, err := os.ReadFile(htmlPath)
 		if err != nil {
@@ -249,9 +255,16 @@ func TestToPDF_SuccessWithStubEngine(t *testing.T) {
 	}
 }
 
+// libreoffice cannot be told where to put its output: it writes
+// "<input-stem>.pdf" beside the input. The output path is now deliberately a
+// DIFFERENT stem ("out.pdf" against an input of "note.html"), so this test
+// actually exercises the rename. It could not before — the output was also
+// called "note.pdf", so the reconciliation compared a path to itself and the
+// rename was unreachable dead code, on the one engine whose whole reason for
+// having a special case is that it needs it.
 func TestToPDF_LibreOfficeDirOutput(t *testing.T) {
-	// libreoffice writes <stem>.pdf into a directory; our input stem is "note",
-	// so it lands exactly on outPath — verify the dir-output path still reads it.
+	defer stubEngineRunsOK()()
+	defer stubBundledChromium("")()
 	restoreLP := stubLookPath(func(bin string) (string, error) {
 		if bin == "libreoffice" {
 			return "/usr/bin/libreoffice", nil
@@ -261,12 +274,13 @@ func TestToPDF_LibreOfficeDirOutput(t *testing.T) {
 	defer restoreLP()
 
 	fakePDF := []byte("%PDF-1.4\nlo\n%%EOF\n")
-	restoreRun := stubRunEngine(func(_ context.Context, eng pdfEngine, htmlPath, outPath string) error {
+	restoreRun := stubRunEngine(func(_ context.Context, eng pdfEngine, _, htmlPath, outPath string) error {
 		if !eng.dirOutput {
 			t.Errorf("expected libreoffice to be a dir-output engine")
 		}
-		// libreoffice would write note.pdf into the dir, which equals outPath.
-		return os.WriteFile(outPath, fakePDF, 0o600)
+		// Write where libreoffice really would: the input's stem, in the input's
+		// directory — NOT outPath.
+		return os.WriteFile(filepath.Join(filepath.Dir(htmlPath), "note.pdf"), fakePDF, 0o600)
 	})
 	defer restoreRun()
 
@@ -281,16 +295,42 @@ func TestToPDF_LibreOfficeDirOutput(t *testing.T) {
 
 // --- helpers ---
 
+// stubEngineRuns makes the "can this engine actually run" probe answer without
+// executing anything.
+//
+// findPDFEngine verifies a located renderer by running it, because a name on
+// PATH can be a wrapper that hangs instead of rendering. These tests describe a
+// host they are not running on — they hand out paths like /usr/bin/chromium that
+// do not exist here — so the probe has to be stubbed alongside lookPath, exactly
+// as runEngine already is.
+func stubEngineRuns(f func(string) bool) func() {
+	prev := engineRuns
+	engineRuns = f
+	return func() { engineRuns = prev }
+}
+
+func stubEngineRunsOK() func() { return stubEngineRuns(func(string) bool { return true }) }
+
 func stubLookPath(f func(string) (string, error)) func() {
 	prev := lookPath
 	lookPath = f
 	return func() { lookPath = prev }
 }
 
-func stubRunEngine(f func(context.Context, pdfEngine, string, string) error) func() {
+func stubRunEngine(f func(context.Context, pdfEngine, string, string, string) error) func() {
 	prev := runEngine
 	runEngine = f
 	return func() { runEngine = prev }
+}
+
+// stubBundledChromium forces the bundled-Chromium probe off (or on). Every test
+// that exercises a PATH engine must call it: the bundled build is probed FIRST,
+// so on a developer machine that has run `rookery browser install` it would win
+// and the test would silently assert against the wrong engine.
+func stubBundledChromium(path string) func() {
+	prev := bundledChromium
+	bundledChromium = func() string { return path }
+	return func() { bundledChromium = prev }
 }
 
 func readZip(t *testing.T, data []byte) map[string]string {

@@ -1156,8 +1156,15 @@ func (s *Server) apiExportKBNote(c echo.Context) error {
 		out, err = export.ToPDF(s.inlineVaultAssets(u.ID, body), opts)
 		contentType, ext = "application/pdf", "pdf"
 		if errors.Is(err, export.ErrNoPDFEngine) {
+			// Name the platform's OWN command first. Rookery installs a Chromium
+			// for the browser tool, and that build is now the preferred PDF
+			// engine — so on most hosts the fix is one command the operator
+			// already knows, not a third-party package. The message used to list
+			// only external renderers, which sent people to install something
+			// they did not need.
 			return jsonErr(c, http.StatusUnprocessableEntity, "pdf_unavailable",
-				"PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc). Install one, or export HTML/Word instead.")
+				"PDF export needs a renderer on the server. Run `rookery browser install` to install the bundled one, "+
+					"or install weasyprint, chromium, google-chrome, wkhtmltopdf or libreoffice. You can export HTML or Word meanwhile.")
 		}
 	default:
 		return jsonErr(c, http.StatusBadRequest, "invalid_format", "format must be one of: html, docx, pdf")

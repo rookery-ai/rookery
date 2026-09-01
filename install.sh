@@ -237,6 +237,99 @@ handle_host_tools() {
 	esac
 }
 
+# ── browser ──────────────────────────────────────────────────────────────────
+#
+# Offered here so `rookery onboard` does not have to: the reported complaint was
+# being asked to install things during setup that the installer should already
+# have dealt with.
+#
+# Unlike the host tools above, this one is NOT a package the system installs.
+# Playwright's runtime is version-matched to the binary — the cache directory is
+# named after the Playwright version compiled into it — so a shell script cannot
+# fetch the right one without hardcoding that version in two dialects and
+# breaking on every dependency bump. `winget install Google.Chrome` would not
+# help either: Rookery would need the driver regardless. So the binary that was
+# just installed and verified does the fetching, and it also decides whether a
+# browser already present makes the larger download unnecessary.
+handle_browser() {
+	[ "${ROOKERY_NO_BROWSER:-}" = 1 ] && return 0
+
+	# Nothing to say when the machine can already do this.
+	if "$BIN_DIR/rookery" browser status >/dev/null 2>&1; then
+		return 0
+	fi
+
+	step "Browser (optional)"
+	say "  Lets agents read pages that only appear once JavaScript has run, and"
+	say "  lets them sign in and click through a flow. Everything else works without it."
+
+	if [ "${ROOKERY_YES:-}" = 1 ]; then
+		reply=y
+	elif [ -t 0 ]; then
+		printf '  Download it now? [y/N] '
+		read -r reply </dev/tty 2>/dev/null || reply=n
+	else
+		say "  Later:  ${B}rookery browser install${R}"
+		return 0
+	fi
+
+	case "$reply" in
+		y|Y|yes|YES)
+			if ! "$BIN_DIR/rookery" browser install; then
+				warn "could not install it — run it yourself: rookery browser install"
+			fi
+			;;
+		*)
+			say "  Skipped. Later:  ${B}rookery browser install${R}"
+			;;
+	esac
+}
+
+# ── autostart ────────────────────────────────────────────────────────────────
+#
+# Offered here because "it does not come back after a reboot" is the kind of
+# thing nobody discovers until an agent has silently missed a day of runs.
+#
+# The registering itself is `rookery service install`, not shell written twice.
+# The host tools above are ordinary OS packages and this script installs them
+# directly, but autostart is Rookery's own configuration: it means generating a
+# systemd unit or a Task Scheduler document against the binary's real path, and
+# that knowledge belongs in Go where it is tested once. install.ps1 cannot even
+# be syntax-checked on the development host.
+handle_autostart() {
+	[ "${ROOKERY_NO_SERVICE:-}" = 1 ] && return 0
+
+	# macOS has no autostart integration yet, and offering one that does nothing
+	# is worse than not asking.
+	[ "$OS" = darwin ] && return 0
+
+	step "Start automatically"
+	say "  Rookery can start when you log in, so agents and reminders keep running."
+
+	if [ "${ROOKERY_YES:-}" = 1 ]; then
+		reply=y
+	elif [ -t 0 ]; then
+		printf '  Set that up now? [y/N] '
+		read -r reply </dev/tty 2>/dev/null || reply=n
+	else
+		say "  Later:  ${B}rookery service install${R}"
+		return 0
+	fi
+
+	case "$reply" in
+		y|Y|yes|YES)
+			if "$BIN_DIR/rookery" service install; then
+				say "  ${GRN}done${R}"
+			else
+				warn "could not set it up — run it yourself: rookery service install"
+			fi
+			;;
+		*)
+			say "  Skipped. Later:  ${B}rookery service install${R}"
+			;;
+	esac
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 need curl
@@ -308,6 +401,8 @@ INSTALLED_VERSION="$("$BIN_DIR/rookery" version 2>/dev/null | head -n 1 || true)
 say "  ${GRN}${INSTALLED_VERSION}${R}"
 
 handle_host_tools
+handle_browser
+handle_autostart
 
 say ""
 step "Done"

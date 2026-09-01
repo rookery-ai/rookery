@@ -134,6 +134,9 @@ hundred megabytes and therefore **not installed by default**. Without it
 everything else works and only those pages are unreadable; `/healthz` reports
 which state you are in.
 
+`rookery onboard` offers it during setup on Linux, macOS and Windows alike, and
+says nothing about it if you already have it. To install it separately:
+
 ```bash
 rookery browser install     # Node driver + Chromium, once
 rookery browser status
@@ -163,7 +166,7 @@ requests with a script, and no browser permission covers those.
 | linux amd64/arm64 | Landlock | systemd user unit |
 | container (linux) | Landlock | runtime-managed |
 | darwin amd64/arm64 | none | launchd (not yet shipped) |
-| windows amd64/arm64 | none | SCM (not yet shipped) |
+| windows amd64/arm64 | none | Task Scheduler logon task |
 
 **Off Linux there is no filesystem sandbox** — coder subprocesses run
 unconfined. `GET /healthz` reports that, along with version, coder mode and

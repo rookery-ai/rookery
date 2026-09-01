@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.12.0](https://github.com/rookery-ai/rookery/compare/v0.11.0...v0.12.0) (2026-08-31)
+
+
+### Features
+
+* **convert:** keep embedded images and the editor's own constructs ([#275](https://github.com/rookery-ai/rookery/issues/275)) ([c50adbd](https://github.com/rookery-ai/rookery/commit/c50adbdfdc38fbfbde1c4b617f1afae1ac9976c4))
+
+
+### Bug Fixes
+
+* **convert:** escape extracted text so imported notes stay editable ([#273](https://github.com/rookery-ai/rookery/issues/273)) ([2248c3a](https://github.com/rookery-ai/rookery/commit/2248c3a94f90b41227dc2d7198e68a5389220335))
+* **pdf:** make export find the bundled Chromium, and OCR scanned imports ([#274](https://github.com/rookery-ai/rookery/issues/274)) ([8300285](https://github.com/rookery-ai/rookery/commit/8300285cc5934aafcc4bb0244effe76609987a24))
+
+## [0.11.0](https://github.com/rookery-ai/rookery/compare/v0.10.0...v0.11.0) (2026-08-28)
+
+
+### Features
+
+* **onboard:** offer the browser during setup, and stay quiet when it is there ([#270](https://github.com/rookery-ai/rookery/issues/270)) ([9b8721e](https://github.com/rookery-ai/rookery/commit/9b8721ec1eefe0827d82405312cf30fb5b827e8c))
+
+## [0.10.0](https://github.com/rookery-ai/rookery/compare/v0.9.1...v0.10.0) (2026-08-28)
+
+
+### Features
+
+* **browser:** read and act on JavaScript-rendered pages ([#265](https://github.com/rookery-ai/rookery/issues/265)) ([99cd586](https://github.com/rookery-ai/rookery/commit/99cd5864502511cc9a7d62ed3b0e2e61de5ff3a2))
+
 ## [0.9.1](https://github.com/rookery-ai/rookery/compare/v0.9.0...v0.9.1) (2026-08-24)
 
 

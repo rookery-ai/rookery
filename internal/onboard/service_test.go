@@ -5,23 +5,82 @@ import (
 	"testing"
 )
 
-// Only Linux can have a service installed today. Claiming otherwise would mean
-// shipping a launchd plist or a Windows service wrapper that half works, and a
-// half-working service is harder to diagnose than none at all.
-func TestOnlyLinuxIsManaged(t *testing.T) {
-	if !ServiceFor("linux").Managed {
-		t.Error("linux should be managed — the systemd user unit already ships in the deb and rpm")
+// Linux and Windows can have autostart installed; macOS still cannot.
+//
+// Windows joined deliberately, and the old wording of this test — "no service
+// integration is built for it" — was accurate right up until it was not. It is
+// a Task Scheduler logon task rather than a Service Control Manager service:
+// see ServiceFor's comment for why an SCM service is the wrong mechanism for a
+// server whose data lives in the user's own profile.
+//
+// macOS stays unmanaged, and claiming otherwise would mean shipping a launchd
+// plist that half works — harder to diagnose than none at all.
+func TestOnlyLinuxAndWindowsAreManaged(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		svc := ServiceFor(goos)
+		if !svc.Managed {
+			t.Errorf("%s should be managed", goos)
+		}
+		if svc.Kind == "" {
+			t.Errorf("%s does not name its mechanism", goos)
+		}
+		if svc.Foreground == "" {
+			t.Errorf("%s does not say how to run the server by hand", goos)
+		}
 	}
-	for _, goos := range []string{"darwin", "windows", "freebsd"} {
+	for _, goos := range []string{"darwin", "freebsd"} {
 		svc := ServiceFor(goos)
 		if svc.Managed {
-			t.Errorf("%s reports Managed, but no service integration is built for it", goos)
+			t.Errorf("%s reports Managed, but no autostart integration is built for it", goos)
 		}
 		if strings.TrimSpace(svc.Note) == "" {
 			t.Errorf("%s has no Note explaining what to do instead", goos)
 		}
 		if svc.Foreground == "" {
 			t.Errorf("%s does not say how to run the server by hand", goos)
+		}
+	}
+}
+
+// A managed platform must not also carry a Note telling the operator autostart
+// is unavailable. The two would contradict each other, and `upgrade` prints
+// whichever it finds.
+func TestAManagedPlatformDoesNotAlsoApologise(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		if note := strings.TrimSpace(ServiceFor(goos).Note); note != "" {
+			t.Errorf("%s is managed but still carries a Note: %q", goos, note)
+		}
+	}
+}
+
+// Every managed platform must name its OWN restart command.
+//
+// `rookery upgrade` prints this, and it used to hardcode systemctl behind a
+// bare `if svc.Managed`. That was right only while Linux was the sole managed
+// platform — the moment Windows became one, the same branch would have told a
+// Windows operator to run systemctl, which is exactly the bug the comment at
+// that call site records having already fixed once for macOS and Windows.
+func TestEveryManagedPlatformNamesItsOwnRestartCommand(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		svc := ServiceFor(goos)
+		if strings.TrimSpace(svc.Restart) == "" {
+			t.Errorf("%s is managed but names no restart command; upgrade has nothing to print", goos)
+		}
+	}
+	if strings.Contains(ServiceFor("windows").Restart, "systemctl") {
+		t.Error("Windows must not be told to run systemctl — there is none")
+	}
+	if !strings.Contains(ServiceFor("linux").Restart, "systemctl") {
+		t.Error("linux restarts through systemctl")
+	}
+}
+
+// An unmanaged platform has nothing to restart, and offering a command would be
+// worse than the honest fallback of "restart the one you are running".
+func TestUnmanagedPlatformsNameNoRestartCommand(t *testing.T) {
+	for _, goos := range []string{"darwin", "freebsd"} {
+		if r := strings.TrimSpace(ServiceFor(goos).Restart); r != "" {
+			t.Errorf("%s is not managed but offers a restart command: %q", goos, r)
 		}
 	}
 }

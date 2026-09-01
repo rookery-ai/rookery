@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,53 +52,119 @@ var pdftotextPath = func() string {
 func pdfToMarkdown(data []byte, opt Options) (Result, error) {
 	res := Result{Kind: KindPDF, Title: titleFromFilename(opt.Filename)}
 
-	text, extractor, pages, err := extractPDFText(data)
+	ex, err := extractPDFText(data)
 	if err != nil {
 		return Result{}, err
 	}
-	res.Extractor = extractor
+	text, pages := ex.text, ex.pages
+	res.Extractor = ex.extractor
 
 	text = strings.TrimSpace(text)
+
+	// A PDF with no text layer is a SCAN, and a scan is exactly what OCR is for.
+	// This used to report "OCR is not available" unconditionally — on a host
+	// where both tools needed are installed, and one of them (tesseract) is a
+	// declared host tool whose stated purpose is "OCR for scanned documents and
+	// images". So the most common failing upload, a scanned page, produced a
+	// note containing an apology and nothing else while the means to read it sat
+	// on the same machine. The thin-text case takes the same path: a page or two
+	// of stray ligatures is a scan that fooled the byte count, not a document.
+	thin := pages > 0 && len(text)/pages < minTextPerPage
+	if text == "" || thin {
+		if ocrText, err := ocrPDF(data, pages); err == nil {
+			ocrText = strings.TrimSpace(ocrText)
+			// Prefer whichever reading is LONGER. A thin text layer is usually
+			// worse than the OCR of the same page, but not always — a PDF with
+			// real text and one huge image can trip the threshold, and throwing
+			// a correct text layer away for a guess would be the worse error.
+			if len(ocrText) > len(text) {
+				text = ocrText
+				res.Extractor += "+ocr"
+				res.Warnings = append(res.Warnings,
+					"no usable text layer; the text in this note was read from the page images by OCR and may contain recognition errors")
+			}
+		}
+	}
+	// Checked after OCR, so this is reached only when there was no text layer
+	// AND OCR could not supply one — either because the tools are missing or
+	// because the pages really are blank. ocrUnavailableWarning tells those two
+	// cases apart rather than always blaming a missing tool.
 	if text == "" {
 		res.Markdown = "(no text layer could be extracted from this PDF)\n"
-		res.Warnings = append(res.Warnings,
-			"no text extracted; the PDF is likely scanned images (OCR is not available)")
+		res.Warnings = append(res.Warnings, ocrUnavailableWarning())
 		return res, nil
 	}
-	if pages > 0 && len(text)/pages < minTextPerPage {
+	if thin && !strings.HasSuffix(res.Extractor, "+ocr") {
 		res.Warnings = append(res.Warnings, fmt.Sprintf(
 			"only %d bytes of text across %d pages; the PDF may be scanned or use fonts this extractor cannot decode — treat the content as incomplete",
 			len(text), pages))
 	}
-	if extractor == "pure-go" {
-		// Actionable, and aimed at who can actually fix it: pdftotext runs in the
-		// host server process, so installing poppler on the HOST (dnf install
-		// poppler-utils / apt install poppler-utils, or into the operator's
-		// ~/.local/bin) is what upgrades this — an agent installing tools into its
-		// own sandbox cannot help an in-process converter.
-		res.Warnings = append(res.Warnings,
-			"extracted without pdftotext; layout and column order may be imperfect — "+
-				"install poppler-utils on the host for higher-fidelity PDF text")
+	if ex.extractor == "pure-go" {
+		switch {
+		case ex.popplerErr != nil:
+			// Telling someone to install what they already have sends them to
+			// fix the wrong thing. pdftotext WAS found and it failed, so name
+			// that instead; the server log carries the underlying error.
+			res.Warnings = append(res.Warnings,
+				"pdftotext is installed but failed on this file, so a weaker pure-Go extractor was used — "+
+					"layout and column order may be imperfect; see the server log for the reason")
+		default:
+			// Actionable, and aimed at who can actually fix it: pdftotext runs in
+			// the host server process, so installing poppler on the HOST (dnf
+			// install poppler-utils / apt install poppler-utils, or into the
+			// operator's ~/.local/bin) is what upgrades this — an agent
+			// installing tools into its own sandbox cannot help an in-process
+			// converter.
+			res.Warnings = append(res.Warnings,
+				"extracted without pdftotext; layout and column order may be imperfect — "+
+					"install poppler-utils on the host for higher-fidelity PDF text")
+		}
 	}
+	// paragraphize authors the markdown structure; the PDF's own characters are
+	// escaped inside it, per paragraph, so that a leading "-" is judged against
+	// the paragraph it actually starts. A PDF is full of the characters that
+	// break the editor round trip — bracketed citations like "[12]", footnote
+	// markers, "<" in code listings — so without this an academic paper reliably
+	// imported into a note that could not be edited.
 	res.Markdown = normalizeText(paragraphize(text))
 	return res, nil
 }
 
-// extractPDFText returns the document text, the extractor that produced it, and
-// the page count.
-func extractPDFText(data []byte) (string, string, int, error) {
+// pdfExtraction is what extractPDFText produces. It carries popplerErr
+// separately from err because the two mean opposite things: err failed the
+// whole conversion, while popplerErr means poppler was PRESENT and failed, and
+// the pure-Go fallback ran instead. That distinction decides which warning the
+// reader gets, and losing it is what made the converter advise installing a
+// tool the host already had.
+type pdfExtraction struct {
+	text       string
+	extractor  string
+	pages      int
+	popplerErr error
+}
+
+func extractPDFText(data []byte) (pdfExtraction, error) {
+	var popplerErr error
 	if bin := pdftotextPath(); bin != "" {
-		if text, pages, err := runPdftotext(bin, data); err == nil {
-			return text, "pdftotext", pages, nil
+		text, pages, err := runPdftotext(bin, data)
+		if err == nil {
+			return pdfExtraction{text: text, extractor: "pdftotext", pages: pages}, nil
 		}
-		// Fall through: a pdftotext failure should not fail the whole conversion
-		// when a pure-Go extractor is available.
+		// A pdftotext failure must not fail the whole conversion when a pure-Go
+		// extractor is available — but it must not vanish either. The error used
+		// to be discarded entirely, so a poppler that was present and FAILING
+		// produced a note telling the operator to install poppler, with nothing
+		// anywhere to contradict it. image.go's runTesseract has always folded
+		// stderr into its error; this is the same policy.
+		slog.Warn("convert: pdftotext failed; falling back to the pure-Go extractor",
+			"bin", bin, "err", err)
+		popplerErr = err
 	}
 	text, pages, err := extractPDFPureGo(data)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("convert: pdf: %w", err)
+		return pdfExtraction{}, fmt.Errorf("convert: pdf: %w", err)
 	}
-	return text, "pure-go", pages, nil
+	return pdfExtraction{text: text, extractor: "pure-go", pages: pages, popplerErr: popplerErr}, nil
 }
 
 // runPdftotext writes the bytes to a temp file and shells out. -layout keeps
@@ -114,10 +181,17 @@ func runPdftotext(bin string, data []byte) (string, int, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	var out bytes.Buffer
+	var out, errBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, bin, "-layout", "-enc", "UTF-8", src, "-")
 	cmd.Stdout = &out
+	// Captured so a failure says WHY. Without it every pdftotext error — a
+	// damaged file, an encrypted one, a missing shared library — arrived here
+	// as a bare "exit status 1" and was then discarded entirely.
+	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
+		if msg := tailLines(errBuf.String(), 3); msg != "" {
+			return "", 0, fmt.Errorf("%w: %s", err, msg)
+		}
 		return "", 0, err
 	}
 	text := out.String()
@@ -216,9 +290,18 @@ func paragraphize(text string) string {
 				kept = append(kept, s)
 			}
 		}
-		if len(kept) > 0 {
-			out = append(out, strings.Join(kept, " "))
+		if len(kept) == 0 {
+			continue
 		}
+		// runPdftotext passes -layout precisely so columns survive; collapsing
+		// every block to one line threw that away and turned each table into a
+		// run-on paragraph with the figures interleaved. Checked before the
+		// join, since the alignment only exists in the unjoined lines.
+		if rows, ok := looksTabular(kept); ok {
+			out = append(out, tabularBlock(rows))
+			continue
+		}
+		out = append(out, escapeLeadingMarker(EscapeInline(strings.Join(kept, " "))))
 	}
 	return strings.Join(out, "\n\n")
 }

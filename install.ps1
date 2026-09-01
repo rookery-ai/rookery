@@ -27,13 +27,21 @@
 
 .PARAMETER NoTools
     Skip the host-tool step entirely.
+
+.PARAMETER NoService
+    Skip the autostart step entirely.
+
+.PARAMETER NoBrowser
+    Skip the browser step entirely.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = $env:ROOKERY_VERSION,
     [string]$BinDir  = $env:ROOKERY_BIN_DIR,
     [switch]$Yes,
-    [switch]$NoTools
+    [switch]$NoTools,
+    [switch]$NoService,
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,11 +116,16 @@ $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 # Chocolatey or Scoop. Poppler is the one whose package id is not obvious —
 # oschwartz10612.Poppler is the maintained Windows build, and it is what ships
 # pdftotext.exe.
+#
+# `Names` is a list, not a single command, because python.org's distribution —
+# which is what Python.Python.3.13 installs — ships python.exe and py.exe and no
+# python3.exe. Probing one spelling is what let this script and `rookery
+# onboard` disagree about whether Python was installed at all.
 $HostTools = @(
-    @{ Command = 'python';    Winget = 'Python.Python.3.13';       Purpose = 'agent-tool AST guardrail (without it, generated scripts run unchecked)' }
-    @{ Command = 'rg';        Winget = 'BurntSushi.ripgrep.MSVC';  Purpose = 'knowledge-base search' }
-    @{ Command = 'pdftotext'; Winget = 'oschwartz10612.Poppler';   Purpose = 'PDF text extraction' }
-    @{ Command = 'tesseract'; Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images' }
+    @{ Names = @('python', 'python3', 'py'); Winget = 'Python.Python.3.13';       Purpose = 'agent-tool AST guardrail (without it, generated scripts run unchecked)'; Verify = $true }
+    @{ Names = @('rg');                      Winget = 'BurntSushi.ripgrep.MSVC';  Purpose = 'knowledge-base search' }
+    @{ Names = @('pdftotext');               Winget = 'oschwartz10612.Poppler';   Purpose = 'PDF text extraction' }
+    @{ Names = @('tesseract');               Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images' }
 )
 
 function Test-Command {
@@ -120,10 +133,32 @@ function Test-Command {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+# Stock Windows ships an App Execution Alias at
+# %LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe which Get-Command resolves
+# happily and which opens the Microsoft Store instead of running Python. So a
+# tool marked Verify is proved by RUNNING it: existence alone would let this
+# script decide Python is present and skip installing it, leaving the AST
+# guardrail disabled with nothing said. internal/onboard applies the same rule,
+# for the same reason.
+function Test-Tool {
+    param([hashtable]$Tool)
+    foreach ($name in $Tool.Names) {
+        if (-not (Test-Command $name)) { continue }
+        if (-not $Tool.Verify) { return $true }
+        try {
+            $out = & $name --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and "$out" -match 'Python') { return $true }
+        } catch {
+            # A stub that refuses to run is not the tool.
+        }
+    }
+    return $false
+}
+
 function Install-HostTools {
     if ($NoTools -or $env:ROOKERY_NO_TOOLS -eq '1') { return }
 
-    $missing = @($HostTools | Where-Object { -not (Test-Command $_.Command) })
+    $missing = @($HostTools | Where-Object { -not (Test-Tool $_) })
     if ($missing.Count -eq 0) {
         Write-Step "Host tools: all present"
         return
@@ -132,7 +167,7 @@ function Install-HostTools {
     Write-Step "Host tools"
     Write-Host "  Rookery runs without these, but some features quietly degrade:"
     foreach ($t in $missing) {
-        Write-Host ("    {0,-10} {1}" -f $t.Command, $t.Purpose)
+        Write-Host ("    {0,-10} {1}" -f $t.Names[0], $t.Purpose)
     }
     Write-Host ""
 
@@ -180,6 +215,93 @@ function Install-HostTools {
     # findable until a new shell. Saying so up front prevents a "it says it
     # installed but rookery can't see it" report.
     Write-Warn "newly installed tools appear on PATH in a NEW terminal, not this one."
+}
+
+# ── browser ──────────────────────────────────────────────────────────────────
+#
+# Offered here so `rookery onboard` does not have to.
+#
+# Unlike the host tools above, this is NOT a winget package. Playwright's
+# runtime is version-matched to the binary — its cache directory is named after
+# the Playwright version compiled in — so this script cannot fetch the right one
+# without hardcoding that version and breaking on every dependency bump. And
+# `winget install Google.Chrome` would not help: Rookery needs Playwright's own
+# driver whatever browser is present. So the binary just installed and verified
+# does the fetching, and it decides for itself whether an existing Chrome or
+# Edge makes the larger download unnecessary.
+function Install-Browser {
+    param([string]$Exe)
+
+    if ($NoBrowser -or $env:ROOKERY_NO_BROWSER -eq '1') { return }
+
+    # Nothing to say when the machine can already do this.
+    & $Exe browser status *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+
+    Write-Step "Browser (optional)"
+    Write-Host "  Lets agents read pages that only appear once JavaScript has run, and"
+    Write-Host "  lets them sign in and click through a flow. Everything else works without it."
+
+    $answer = 'n'
+    if ($Yes -or $env:ROOKERY_YES -eq '1') {
+        $answer = 'y'
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $answer = Read-Host "  Download it now? [y/N]"
+    } else {
+        Write-Host "  Later:  rookery browser install"
+        return
+    }
+
+    if ($answer -notmatch '^(y|yes)$') {
+        Write-Host "  Skipped. Later:  rookery browser install"
+        return
+    }
+
+    & $Exe browser install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "could not install it — run it yourself: rookery browser install"
+    }
+}
+
+# ── autostart ────────────────────────────────────────────────────────────────
+#
+# Windows had no autostart at all: the installer finished, the operator
+# restarted the laptop, and nothing came back. Nothing reported that either —
+# agents simply stopped running.
+#
+# The registering is `rookery service install`, not PowerShell. The host tools
+# above are ordinary OS packages and this script installs them itself, but
+# autostart is Rookery's own configuration: it means generating a Task Scheduler
+# document against the binary's real path, and that belongs in Go where it is
+# unit-tested. This file is not even syntax-checked on the development host,
+# which is the last place that knowledge should live.
+function Install-Autostart {
+    param([string]$Exe)
+
+    if ($NoService -or $env:ROOKERY_NO_SERVICE -eq '1') { return }
+
+    Write-Step "Start automatically"
+    Write-Host "  Rookery can start when you sign in, so agents and reminders keep running."
+
+    $answer = 'n'
+    if ($Yes -or $env:ROOKERY_YES -eq '1') {
+        $answer = 'y'
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        $answer = Read-Host "  Set that up now? [y/N]"
+    } else {
+        Write-Host "  Later:  rookery service install"
+        return
+    }
+
+    if ($answer -notmatch '^(y|yes)$') {
+        Write-Host "  Skipped. Later:  rookery service install"
+        return
+    }
+
+    & $Exe service install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "could not set it up — run it yourself: rookery service install"
+    }
 }
 
 # ── release resolution ───────────────────────────────────────────────────────
@@ -269,6 +391,8 @@ try {
     }
 
     Install-HostTools
+    Install-Browser $dest
+    Install-Autostart $dest
 
     Write-Host ""
     Write-Step "Done"

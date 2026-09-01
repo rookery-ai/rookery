@@ -193,6 +193,15 @@ func (v *Vault) ImportFile(workspaceID string, in ImportInput) (ImportResult, er
 		return ImportResult{}, cleanupOrphan(v, workspaceID, originalRel, fmt.Errorf("import: locate free path for note: %w", err))
 	}
 
+	// Images extracted from inside the document are written alongside the note
+	// and the placeholders in the markdown are rewritten to point at them. The
+	// converter cannot do this itself — internal/convert is a pure function with
+	// no vault and no filesystem — so the rewrite belongs here, at the one choke
+	// point every ingest door already funnels through.
+	assetPaths, assetWarnings := v.writeImportAssets(workspaceID, res.Assets)
+	res.Markdown = rewriteAssetRefs(res.Markdown, assetPaths)
+	res.Warnings = append(res.Warnings, assetWarnings...)
+
 	title := in.Title
 	if title == "" {
 		title = res.Title

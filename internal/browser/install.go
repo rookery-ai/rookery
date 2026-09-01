@@ -13,6 +13,10 @@ import (
 //
 // Only Chromium is installed. Playwright's default is all three engines, which
 // would pull roughly a gigabyte for two browsers nothing here ever launches.
+// When the operator already has Chrome or Edge, only the driver is fetched.
+// Playwright drives a system browser through its own Node driver, so the driver
+// is a floor that cannot be skipped — but the Chromium build, which is the
+// larger half of the download, can be.
 func Install(out io.Writer, withDeps bool) error {
 	opts := &playwright.RunOptions{
 		Browsers: []string{"chromium"},
@@ -21,10 +25,37 @@ func Install(out io.Writer, withDeps bool) error {
 		Stderr:   out,
 		Verbose:  true,
 	}
+
+	// Resolve BEFORE installing: afterwards a managed Chromium exists and the
+	// question answers itself.
+	if c := Resolve(); c.OK && c.Source == SourceChannel {
+		fmt.Fprintf(out, "Using %s — downloading the driver only.\n", c.Describe())
+		opts.Browsers = nil
+		opts.SkipInstallBrowsers = true
+	} else if _, path := systemChannel(currentResolveHost()); path != "" {
+		// A system browser is present but the driver is missing, so Resolve
+		// could not report it yet. Same outcome, reached a turn earlier.
+		fmt.Fprintln(out, "Found a browser already installed — downloading the driver only.")
+		opts.Browsers = nil
+		opts.SkipInstallBrowsers = true
+	}
+
 	if err := playwright.Install(opts); err != nil {
 		return fmt.Errorf("install browser runtime: %w", err)
 	}
 	return nil
+}
+
+// InstallSize describes what `rookery browser install` is about to download, so
+// the offer can say so rather than quoting a number that is wrong half the time.
+//
+// Stating this matters: the ~200 MB figure is the driver plus a Chromium build,
+// and an owner who already has Chrome pays only the first.
+func InstallSize() string {
+	if _, path := systemChannel(currentResolveHost()); path != "" {
+		return "about 70 MB"
+	}
+	return "about 200 MB"
 }
 
 // SystemDepsHint describes the shared libraries Chromium needs, in the form of
