@@ -500,7 +500,10 @@ test("quick actions link to the four create surfaces", async () => {
   for (const [name, href] of [
     [/new agent/i, "/agents/new"],
     [/new note/i, "/kb"],
-    [/start chat/i, "/chats"],
+    // ?new=1 is load-bearing, not decoration: the bare path lands on the chat
+    // list's empty state, so the control named Start chat started nothing.
+    // ChatsPage reads the parameter and creates the chat.
+    [/start chat/i, "/chats?new=1"],
     [/connect a service/i, "/connections"],
   ] as const) {
     const link = await screen.findByRole("link", { name });

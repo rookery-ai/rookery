@@ -503,3 +503,54 @@ test("the message scroll region carries the same 10% gutter as the composer", as
   expect(scroll.className).toContain("px-[10%]");
   expect(scroll.className).not.toContain("px-4");
 });
+
+// ── ?new=1 — Home's "Start chat" ────────────────────────────────────────────
+//
+// The Home quick action is named "Start chat" and used to land on the bare
+// list, whose empty state reads "Select a chat or start a new one" — so the
+// button that says it starts a chat started nothing, and the user had to find
+// "New chat" in the context pane themselves.
+//
+// Auto-creation is keyed on ?new=1 rather than on "no chat is selected"
+// because the icon rail's own /chats entry carries no parameter: browsing to
+// Chats to READ history must not mint an empty chat on every visit.
+
+function countCreates() {
+  const calls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  return calls.filter(
+    ([input, init]) =>
+      String(input) === "/api/v1/chats" &&
+      ((init as RequestInit | undefined)?.method ?? "GET") === "POST",
+  ).length;
+}
+
+test("?new=1 creates a chat, opens it, and puts the caret in the composer", async () => {
+  mockFetch();
+  wrap("/?new=1");
+
+  const box = await screen.findByPlaceholderText("Message…");
+  await waitFor(() => expect(document.activeElement).toBe(box));
+  expect(screen.queryByText(/select a chat or start a new one/i)).toBeNull();
+});
+
+// The effect that creates the chat depends on the chat list, which refetches.
+// Without the ref guard every refetch mints another chat — the same shape as
+// ChatWindow's streamOpenRef.
+test("?new=1 creates exactly one chat even as the list refetches", async () => {
+  mockFetch();
+  const { rerender } = wrap("/?new=1");
+  await screen.findByPlaceholderText("Message…");
+
+  rerender(<div />);
+  await waitFor(() => expect(countCreates()).toBe(1));
+});
+
+// The rail links to a bare /chats. Creating there would hand a user browsing
+// their own history a new empty chat on every visit.
+test("plain /chats creates nothing and still shows the empty state", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText(/select a chat or start a new one/i);
+
+  expect(countCreates()).toBe(0);
+});
