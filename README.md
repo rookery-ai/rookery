@@ -11,9 +11,46 @@
   <a href="https://github.com/rookery-ai/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
-Everything you know in one markdown knowledge base — what you write, and what
-your connected services bring in. Ask it anything, send an agent out for what
-isn't there yet, or hand over the whole job and let it run on a schedule you set.
+Agents that work on your behalf, on hardware you own — your knowledge, your
+accounts, and the pages that have no API.
+
+Rookery is a platform for agents that work on your behalf, running on hardware
+you own. You install one program. It gives you a place to keep what you know, as
+plain markdown on your own disk, a way to build agents by describing them in
+plain language, and a way for those agents to reach the services you already
+use — email, calendars, repositories, home automation, whatever you connect.
+They run on a schedule, or when you ask, and they tell you what happened. The
+whole thing is designed to sit on a machine that stays on, so the work carries
+on while you are not watching.
+
+It is not a workflow builder. There is no canvas and no nodes to wire together;
+you describe the outcome, not the path to it.
+
+<!--
+SCREENSHOT SLOT — not captured yet. Two shots, in this order.
+
+1. THE RUN TIMELINE (here). The ordered steps of a real run, with the approval
+   gate visible IN THE SAME FRAME as the payment step. Capability and restraint
+   together read as competence; the same capability with the restraint explained
+   underneath reads as recklessness discovered. Secret fields must show the
+   PLACEHOLDERS (${CARD_NUMBER}, ${CVV}) and never values — the only safe shot,
+   and the more convincing one, because it is the visible evidence that the
+   model never receives them.
+
+2. THE BUILD CONVERSATION (under "What you get"). The designer asking its
+   clarifying questions and proposing a plan, with "Allow and build" visible.
+
+Use a test card, a sandbox account or a throwaway. Never real payment data: a
+screenshot cannot be redacted, which is exactly why agents are never given one.
+
+Markup, ready to uncomment once the file exists. It is commented rather than
+live because an <img> pointing at a missing file renders as a broken image on
+GitHub, which is worse than no image at all:
+
+<p align="center">
+  <img src="docs/assets/run-timeline.png" alt="A run timeline: opened the page, signed in, found one unpaid bill for the previous month, filled the card fields from stored secrets, then stopped before paying and asked for approval" width="100%">
+</p>
+-->
 
 Full documentation lives at **[rookery.cloud/docs](https://rookery.cloud/docs)**.
 
@@ -184,9 +221,15 @@ read the result from CI rather than reproducing it locally; `make ci-fmt`,
 `ci-vet`, `ci-ui` and `ci-docs` are the quick targeted checks worth running
 first.
 
-The three README images are generated —
-edit `scripts/gen-readme-assets.py`, never `docs/assets/*.svg`.
+The three README **diagrams** are generated — edit
+`scripts/gen-readme-assets.py`, never `docs/assets/*.svg`. Screenshots are not:
+those are captured by hand, and the brief for each is in a comment beside its
+slot at the top of this file.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+**Apache-2.0, permanently.** See [LICENSE](LICENSE).
+
+There is no contributor licence agreement. Without one, nobody — the maintainers
+included — can relicense this project unilaterally, which makes the line above a
+structural fact about the repository rather than a statement of intent.
