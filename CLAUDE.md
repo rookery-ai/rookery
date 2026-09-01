@@ -240,7 +240,7 @@ non-public hostnames, so a `.lan` address fails Google's validation outright.
 | linux amd64/arm64 | Landlock | systemd **user** unit + `enable-linger` | 1 |
 | container (linux) | Landlock (verified ABI 8 under rootless Podman) | runtime-managed | 1 |
 | darwin amd64/arm64 | **none** | launchd (not yet shipped) | 2 |
-| windows amd64/arm64 | **none** | SCM (not yet shipped) | 2 |
+| windows amd64/arm64 | **none** | Task Scheduler logon task | 2 |
 
 **Off Linux there is no filesystem sandbox at all** — `sandbox.Supported()`
 returns false and callers do not wrap, so coder subprocesses run unconfined.
@@ -251,7 +251,49 @@ Linux + macOS) and `install.ps1` (Windows). Each does exactly one job: fetch the
 goreleaser archive for the detected platform, verify it against the release's
 `checksums.txt`, put the binary on `PATH`, offer the four host tools, and hand
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
-A Homebrew tap and Windows service registration remain deferred.
+A Homebrew tap remains deferred, as does launchd registration on macOS.
+
+**Windows autostart is a Task Scheduler logon task, not an SCM service, and
+`rookery service` is what registers it.** Windows had no autostart at all: the
+installer finished, the machine was restarted, and nothing came back — silently,
+because nothing had ever been registered. The mechanism is decided by one
+constraint: it must work for a standard non-administrator, with no stored
+credentials, and reach a data directory under the user's own profile. An SCM
+service needs administrator rights and then runs as a different principal, which
+reintroduces exactly the problem the Linux side avoids by using a systemd **user**
+unit; relying on `S4U` would need a batch-logon right a standard user may not
+hold. The accepted cost is a visible console window — every way of hiding it
+trades a cosmetic problem for a credential prompt or an elevation requirement.
+
+**Four Task Scheduler defaults are wrong for a long-running server and all four
+fail silently**, which is why `TaskXMLFor` sets them explicitly and a test pins
+each: `DisallowStartIfOnBatteries` defaults **true**, so on a laptop — the machine
+this project documents as its common case — the task usually would not start at
+all; `StopIfGoingOnBatteries` defaults **true**, killing the server when the
+charger is unplugged; `ExecutionTimeLimit` defaults to **72 hours**, after which
+the task is terminated with no error; and `MultipleInstancesPolicy` decides
+whether a second server is started that cannot bind the port. The XML is written
+**UTF-16 with a BOM** because the declaration says UTF-16 — schtasks rejects a
+mismatch with an "incorrectly formatted" error that names nothing useful — and
+paths and account names are XML-escaped, since `&` is legal in both.
+
+**`ServiceSupport.Restart` is a field, not a string built at the call site.**
+`rookery upgrade` hardcoded `systemctl --user restart` behind `if svc.Managed`,
+which was correct only while Linux was the sole managed platform; the moment
+Windows became one, the same branch would have told a Windows operator to run a
+command that does not exist — the precise bug the comment at that call site
+records having already fixed once for macOS and Windows.
+
+**The installers ASK and Go registers, and that boundary is load-bearing.**
+External dependencies (python3, ripgrep, Poppler, Tesseract) are ordinary OS
+packages and both installers install them directly through the host's package
+manager. Autostart is Rookery's own configuration — it means generating a unit or
+a task document against the binary's real path — so it lives in Go, where it is
+tested once and also serves the operator who installed from an rpm, a deb or a
+tarball and never ran a script. `packaging/autostart_test.go` fails if either
+script starts writing a unit or calling `schtasks` itself, because the tempting
+fix when something misbehaves is to inline it into the shell, where nothing can
+exercise it — `install.ps1` is not even syntax-checked here.
 
 **Everything after first install is a Go subcommand, not a third and fourth shell
 script.** `rookery upgrade` and `rookery uninstall` follow the rule above: the
@@ -457,6 +499,47 @@ in `internal/agentdesigner/guardrails.go` self-skips, so generated tool scripts
 run unchecked. `rg`, `pdftotext` and `tesseract` degrade KB search, PDF
 extraction and OCR respectively.
 
+**Host tools are resolved once at startup, and the directories holding any that
+PATH cannot reach are appended to it.** `cmd/rookery`'s `augmentHostToolPath`
+runs before the command tree is built, calling `onboard.AugmentProcessPath`.
+
+This exists because a first Windows install installed ripgrep, Poppler and
+Tesseract and `rookery onboard` offered to install all three again — twice over.
+`onboard.Missing` was `exec.LookPath` and nothing else, while winget writes a
+portable package's shim into a `Links` directory the current process resolved
+before it existed, and Tesseract's installer never touches PATH at all. Setup
+also probed `python3` while `install.ps1` probed and installed `python` — and
+python.org's distribution ships no `python3.exe` — so that one could never be
+satisfied at all, on any run, forever.
+
+**Fixing detection alone would have been the more dangerous half of the bug.**
+Every consumer resolves these through `exec.LookPath`: `internal/health`'s
+`have()`, `internal/convert`, `internal/vault`'s searcher,
+`agentdesigner/guardrails.go`, and `internal/coder/hosttools.go`, which uses the
+resolved path to grant the interpreter's directory read+execute inside Landlock.
+A setup that searched harder on its own would report "all present" while OCR,
+PDF extraction and the AST guardrail stayed broken — silent where the bug it
+replaced was loud. Extending PATH fixes every one of those at once, including
+the ones not written yet, and makes the property testable:
+`internal/health`'s `TestSetupAndHealthzAgreeAboutHostTools` asserts the two
+surfaces give the same answer. An earlier draft asserted it *before* augmenting
+and failed on all four tools, which is why the call sits ahead of everything
+else in `main` and why `cmd/rookery` pins that ordering.
+
+Three details are load-bearing. `HostTool.Bins` returns per-platform spellings
+(`python3`, `python`, `py` on Windows). `VerifyByRunning` is set for python3
+alone and requires the candidate to actually run and name itself, because stock
+Windows ships an App Execution Alias at
+`%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe` that resolves like a real
+command and opens the Microsoft Store — accepting it would report a missing tool
+as PRESENT, and `WindowsApps` is deliberately excluded from the directory search
+for the same reason. And the directory search applies **no executable-bit test
+on Windows**, where Go synthesises mode from file attributes and never sets
+`0o111` — the identical trap `coder.binCandidates` records. `install.ps1`
+carries the same spellings and the same run-to-verify rule, pinned against the
+Go side by `packaging/hosttools_agreement_test.go`, because neither file is
+wrong when read alone.
+
 ## Architecture
 
 ### Entry point & wiring
@@ -501,7 +584,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
 | `internal/nethttp` | The single private-address dial guard (`GuardedClient`, `DenyPrivateAddr`, `IsBlockedIP`). Enforced at DIAL time via `net.Dialer.Control`, not by URL inspection — the only approach that catches a hostname RESOLVING into private space and every redirect hop. Blocks loopback/RFC1918/link-local/unique-local/CGNAT-tailscale/cloud-metadata, plus the NAT64/6to4/Teredo transition ranges that embed an IPv4 address (partial by nature — a network-specific NAT64 prefix cannot be enumerated). Load-bearing because chat can now reach the web and the loopback interface hosts the connector + KB bridges and their per-run bearer tokens. `internal/coder/netguard.go` delegates here; do not fork a second copy. |
 | `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
-| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. |
+| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. Also `Resolve`/`MissingOn`/`ToolDirs`/`AugmentProcessPath` — see "Host tools are resolved once, then put on PATH" below. |
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). **`Usage.Add` is the ONE place usage is summed** — there were two, and the second (in `internal/agentrunner`) enumerated three fields, so `CachedTokens`/`CacheReported` were parsed correctly, carried out of the engine correctly, and discarded one layer up: the run log reported `n/a` for a provider that reports cache statistics on *every* response. A reflection test walks the struct, so a field added later fails until `Add` carries it. `Usage` also carries `Cost`/`CostReported`, read from the provider (OpenRouter reports it on every response) rather than computed from a price table — a table is a second copy of someone else's pricing and goes stale in silence. `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
@@ -1015,6 +1098,28 @@ your first agent"**. Four things are load-bearing:
   not an agent run and that a request to say nothing wants a short sentence, not a marker.
   Deleting it from the agent surface would silence every agent on the install, so a test pins
   both halves.
+- **Fixing the surface and the protocol still left chat unable to answer the one question the
+  button invites, and the gap had the same shape a third time.** Everything in the primer
+  teaches the agent FILE — the `agents/<id>/` layout, `state.md`, the `# Suggested schedule:`
+  header — because an agent run needs it, while **nothing in `internal/prompts` named the agent
+  designer at all**. So a new owner who clicked *Explore what you can do!* and asked about
+  agents was told to create one by hand and write AGENT.md: the model was reciting this block,
+  because the file was the only concrete thing in its context and the designer did not exist as
+  far as it knew. A hand-written file is not a registered agent — no schedule row, no bound
+  connections, and it never runs — so the advice was not merely unhelpful. `platformContextBlock`
+  now carries an **`## Agents — how they are created`** section that is surface-split like the
+  output protocol: chat gets the navigation path (*Agents → New Agent → describe it in plain
+  language → Build*) plus an explicit ban on telling the owner to author AGENT.md or touch
+  `agents/`, and the **`## Agent schedule`** section drops the header syntax for chat while
+  keeping it for agents, since that line is the most file-shaped thing in the primer and chat
+  had been handed it verbatim. The agent surface is told about the designer too, for a different
+  reason: an agent that rewrites its own AGENT.md loses the change on the owner's next edit,
+  with neither side reporting the conflict. Both halves are pinned
+  (`internal/prompts/agentcreation_test.go`) — deleting the authoring detail from `SurfaceAgent`
+  would break every build — and a third test keeps the section out of the DESIGNER's own prompt,
+  which must not be told to point at the screen it is already running on. This is the same shape
+  as `TestInboxBlockPromisesNoChannelSelection`: a capability the product has, absent from the
+  prompt, yields a confident answer pointing somewhere else.
 - **The opening message is sent by `ChatWindow` AFTER navigation, never by the wizard before
   it.** `handleChatMessage` is a blocking coder call, so sending first would freeze the wizard
   on a dead button for as long as the model takes. Two guards make it once-only: a ref (per

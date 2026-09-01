@@ -176,6 +176,7 @@ func TestToDOCX_XMLEscaping(t *testing.T) {
 }
 
 func TestAvailableFormats(t *testing.T) {
+	defer stubEngineRunsOK()()
 	defer stubBundledChromium("")()
 	// HTML and DOCX are always available regardless of host.
 	restore := stubLookPath(func(string) (string, error) { return "", errors.New("not found") })
@@ -214,6 +215,7 @@ func TestToPDF_NoEngine(t *testing.T) {
 }
 
 func TestToPDF_SuccessWithStubEngine(t *testing.T) {
+	defer stubEngineRunsOK()()
 	defer stubBundledChromium("")()
 	// Pretend chromium is installed.
 	restoreLP := stubLookPath(func(bin string) (string, error) {
@@ -261,6 +263,7 @@ func TestToPDF_SuccessWithStubEngine(t *testing.T) {
 // rename was unreachable dead code, on the one engine whose whole reason for
 // having a special case is that it needs it.
 func TestToPDF_LibreOfficeDirOutput(t *testing.T) {
+	defer stubEngineRunsOK()()
 	defer stubBundledChromium("")()
 	restoreLP := stubLookPath(func(bin string) (string, error) {
 		if bin == "libreoffice" {
@@ -291,6 +294,22 @@ func TestToPDF_LibreOfficeDirOutput(t *testing.T) {
 }
 
 // --- helpers ---
+
+// stubEngineRuns makes the "can this engine actually run" probe answer without
+// executing anything.
+//
+// findPDFEngine verifies a located renderer by running it, because a name on
+// PATH can be a wrapper that hangs instead of rendering. These tests describe a
+// host they are not running on — they hand out paths like /usr/bin/chromium that
+// do not exist here — so the probe has to be stubbed alongside lookPath, exactly
+// as runEngine already is.
+func stubEngineRuns(f func(string) bool) func() {
+	prev := engineRuns
+	engineRuns = f
+	return func() { engineRuns = prev }
+}
+
+func stubEngineRunsOK() func() { return stubEngineRuns(func(string) bool { return true }) }
 
 func stubLookPath(f func(string) (string, error)) func() {
 	prev := lookPath

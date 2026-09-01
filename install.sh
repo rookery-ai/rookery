@@ -285,6 +285,51 @@ handle_browser() {
 	esac
 }
 
+# ── autostart ────────────────────────────────────────────────────────────────
+#
+# Offered here because "it does not come back after a reboot" is the kind of
+# thing nobody discovers until an agent has silently missed a day of runs.
+#
+# The registering itself is `rookery service install`, not shell written twice.
+# The host tools above are ordinary OS packages and this script installs them
+# directly, but autostart is Rookery's own configuration: it means generating a
+# systemd unit or a Task Scheduler document against the binary's real path, and
+# that knowledge belongs in Go where it is tested once. install.ps1 cannot even
+# be syntax-checked on the development host.
+handle_autostart() {
+	[ "${ROOKERY_NO_SERVICE:-}" = 1 ] && return 0
+
+	# macOS has no autostart integration yet, and offering one that does nothing
+	# is worse than not asking.
+	[ "$OS" = darwin ] && return 0
+
+	step "Start automatically"
+	say "  Rookery can start when you log in, so agents and reminders keep running."
+
+	if [ "${ROOKERY_YES:-}" = 1 ]; then
+		reply=y
+	elif [ -t 0 ]; then
+		printf '  Set that up now? [y/N] '
+		read -r reply </dev/tty 2>/dev/null || reply=n
+	else
+		say "  Later:  ${B}rookery service install${R}"
+		return 0
+	fi
+
+	case "$reply" in
+		y|Y|yes|YES)
+			if "$BIN_DIR/rookery" service install; then
+				say "  ${GRN}done${R}"
+			else
+				warn "could not set it up — run it yourself: rookery service install"
+			fi
+			;;
+		*)
+			say "  Skipped. Later:  ${B}rookery service install${R}"
+			;;
+	esac
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 need curl
@@ -357,6 +402,7 @@ say "  ${GRN}${INSTALLED_VERSION}${R}"
 
 handle_host_tools
 handle_browser
+handle_autostart
 
 say ""
 step "Done"
