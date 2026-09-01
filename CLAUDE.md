@@ -2276,6 +2276,55 @@ Only Linux needs shared libraries afterwards, which is why
 `browser.SystemDepsHint` returns `""` off Linux rather than the caller branching
 on `GOOS`; an unrecognised Linux package manager falls back to naming the
 libraries. `--yes` installs it, consistent with the host tools and the service.
+**Both installers offer it too**, so setup is not the first place an owner hears
+about it — being offered during `onboard` what the installer should already have
+handled was the reported complaint. The scripts do not resolve it themselves and
+`packaging/browser_test.go` fails if they start to: Playwright's runtime is
+version-MATCHED to the binary (the cache directory is named after the Playwright
+version compiled in), so a version hardcoded in shell would silently stop
+matching at the next dependency bump, and the symptom would be "installed and
+Rookery cannot see it" — the exact class of bug this work removes.
+
+**`browser.Resolve` decides what is launched, and it is why an owner with Chrome
+is no longer asked to download one.** Rookery used to launch exactly one thing,
+Playwright's managed Chromium, so a machine with Chrome or Edge already on it
+was offered a several-hundred-megabyte download for a capability it had. The
+order is: a managed Chromium, then a system **Chrome or Edge driven through
+Playwright's `Channel`**, then a managed Firefox. Four things are load-bearing:
+
+- **The driver is a FLOOR, not an alternative.** Playwright drives even a system
+  Chrome through its own Node driver, so `playwright.Run` fails without it
+  whatever browsers exist. Detection therefore removes the ~115 MiB Chromium
+  build from the download, never the ~70 MB driver, and `browser.InstallSize`
+  says which of the two the owner is actually being offered. `Resolve` reports a
+  missing driver as a missing DRIVER, because "no browser" would send someone
+  looking in the wrong place.
+- **`Probe().OK` now means a browser can actually be launched.** It used to ask
+  `hasChromium`, which matched a *directory* name — so a half-extracted cache
+  reported the browser present while `ChromiumExecutable` returned `""` and every
+  render failed. Resolution requires a real executable.
+- **`ChromiumExecutable` falls back to a system Chrome**, because
+  `internal/export` shells out to a Chromium **binary** rather than going through
+  Playwright. Without that fallback, the change that stopped downloading Chromium
+  would have left PDF export reporting "unavailable" on a host rendering pages
+  perfectly well — reintroducing the exact invisible-working-renderer bug that
+  function was written to fix. **The fallback cannot cover a host whose only
+  browser is a managed Firefox**, which resolves and renders while PDF export
+  stays unavailable: PDF needs a Chromium binary and there is none. Recorded as a
+  gap rather than fixed, because it requires having installed Playwright's
+  Firefox deliberately, and `rookery browser install` resolves it.
+- **Each engine carries its OWN loopback hardening, and WebKit is refused by
+  name.** The browser is routed through a guarded proxy, and every engine needs a
+  different setting to stop it bypassing that proxy for localhost, where this
+  install's own connector, KB and MCP bridges listen: an argument for Chromium
+  (`--proxy-bypass-list=<-loopback>`), a preference for Firefox
+  (`network.proxy.allow_hijacking_localhost`). WebKit has no equivalent that
+  could be verified here, and the only test asserting the *behaviour* rather than
+  the flag sits behind the `browser` build tag that CI does not run — so a
+  WebKit-only cache is reported as unusable **with a reason** rather than either
+  launched unprotected or silently read as "no browser installed".
+`Channel` is preferred over `ExecutablePath` throughout, because playwright-go
+documents the first and warns "use at your own risk" about the second.
 
 **`/healthz` reports `tools.browser` and deliberately does NOT warn about it.**
 The other four host tools are *expected* to be present — `install.sh` offers

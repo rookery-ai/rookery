@@ -237,6 +237,54 @@ handle_host_tools() {
 	esac
 }
 
+# ── browser ──────────────────────────────────────────────────────────────────
+#
+# Offered here so `rookery onboard` does not have to: the reported complaint was
+# being asked to install things during setup that the installer should already
+# have dealt with.
+#
+# Unlike the host tools above, this one is NOT a package the system installs.
+# Playwright's runtime is version-matched to the binary — the cache directory is
+# named after the Playwright version compiled into it — so a shell script cannot
+# fetch the right one without hardcoding that version in two dialects and
+# breaking on every dependency bump. `winget install Google.Chrome` would not
+# help either: Rookery would need the driver regardless. So the binary that was
+# just installed and verified does the fetching, and it also decides whether a
+# browser already present makes the larger download unnecessary.
+handle_browser() {
+	[ "${ROOKERY_NO_BROWSER:-}" = 1 ] && return 0
+
+	# Nothing to say when the machine can already do this.
+	if "$BIN_DIR/rookery" browser status >/dev/null 2>&1; then
+		return 0
+	fi
+
+	step "Browser (optional)"
+	say "  Lets agents read pages that only appear once JavaScript has run, and"
+	say "  lets them sign in and click through a flow. Everything else works without it."
+
+	if [ "${ROOKERY_YES:-}" = 1 ]; then
+		reply=y
+	elif [ -t 0 ]; then
+		printf '  Download it now? [y/N] '
+		read -r reply </dev/tty 2>/dev/null || reply=n
+	else
+		say "  Later:  ${B}rookery browser install${R}"
+		return 0
+	fi
+
+	case "$reply" in
+		y|Y|yes|YES)
+			if ! "$BIN_DIR/rookery" browser install; then
+				warn "could not install it — run it yourself: rookery browser install"
+			fi
+			;;
+		*)
+			say "  Skipped. Later:  ${B}rookery browser install${R}"
+			;;
+	esac
+}
+
 # ── autostart ────────────────────────────────────────────────────────────────
 #
 # Offered here because "it does not come back after a reboot" is the kind of
@@ -353,6 +401,7 @@ INSTALLED_VERSION="$("$BIN_DIR/rookery" version 2>/dev/null | head -n 1 || true)
 say "  ${GRN}${INSTALLED_VERSION}${R}"
 
 handle_host_tools
+handle_browser
 handle_autostart
 
 say ""

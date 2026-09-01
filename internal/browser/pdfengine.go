@@ -25,7 +25,26 @@ import (
 //
 // Deliberately a plain path lookup with no side effects, so it can be called
 // from an availability probe — the same constraint that shaped Probe.
-func ChromiumExecutable() string { return chromiumExecutableIn(browsersDir()) }
+// It falls back to a Chromium-family browser the operator already has. Without
+// that, an install whose only browser is a system Chrome would render pages
+// perfectly well through Playwright and still report PDF export as
+// unavailable — the same "invisible working renderer" this function was written
+// to fix, reintroduced by the change that stopped downloading Chromium when one
+// was already present.
+//
+// KNOWN GAP, stated rather than papered over: the fallback cannot cover a host
+// whose ONLY browser is a managed Firefox. Resolve will drive it, so /healthz
+// reports a browser and pages render, while this returns "" and PDF export
+// reports unavailable — exactly the divergence above, in the one shape the
+// fallback cannot reach, because PDF needs a Chromium binary and there is none.
+// It requires having installed Playwright's Firefox deliberately, so it is rare
+// rather than impossible. `rookery browser install` fixes it by adding Chromium.
+func ChromiumExecutable() string {
+	if p := chromiumExecutableIn(browsersDir()); p != "" {
+		return p
+	}
+	return SystemChromiumExecutable()
+}
 
 // chromiumExecutableIn is the testable half: the caller supplies the browsers
 // directory, so a test can describe a cache layout without one being installed.

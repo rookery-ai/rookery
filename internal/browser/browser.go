@@ -31,7 +31,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 // ErrUnavailable means the browser runtime is not installed on this host. It is
@@ -119,41 +118,24 @@ type Availability struct {
 // helper is unexported, it runs the driver to read its version, and — the
 // disqualifying part — it MkdirAlls the driver directory. A probe that creates
 // the thing it is probing for cannot be called from /healthz.
-func Probe() Availability { return probeAt(driverDir(), browsersDir()) }
-
-func probeAt(driver, browsers string) Availability {
-	if driver == "" || browsers == "" {
-		return Availability{Reason: "could not determine the browser cache directory for this platform"}
-	}
-	if _, err := os.Stat(filepath.Join(driver, "package", "cli.js")); err != nil {
-		return Availability{Reason: "the Playwright driver is not installed — run `rookery browser install`"}
-	}
-	if !hasChromium(browsers) {
-		return Availability{Reason: "no Chromium build is installed — run `rookery browser install`"}
-	}
-	return Availability{OK: true}
+//
+// It now answers from Resolve, so OK means "something can actually be
+// launched" rather than "a chromium- directory exists". The two used to differ:
+// hasChromium matched a DIRECTORY name, so a half-extracted cache reported the
+// browser as present while ChromiumExecutable returned "" and every render
+// failed. It also means an owner who already has Chrome or Edge is reported as
+// having a browser, because they do.
+func Probe() Availability {
+	c := Resolve()
+	return Availability{OK: c.OK, Reason: c.Reason}
 }
 
-// hasChromium reports whether any chromium build is present. It matches on the
-// directory PREFIX rather than an exact revision because Playwright names these
-// chromium-<rev> / chromium_headless_shell-<rev> and the revision changes with
-// every upgrade; pinning one would report a working install as broken the first
-// time the dependency moved.
-func hasChromium(browsers string) bool {
-	entries, err := os.ReadDir(browsers)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), "chromium-") || strings.HasPrefix(e.Name(), "chromium_headless_shell-") {
-			return true
-		}
-	}
-	return false
-}
+// probeAt and hasChromium were deleted with this change rather than left in
+// place. They had become reachable only from their own test, which would have
+// gone on passing while covering nothing — and hasChromium is the defect being
+// fixed here, since matching a DIRECTORY name reports a half-extracted cache as
+// a working browser. resolveWith answers both questions now, and it requires a
+// real executable.
 
 // driverDir resolves where playwright-go keeps node + cli.js, honouring the two
 // environment overrides the library itself honours.

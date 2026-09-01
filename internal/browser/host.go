@@ -93,26 +93,13 @@ func RunHost(ctx context.Context) error {
 	}
 	defer func() { _ = pw.Stop() }()
 
-	br, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(true),
-		Proxy:    &playwright.Proxy{Server: "http://" + proxyAddr},
-		Args: []string{
-			// Force loopback through the proxy too. Chromium bypasses the proxy
-			// for localhost by DEFAULT, which would let a page reach this
-			// install's own connector/KB/MCP bridges and their bearer tokens.
-			// Playwright already compensates for this today — measured — so the
-			// flag is currently redundant. It is set anyway because relying on
-			// an undocumented default for a security property is how that
-			// property disappears in a dependency bump; the accompanying test
-			// asserts the BEHAVIOUR (loopback refused), not the flag.
-			"--proxy-bypass-list=<-loopback>",
-			// Chromium's /dev/shm usage exceeds the default size in many
-			// containers; without this it crashes on content-heavy pages.
-			"--disable-dev-shm-usage",
-		},
-	})
+	choice := Resolve()
+	if !choice.OK {
+		return fmt.Errorf("browser host: %s", choice.Reason)
+	}
+	br, err := launchResolved(pw, choice, proxyAddr)
 	if err != nil {
-		return fmt.Errorf("browser host: launch chromium: %w", err)
+		return fmt.Errorf("browser host: launch %s: %w", choice.Engine, err)
 	}
 	defer func() { _ = br.Close() }()
 

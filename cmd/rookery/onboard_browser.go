@@ -22,15 +22,24 @@ import (
 // directory, and the "four host tools" count is asserted across four delivery
 // surfaces.
 func (o *onboarder) stepBrowser() {
+	// Silent when anything usable is present — including a Chrome or Edge the
+	// owner already had, which is now resolved rather than ignored. Being
+	// offered a several-hundred-megabyte download for a capability the machine
+	// already provides is exactly the "asking for reinstall" this setup is
+	// being cleaned up to stop.
 	if browser.Probe().OK {
-		return // already installed — nothing worth saying
+		return
 	}
 
 	o.step("Browser (optional)")
 	o.info("Lets agents and chat read pages that only appear once JavaScript has run,")
 	o.info("and lets an agent sign in, fill forms and click through a flow for you.")
 	o.info("Without it those pages come back empty; everything else works normally.")
-	o.info("About %s to download, once.", browserDownloadSize)
+	// The size is asked for rather than stated, because it depends on what is
+	// already here: a host with Chrome installed needs the Playwright driver
+	// alone, not a second browser. Quoting the larger figure to someone who
+	// will not pay it is the kind of small inaccuracy that makes people decline.
+	o.info("%s to download, once.", browser.InstallSize())
 
 	// The install itself is a Go call into the Playwright driver, which fetches
 	// the right Node build and Chromium for whatever platform this is — so this
@@ -75,10 +84,7 @@ func (o *onboarder) stepBrowser() {
 	}
 }
 
-// browserDownloadSize is stated as a range because it is two downloads whose
-// sizes move with upstream releases: the Node driver plus a Chromium build,
-// measured at ~70 MB and ~115 MiB respectively when this was written. A precise
-// number here would be wrong within a release or two and is not worth pinning —
-// the point is to tell someone on a metered connection roughly what they are
-// agreeing to.
-const browserDownloadSize = "200 MB"
+// The download size now comes from browser.InstallSize, because it is not one
+// number: it is the Node driver (~70 MB) plus, only when no browser is already
+// present, a Chromium build (~115 MiB). The old constant stated the total
+// unconditionally, which was wrong for every host that already had Chrome.
