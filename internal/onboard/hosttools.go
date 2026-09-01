@@ -20,7 +20,9 @@ import (
 // that reads as a bug rather than as a missing dependency, which is why Purpose
 // describes the CONSEQUENCE and not the tool.
 type HostTool struct {
-	// Bin is what must be on PATH — the thing actually probed.
+	// Bin is the canonical name: what /healthz reports, what every package-name
+	// map is keyed by, and the first name probed. It is NOT necessarily the only
+	// name the binary has — see WindowsBins.
 	Bin string
 	// Purpose is what stops working without it, in the operator's terms.
 	Purpose string
@@ -28,15 +30,47 @@ type HostTool struct {
 	// convenience: python3 gates the agent-tool AST guardrail, so without it
 	// generated tool scripts run unchecked.
 	Critical bool
+
+	// WindowsBins are additional names to try on Windows, in preference order
+	// after Bin.
+	//
+	// Windows is the only platform that diverges, and it does so for one tool.
+	// python.org's distribution — which is what Python.Python.3.13 installs, and
+	// what install.ps1 has always probed for as `python` — ships python.exe and
+	// py.exe and no python3.exe. So this package probing `python3` alone meant
+	// the installer could install Python, report success, and setup would report
+	// it missing on that run and on every run afterwards, because installing it
+	// again changed nothing.
+	WindowsBins []string
+
+	// VerifyByRunning requires a candidate to execute before it counts.
+	//
+	// Set for python3 alone, because it is the only one of these with a known
+	// decoy: stock Windows ships an App Execution Alias stub named python3.exe
+	// that resolves through LookPath and opens the Microsoft Store. Existence
+	// alone would report a missing tool as PRESENT, which is strictly worse than
+	// the bug this file is fixing — the guardrail self-skips silently, whereas
+	// re-offering an installed tool is at least visible.
+	VerifyByRunning bool
+}
+
+// Bins returns the candidate names for this tool on goos, in preference order.
+func (t HostTool) Bins(goos string) []string {
+	if goos != "windows" || len(t.WindowsBins) == 0 {
+		return []string{t.Bin}
+	}
+	return append([]string{t.Bin}, t.WindowsBins...)
 }
 
 // HostTools is the canonical set. /healthz reports the same four, the container
 // image installs them, and both native package formats recommend them.
 var HostTools = []HostTool{
 	{
-		Bin:      "python3",
-		Purpose:  "agent-tool AST guardrail — without it, generated tool scripts run unchecked",
-		Critical: true,
+		Bin:             "python3",
+		Purpose:         "agent-tool AST guardrail — without it, generated tool scripts run unchecked",
+		Critical:        true,
+		WindowsBins:     []string{"python", "py"},
+		VerifyByRunning: true,
 	},
 	{Bin: "rg", Purpose: "fast knowledge-base search (a slower pure-Go fallback is used without it)"},
 	{Bin: "pdftotext", Purpose: "PDF text extraction (a weaker pure-Go fallback is used without it)"},
@@ -51,17 +85,18 @@ type LookPath func(string) (string, error)
 func DefaultLookPath(bin string) (string, error) { return exec.LookPath(bin) }
 
 // Missing returns the host tools not currently resolvable, in canonical order.
+//
+// A nil look means "this machine", and gets the full resolution: PATH first,
+// then the directories the Windows installers use that are not on it. Passing a
+// look explicitly means "describe a PATH and nothing else" — no directory
+// search, no execution check — because a caller supplying a fake lookup is
+// describing a filesystem that does not exist and has nothing there to stat or
+// run.
 func Missing(look LookPath) []HostTool {
 	if look == nil {
-		look = DefaultLookPath
+		return MissingOn(CurrentHost())
 	}
-	var out []HostTool
-	for _, t := range HostTools {
-		if _, err := look(t.Bin); err != nil {
-			out = append(out, t)
-		}
-	}
-	return out
+	return MissingOn(Host{GOOS: runtime.GOOS, LookPath: look})
 }
 
 // Manager is a host package manager Rookery knows how to drive.

@@ -48,6 +48,8 @@ import (
 )
 
 func main() {
+	augmentHostToolPath(os.Args)
+
 	app := &cli.Command{
 		Name:  "rookery",
 		Usage: "Multi-user AI Agents Control Plane",
