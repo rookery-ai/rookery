@@ -2617,6 +2617,20 @@ refactor (the old incremental migrations were collapsed; data was wiped and re-c
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
 `003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind); `016_agent_run_transcript` adds `agent_runs.{transcript,silent}` (see "Run transcript and the silent flag" below); `017_agent_runs_cost` adds `agent_runs.{cached_tokens,cache_reported,cost_usd,cost_reported}` — a token count is not a price (the same 200k tokens cost different amounts on different models, and a cached prefix bills at a fraction), so "what is this agent costing me?" could not be answered from run history at all. Each figure carries a `_reported` flag rather than using 0 as a sentinel: a provider reporting zero and a provider reporting nothing are opposite findings, and a CLI coder reports neither — rendering its runs as `$0.00` would read as free rather than as unmeasured.
 
+**`db.ListAgents` is name-ordered and must stay that way; the agents PAGE is ordered in the
+handler.** The list page shows the newest agent first — the one you just built is the one you came
+back to look at — but that ordering lives in `apiListAgents`, because `ListAgents` has five other
+callers that want it alphabetical: the chat context builder, the gateway's `/run` listing, the
+dashboard, the KB and global search. Moving the `ORDER BY` into the shared query is the tidier-looking
+fix and silently re-orders all five, so `TestListAgentsQueryStaysNameOrdered` pins the query
+alongside the test for the page — the page's own test passes either way, which is exactly why it
+cannot be the only one. `apiAgent.LastRunAt` comes from `db.LastRunTimes`, one aggregate over
+`agent_runs` rather than a lookup per row (this is the hottest page in the product), and reads
+`started_at` rather than `finished_at`: a run in flight has no `finished_at`, and an agent running
+right now has certainly run. It is sent as an explicit `null` and never omitted, for the reason
+`flattenRequires` and `plan_ready` record — asserted on raw response bytes, since decoding erases
+the distinction.
+
 **`015_orphaned_agent_rows` is a one-time sweep, not a change to the delete path.** Foreign keys
 were enforced per-CONNECTION until the DSN-pragma fix (#214, 2026-08-17), so `DELETE FROM agents`
 cascaded only when the pool happened to hand it a connection with `foreign_keys` on. On the

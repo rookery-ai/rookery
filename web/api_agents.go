@@ -3,8 +3,10 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +61,13 @@ type apiAgent struct {
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
 	Running     bool      `json:"running"`
+	// LastRunAt is when the agent last STARTED a run, or null if it never has.
+	//
+	// No omitempty: a nil pointer must serialize as an explicit null, because
+	// the SPA's fallback substitutes only for `undefined` and an omitted key
+	// decodes to exactly that. Two bugs of this shape have shipped already
+	// (flattenRequires, plan_ready).
+	LastRunAt *time.Time `json:"last_run_at"`
 }
 
 func (s *Server) toAPIAgent(a *db.Agent) apiAgent {
@@ -235,10 +244,29 @@ func (s *Server) apiListAgents(c echo.Context) error {
 	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
+	// One aggregate for the whole list, not a lookup per row. A failure here
+	// costs the date line, never the list: an agent you cannot see is worse
+	// than an agent whose last-run time is missing.
+	lastRuns, err := s.db.LastRunTimes(u.ID)
+	if err != nil {
+		slog.Warn("agents: last run times unavailable", "err", err)
+		lastRuns = nil
+	}
 	out := make([]apiAgent, 0, len(agents))
 	for _, a := range agents {
-		out = append(out, s.toAPIAgent(a))
+		item := s.toAPIAgent(a)
+		if t, ok := lastRuns[a.ID]; ok {
+			item.LastRunAt = &t
+		}
+		out = append(out, item)
 	}
+	// Newest first: the agent you just built is the one you came back to look
+	// at. Sorted HERE rather than in db.ListAgents, whose name ordering five
+	// other callers depend on — the chat context builder, the gateway's /run
+	// listing, the dashboard, the KB and global search.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
 	var draft *db.AgentDraft
 	if s.designFlow != nil {
 		draft = s.designFlow.HasDraft(u.ID)

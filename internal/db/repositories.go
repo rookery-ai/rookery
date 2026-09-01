@@ -668,6 +668,37 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 	return runs, rows.Err()
 }
 
+// LastRunTimes returns, per agent in the workspace, when that agent last
+// STARTED a run — keyed by agent id, absent for an agent that has never run.
+//
+// One aggregate rather than a lookup per agent: the list page renders every
+// agent in the workspace, so the obvious per-row query is an N+1 on the
+// hottest page in the product.
+//
+// started_at, not finished_at: a run in flight has no finished_at, and an
+// agent that is running right now has most certainly run. Callers that need
+// to distinguish the two have `running` already.
+func (d *DB) LastRunTimes(workspaceID string) (map[string]time.Time, error) {
+	rows, err := d.Query(`SELECT agent_id, MAX(started_at) FROM agent_runs
+		WHERE workspace_id=? GROUP BY agent_id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var agentID string
+		var startedAt sql.NullString
+		if err := rows.Scan(&agentID, &startedAt); err != nil {
+			return nil, err
+		}
+		if startedAt.Valid {
+			out[agentID] = scanTime(startedAt.String)
+		}
+	}
+	return out, rows.Err()
+}
+
 // GetUnfinishedAgentRun returns the most recent run for an agent that has not yet
 // finished (finished_at IS NULL), or (nil, nil) if there is none. Used to show a
 // durable "Running…" badge that survives a page reload (the in-memory run tracker
