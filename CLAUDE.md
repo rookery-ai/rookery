@@ -1373,7 +1373,25 @@ rather than part of it, for the reason `MCPToolsBlock` gives: a connector action
 against a known API, an MCP tool is whatever a server chose to advertise.
 `parseTechnicalSpec` follows `parseSchedule`'s policy — render only the closed set of labels the
 prompt asks for, fall back to the raw block otherwise, because a plausible-but-wrong summary of what
-an agent is about to do is worse than raw text the user can judge. A **View spec** button sits
+an agent is about to do is worse than raw text the user can judge.
+
+**That policy's other half now lives in `web/ui/src/lib/cron.ts`, and it is shared.** `parseSchedule`
+is a thin caller of `describeCron`, which turns a cron expression into a phrase or returns **null**
+when it cannot prove a reading — the same rule, stated once: a plausible-but-wrong plain-language
+schedule is worse than the raw cron, because the user has no way to tell it is wrong. It moved
+because the agent page's `ScheduleCard` needed it too (it previously showed the bare expression), and
+two copies would drift into describing one expression two ways. It is **not** a general cron parser:
+it recognises an enumerated set of field shapes and refuses everything else, and each branch
+re-checks its values against the field's real range before emitting a word. Three refusals are the
+ones worth knowing, because each is a case where confident prose would be WRONG rather than merely
+absent — a step wider than its own field (`*/90` in a 0–59 minute field runs **hourly**, not every 90
+minutes); a restricted day-of-month **together with** a restricted day-of-week, which cron ORs while
+every natural phrasing of it reads as an AND; and an interval bounded by another field (`*/10 9 * * *`
+is not "every 10 minutes"). Weekdays are named in cron's own numbering order rather than the order
+typed, so `1,6` and `6,1` cannot render as two different schedules. `ScheduleCard` describes the
+field being TYPED, not the saved schedule, and shows nothing for a half-finished expression.
+
+A **View spec** button sits
 beside *Approve & build* and beside *Save*, switching the existing header toggle rather than opening
 a second surface. In `StateVerifying` the last assistant turn is promoted out of the bubble stream
 into `ReviewCard` — the one turn where action is required used to be visually identical to every
