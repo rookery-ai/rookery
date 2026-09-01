@@ -354,11 +354,12 @@ func runUpgrade(ctx context.Context, o upgradeOpts) error {
 	if out, err := exec.CommandContext(ctx, self, "version").Output(); err == nil {
 		fmt.Fprintf(o.out, "Now running: %s", out)
 	}
-	// Only Linux has a service to restart. Printing systemctl on macOS and
-	// Windows told people to run a command that does not exist, on the two
-	// platforms where the answer is "restart the one you are running".
-	if svc := onboard.CurrentService(); svc.Managed {
-		fmt.Fprintln(o.out, "\nRestart the service to pick it up:\n    systemctl --user restart rookery.service")
+	// The restart command comes from the platform, never from here. Printing
+	// systemctl on macOS and Windows told people to run a command that does not
+	// exist; hardcoding it behind `if svc.Managed` fixed that only for as long
+	// as Linux was the one managed platform, and Windows is now another.
+	if svc := onboard.CurrentService(); svc.Managed && svc.Restart != "" {
+		fmt.Fprintf(o.out, "\nRestart the service to pick it up:\n    %s\n", svc.Restart)
 	} else {
 		fmt.Fprintf(o.out, "\nRestart the server to pick it up (stop the running one, then `%s`).\n", svc.Foreground)
 	}
