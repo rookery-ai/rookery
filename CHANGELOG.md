@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/rookery-ai/rookery/compare/v0.14.1...v0.14.2) (2026-09-02)
+
+
+### Documentation
+
+* put the pitch in the banner and cut the README to what it needs ([#295](https://github.com/rookery-ai/rookery/issues/295)) ([4e952bf](https://github.com/rookery-ai/rookery/commit/4e952bf2bd444499311b0534c8c650134e8b6147))
+
 ## [0.14.1](https://github.com/rookery-ai/rookery/compare/v0.14.0...v0.14.1) (2026-09-01)
 
 
