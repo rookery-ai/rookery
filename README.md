@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-banner-dark.svg">
-    <img src="docs/assets/hero-banner.svg" alt="Rookery — self-hosted AI agents that run on your own machine, around the clock" width="100%">
+    <img src="docs/assets/hero-banner.svg" alt="Rookery — describe an agent, watch it tested, let it run" width="100%">
   </picture>
 </p>
 
@@ -11,20 +11,17 @@
   <a href="https://github.com/rookery-ai/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
-Agents that work on your behalf, on hardware you own — your knowledge, your
-accounts, and the pages that have no API.
+**Rookery is a platform for agents that work on your behalf, running on hardware
+you own.** You install one program. It gives you:
 
-Rookery is a platform for agents that work on your behalf, running on hardware
-you own. You install one program. It gives you a place to keep what you know, as
-plain markdown on your own disk, a way to build agents by describing them in
-plain language, and a way for those agents to reach the services you already
-use — email, calendars, repositories, home automation, whatever you connect.
+- **A place to keep what you know** — as plain markdown on your own disk.
+- **A way to build agents by describing them in plain language.**
+- **A way for those agents to reach the services you already use** — email,
+  calendars, repositories, home automation, whatever you connect.
+
 They run on a schedule, or when you ask, and they tell you what happened. The
 whole thing is designed to sit on a machine that stays on, so the work carries
 on while you are not watching.
-
-It is not a workflow builder. There is no canvas and no nodes to wire together;
-you describe the outcome, not the path to it.
 
 <!--
 SCREENSHOT SLOT — not captured yet. Two shots, in this order.
@@ -52,8 +49,6 @@ GitHub, which is worse than no image at all:
 </p>
 -->
 
-Full documentation lives at **[rookery.cloud/docs](https://rookery.cloud/docs)**.
-
 ## Quickstart
 
 ```bash
@@ -62,11 +57,6 @@ rookery onboard
 ```
 
 Then open `http://localhost:8080`, log in, and create your first workspace.
-
-Later, `rookery upgrade` moves to the latest release (or `--version v0.1.4` to a
-named one), and `rookery uninstall` removes the service and binary — keeping your
-data unless you pass `--purge`. Both refuse to touch a `.deb`/`.rpm` install and
-name your package manager's command instead.
 
 <details>
 <summary>Windows</summary>
@@ -119,12 +109,6 @@ make build
 paste — never a broker. **21 skills** built in, plus any you create the same
 conversational way.
 
-Agents and chat can also drive a **real headless browser**, so a page that only
-exists after JavaScript runs is readable like any other — and an agent you have
-given permission can sign in, fill forms and click through a flow, using
-passwords you have stored as secrets and never see in a transcript. Anything
-irreversible — paying, ordering, deleting — asks you first.
-
 Read more —
 [Workspaces](https://rookery.cloud/docs/concepts/workspaces) ·
 [Knowledge base](https://rookery.cloud/docs/concepts/knowledge-base) ·
@@ -157,7 +141,7 @@ Read more —
 | `ROOKERY_SYSTEM_KEY` | generated | hex key encrypting stored credentials |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
-| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private/loopback addresses (e.g. a self-hosted dashboard). Off by default — see the browser section |
+| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private/loopback addresses (e.g. a self-hosted dashboard). Off by default — see [the browser guide](https://rookery.cloud/docs/concepts/browser) |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind |
 | `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not chosen one |
 | `ROOKERY_CLAUDE_BIN` | — | **deprecated** alias for `ROOKERY_CODER_BIN`; still honoured, warns at startup |
@@ -165,38 +149,6 @@ Read more —
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
 a real hostname or `http://localhost`.
-
-### The browser
-
-Reading JavaScript-rendered pages needs a headless browser, which is a few
-hundred megabytes and therefore **not installed by default**. Without it
-everything else works and only those pages are unreadable; `/healthz` reports
-which state you are in.
-
-`rookery onboard` offers it during setup on Linux, macOS and Windows alike, and
-says nothing about it if you already have it. To install it separately:
-
-```bash
-rookery browser install     # Node driver + Chromium, once
-rookery browser status
-```
-
-It runs confined by the same Landlock sandbox as the coder, and all of its
-traffic goes through a proxy that refuses private and loopback addresses — the
-browser follows links chosen from search results and page content, and the
-loopback interface is where this server's own bridges and their tokens live.
-`ROOKERY_BROWSER_ALLOW_PRIVATE=1` turns that guard off if you specifically want
-an agent to read something on your own network.
-
-Agents read pages and interact with them — clicking, filling forms, signing in
-with passwords you have stored as secrets — with no configuration. **One thing
-needs your permission: an action that cannot be undone**, such as paying,
-ordering or deleting. When an agent's job involves one, its page says so and asks;
-until you allow it, the agent goes up to that step, stops, and tells you what it
-would have done.
-
-Note the limit of that: it guards the browser. An agent can already make web
-requests with a script, and no browser permission covers those.
 
 ## Platform support
 
@@ -220,11 +172,6 @@ becomes the squashed commit and drives release versioning. Push the branch and
 read the result from CI rather than reproducing it locally; `make ci-fmt`,
 `ci-vet`, `ci-ui` and `ci-docs` are the quick targeted checks worth running
 first.
-
-The three README **diagrams** are generated — edit
-`scripts/gen-readme-assets.py`, never `docs/assets/*.svg`. Screenshots are not:
-those are captured by hand, and the brief for each is in a comment beside its
-slot at the top of this file.
 
 ## License
 
