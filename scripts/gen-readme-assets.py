@@ -355,7 +355,15 @@ def document(w: float, h: float, title: str, body: str) -> str:
 # --------------------------------------------------------------------------
 
 def hero(p: Palette) -> str:
-    W, H = 1280, 300
+    # The banner is the mark, the wordmark and one line. The strapline that used
+    # to sit under the tagline is gone, so H drops with it — leaving 300 would
+    # have left the rule floating in 60px of nothing.
+    #
+    # The tagline is set at 36 rather than the old 40 because it grew from 26
+    # characters to 46. SVG text renders in whatever font the viewer has, so the
+    # measurement that matters is the pessimistic one: 46 chars at 36px is ~860px
+    # against 1092px of usable width, which survives a wider-metric platform.
+    W, H = 1280, 280
     o = [f'<rect width="{W}" height="{H}" fill="{p.ground}"/>']
     o.append(f'<circle cx="1168" cy="16" r="278" fill="{p.ember}" opacity="0.10"/>')
     o.append(f'<circle cx="72" cy="300" r="196" fill="{p.dusk}" opacity="0.08"/>')
@@ -369,12 +377,11 @@ def hero(p: Palette) -> str:
         '<path d="M4.5 19.5C4.5 26 9.5 29 16 29S27.5 26 27.5 19.5"/></g>'
     )
     o.append(text("rookery", 200, 136, 86, p.ink, weight=600, spacing=-4))
-    o.append(text("Your knowledge grew hands.", 94, 218, 40, p.ink,
-                  weight=600, spacing=-1))
-    o.append(text("Self-hosted AI agents that run on your own machine, "
-                  "around the clock.", 94, 258, 22, p.muted))
-    o.append(f'<rect x="94" y="278" width="72" height="4" rx="2" fill="{p.ember}"/>')
-    return document(W, H, "Rookery — your knowledge grew hands", "".join(o))
+    o.append(text("Describe an agent. Watch it tested. Let it run.", 94, 210, 36,
+                  p.ink, weight=600, spacing=-1))
+    o.append(f'<rect x="94" y="234" width="72" height="4" rx="2" fill="{p.ember}"/>')
+    return document(W, H, "Rookery — describe an agent, watch it tested, let it run",
+                    "".join(o))
 
 
 # --------------------------------------------------------------------------
