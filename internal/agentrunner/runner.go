@@ -1003,6 +1003,10 @@ func FriendlyRunError(err error, coderName string) string {
 		// tells them nothing they can act on, and reads like a bug in their agent.
 		return fmt.Sprintf("⚠️ %s got no response from the provider, on every retry — a temporary problem at their end, not with this agent. Nothing ran, so nothing was lost. Try again.", who)
 	}
+	if errors.Is(err, coder.ErrCoderRejected) {
+		return fmt.Sprintf("⚠️ %s could not run: %s. Check the model name in the workspace's coder settings.",
+			who, coder.RejectedDetail(err))
+	}
 	if errors.Is(err, coder.ErrTimeout) {
 		// Found by the parity test in package web, not by a report: chat has
 		// classified this since it was written, and an agent run showed the raw

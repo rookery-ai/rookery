@@ -66,7 +66,43 @@ var (
 	// wait, so these three fail on the first attempt with a message that names
 	// the endpoint.
 	ErrUnreachable = errors.New("llm: provider unreachable")
+	// ErrRequestRejected is a provider that ANSWERED and refused the request:
+	// most often a model name it does not have. Not transient, not auth, and
+	// emphatically not unreachable — the server is there and talking.
+	//
+	// Typed because it was the largest unclassified case left, and the one with
+	// the most actionable content. A local Ollama answering `400 {"error":
+	// {"message":"invalid model name"}}` reached the user as "The chat turn
+	// failed. See the server log for details.", when the provider had already
+	// said exactly what was wrong and exactly which setting to change.
+	ErrRequestRejected = errors.New("llm: provider rejected the request")
 )
+
+// ProviderMessage extracts the human-readable sentence from a provider's error
+// envelope, so a caller can show the provider's OWN words instead of a status
+// code.
+//
+// Every OpenAI-compatible endpoint uses {"error":{"message":…}}; Anthropic uses
+// the same shape. A body that does not parse falls back to a short snippet
+// rather than nothing, because a truncated real message still beats a generic
+// sentence.
+func ProviderMessage(body []byte) string {
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &env); err == nil {
+		if m := strings.TrimSpace(env.Error.Message); m != "" {
+			return m
+		}
+		if m := strings.TrimSpace(env.Message); m != "" {
+			return m
+		}
+	}
+	return snippet(body)
+}
 
 // terminalTransportErr reports whether a transport failure is one that waiting
 // cannot fix, so doJSON should give up immediately rather than spend the retry

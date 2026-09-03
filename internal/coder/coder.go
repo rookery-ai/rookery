@@ -619,8 +619,15 @@ var ErrCoderUnreachable = errors.New("coder unreachable")
 // at the front. Falling back to the whole message is deliberate: verbose beats
 // blank, and a blank clause would produce a sentence that names nothing, which
 // is the failure this sentinel exists to end.
-func UnreachableDetail(err error) string {
-	msg, marker := err.Error(), ErrCoderUnreachable.Error()+": "
+func UnreachableDetail(err error) string { return detailAfter(err, ErrCoderUnreachable) }
+
+// RejectedDetail is UnreachableDetail's sibling for ErrCoderRejected.
+func RejectedDetail(err error) string { return detailAfter(err, ErrCoderRejected) }
+
+// detailAfter returns whatever a sentinel was wrapped with, without the
+// sentinel's own text.
+func detailAfter(err, sentinel error) string {
+	msg, marker := err.Error(), sentinel.Error()+": "
 	if i := strings.Index(msg, marker); i >= 0 {
 		if rest := strings.TrimSpace(msg[i+len(marker):]); rest != "" {
 			return rest
@@ -628,6 +635,16 @@ func UnreachableDetail(err error) string {
 	}
 	return msg
 }
+
+// ErrCoderRejected indicates the provider ANSWERED and refused the request —
+// nearly always a model name it does not have.
+//
+// Distinct from ErrCoderUnreachable, and the distinction is the whole value:
+// "cannot reach the model server" and "the model server does not have that
+// model" send the owner to completely different settings. It reached them as
+// "The chat turn failed. See the server log for details." while the provider
+// had already said "invalid model name".
+var ErrCoderRejected = errors.New("coder request rejected by the provider")
 
 // mapCLIErr classifies a CLI-engine subprocess failure.
 //

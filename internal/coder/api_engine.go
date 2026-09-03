@@ -701,6 +701,13 @@ func (c *Coder) mapProviderErr(err error) error {
 		return fmt.Errorf("%w: could not reach the model %q at %s (provider %q)",
 			ErrCoderUnreachable, c.api.model, c.effectiveBaseURL(), c.api.provider)
 	}
+	if errors.Is(err, llm.ErrRequestRejected) {
+		// The provider answered and refused. Name the model, because the refusal
+		// is nearly always about it and the owner needs to know WHICH setting to
+		// change, then quote the provider's own sentence.
+		return fmt.Errorf("%w: the provider rejected model %q — %s",
+			ErrCoderRejected, c.api.model, detailAfter(err, llm.ErrRequestRejected))
+	}
 	if errors.Is(err, llm.ErrRateLimit) {
 		return ErrRateLimited
 	}

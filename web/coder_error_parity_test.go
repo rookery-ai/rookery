@@ -24,6 +24,7 @@ var knownCoderFailures = []error{
 	codersvc.ErrUsageLimit,
 	codersvc.ErrProviderEmpty,
 	codersvc.ErrCoderUnreachable,
+	codersvc.ErrCoderRejected,
 	codersvc.ErrTimeout,
 }
 

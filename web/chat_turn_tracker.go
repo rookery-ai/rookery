@@ -309,6 +309,11 @@ func chatTurnFailureMessage(err error) string {
 		return "The coder could not authenticate with the provider. Check the API key in coder settings."
 	case errors.Is(err, codersvc.ErrTimeout):
 		return "The coder took too long and the turn was stopped. Try a smaller question, or raise the coder timeout."
+	case errors.Is(err, codersvc.ErrCoderRejected):
+		// The provider's own sentence, because it names the actual problem —
+		// "invalid model name" — where anything we invented would not.
+		return codersvc.RejectedDetail(err) +
+			". Check the model name in coder settings."
 	case errors.Is(err, codersvc.ErrCoderUnreachable):
 		// The detail is generated at the failure site and names the model and
 		// endpoint, or the missing binary. Included verbatim because that is the
@@ -417,8 +422,28 @@ func (s *Server) handleChatTurnProgress(c echo.Context) error {
 			return nil
 		case msg, ok := <-st.progressCh:
 			if !ok {
+				// A CLOSED channel means the turn ended — it says nothing about
+				// whether it SUCCEEDED, and this branch used to assume it did.
+				//
+				// That is the common path, not an edge case: the browser opens
+				// this stream immediately after the 202, so it is attached for
+				// essentially every turn and never reaches the attach-after-done
+				// branch above. A failing turn therefore reported `done`, the
+				// client ran its success path, and no banner was set — the
+				// activity card simply vanished and nothing said why. The two
+				// branches must agree, which is why both now ask the same
+				// question.
+				//
+				// st.err is readable here because it is assigned in the same
+				// lock hold as the close, so a closed channel implies the
+				// outcome is already recorded.
+				_, _, turnErr := st.snapshot()
 				// data must be non-empty or the browser won't dispatch the event.
-				fmt.Fprint(w, "event: done\ndata: 1\n\n")
+				if turnErr != nil {
+					fmt.Fprint(w, "event: error\ndata: 1\n\n")
+				} else {
+					fmt.Fprint(w, "event: done\ndata: 1\n\n")
+				}
 				w.Flush()
 				return nil
 			}
