@@ -31,6 +31,23 @@ type Options struct {
 	// title. When empty a neutral default ("Note") is used so the output is
 	// never headless.
 	Title string
+
+	// Attachments are the non-image files the note links to, listed at the end
+	// of the exported document.
+	//
+	// They are LISTED rather than embedded, and that is a limitation of the
+	// export path rather than an oversight. Images are inlined as data: URIs by
+	// the caller, but goldmark deliberately blanks a data: URI in an <a href> —
+	// a security property this path keeps — so a linked PDF cannot be carried
+	// the same way. Without the list, a downloaded document has a relative link
+	// that resolves to nothing and gives the reader no clue what it pointed at.
+	Attachments []Attachment
+}
+
+// Attachment is one non-image file a note links to.
+type Attachment struct {
+	Name string // the link's visible text, or the file name when it has none
+	Path string // the vault-relative path, shown so a reader can ask for it
 }
 
 // Formats reports which export formats are usable right now. HTML and DOCX are
