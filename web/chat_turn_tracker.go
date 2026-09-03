@@ -109,7 +109,27 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			}
 		}
 
+		// A one-shot notice for a turn that has gone quiet. The fail-fast
+		// classification handles a coder that is NOT there; this handles one
+		// that is there and slow, which on a self-hosted local model is the
+		// commoner case — loading weights on the first request of the day can
+		// take a minute, and the two look identical from the browser.
+		//
+		// It fires only if nothing else has been said since the opening
+		// milestone, so a turn making visible tool calls never accumulates
+		// filler. AfterFunc rather than a goroutine and a select: there is
+		// nothing to wait on, and the timer is stopped on every exit path below.
+		slowNotice := time.AfterFunc(chatSlowTurnAfter, func() {
+			st.mu.Lock()
+			quiet := len(st.lines) <= 1 && !st.done
+			st.mu.Unlock()
+			if quiet {
+				onProgress("⏳ Still waiting for the first response — a local model may be loading.")
+			}
+		})
+
 		reply, err := s.runChatCoder(ctx, workspaceID, chatID, history, text, onProgress)
+		slowNotice.Stop()
 
 		st.mu.Lock()
 		st.done = true
@@ -190,10 +210,35 @@ func chatTurnFailureMessage(err error) string {
 		return "The coder could not authenticate with the provider. Check the API key in coder settings."
 	case errors.Is(err, codersvc.ErrTimeout):
 		return "The coder took too long and the turn was stopped. Try a smaller question, or raise the coder timeout."
+	case errors.Is(err, codersvc.ErrCoderUnreachable):
+		// The detail is generated at the failure site and names the model and
+		// endpoint, or the missing binary. Included verbatim because that is the
+		// entire remedy: without it this reads as "something went wrong", which
+		// is what it did before the sentinel existed.
+		return "The coder could not be reached — " + codersvc.UnreachableDetail(err) +
+			". Check that it is running and that the coder settings point at the right place."
+	case errors.Is(err, codersvc.ErrProviderEmpty):
+		return "The provider returned nothing on every retry — a temporary problem at their end. Nothing was lost; try again."
 	default:
-		return "The chat turn failed. See the server log for details."
+		return chatTurnGenericFailure
 	}
 }
+
+// chatTurnGenericFailure is the fallback for an error nothing classified. A
+// constant so the parity test can assert "this surface did NOT fall through"
+// against the real string rather than a copy of it that would drift.
+const chatTurnGenericFailure = "The chat turn failed. See the server log for details."
+
+// chatSlowTurnAfter is how long a turn may stay quiet before it says so.
+//
+// A var rather than a const so a test can shorten it: the behaviour under test
+// is "a quiet turn eventually explains itself", and waiting twenty real seconds
+// to assert that would be twenty seconds on every CI run.
+//
+// Twenty seconds is chosen to sit above a normal hosted round-trip (so an
+// ordinary turn never sees it) and below the point where a person concludes the
+// thing is broken.
+var chatSlowTurnAfter = 20 * time.Second
 
 // chatTurn returns the tracked turn for a chat, or nil.
 func (s *Server) chatTurn(chatID string) *chatTurnState {

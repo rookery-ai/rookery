@@ -2264,6 +2264,68 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 `coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) is a config error, not a usage limit; `coder.ErrMaxTurns` is now vestigial — budget exhaustion returns a `Result` carrying `exhaustionSummary` rather than an error (see the turn-budget bullet above). `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
 
+**A coder that is not there is `coder.ErrCoderUnreachable`, and the retry ladder
+used to hide it for 68 seconds.** `llm.doJSON` treated EVERY network error as
+transient, so a local model server that was simply not running spent the whole
+seven-attempt backoff (1s, 2s, 5s, 10s, 20s, 30s) proving that a refused dial
+stays refused, then returned a raw `*url.Error` that no classifier recognised —
+which every surface rendered as its generic "see the server log" arm. From the
+outside: a chat window that hangs for over a minute and then names nothing.
+
+`llm.ErrUnreachable` is the terminal-transport sentinel, returned on the FIRST
+attempt for the three failures waiting cannot fix — a refused dial, an NXDOMAIN
+host, a certificate that will not verify. The classifier (`terminalTransportErr`)
+**fails open toward retrying**: anything unrecognised keeps the old ladder, so a
+misclassification costs latency and never a turn. The accepted cost in the other
+direction is recorded rather than engineered around — a hosted provider behind a
+load balancer that refuses one dial now fails that request instead of recovering.
+
+**`isConnRefused` is per-platform, and the portable-looking spelling is a trap.**
+`errors.Is(err, syscall.ECONNREFUSED)` compiles, links, passes the cross-compile
+gate and **never matches on Windows**: a real Windows dial failure carries
+`WSAECONNREFUSED` (10061) while `syscall.ECONNREFUSED` there is a synthetic value
+offset from `APPLICATION_ERROR`, and `syscall.Errno.Is` on Windows maps only
+`ErrPermission`/`ErrExist`/`ErrNotExist`/`ErrUnsupported` — there is no
+equivalence rule bridging them the way there is for the filesystem errnos. So
+`connrefused_windows.go` names `windows.WSAECONNREFUSED` (`golang.org/x/sys` is
+already a direct requirement). Getting this wrong is not a build failure; it is a
+Windows install that silently keeps the whole bug.
+
+`coder.ErrCoderUnreachable` covers BOTH engines — an API endpoint that refused,
+and a CLI binary that is not installed (`mapCLIErr`, keyed on `exec.ErrNotFound`;
+an ordinary non-zero exit is deliberately NOT reclassified, because that coder
+reached what it was calling). One sentinel rather than two, so each surface needs
+one arm; the specificity lives in a detail generated at the failure site, which is
+the only place the configuration is in scope, and `coder.UnreachableDetail`
+recovers it for display. `effectiveBaseURL` reports the registry default when the
+workspace set no override — reporting the raw field would print an empty string
+for most workspaces, making the one message that exists to name the endpoint name
+nothing.
+
+**The two user-facing classifiers stay separate and are pinned equal by a test.**
+`agentrunner.FriendlyRunError` and `web.chatTurnFailureMessage` are deliberately
+NOT one function: a run says "it will retry on the next scheduled run" and a chat
+turn says "try again", and merging them needs a mode flag that makes both worse.
+What must not diverge is WHICH failures each recognises, so
+`web/coder_error_parity_test.go` asserts every sentinel in `knownCoderFailures` is
+classified by both and that an unknown error still reaches both generic arms
+(that fallback is deliberate — an unrecognised error's contents are unknown, and a
+chat failure message is written into the transcript, reflected into the vault and
+relayable to a chat platform). The test found a real pre-existing divergence the
+moment it existed: `ErrTimeout` was classified by chat and fell through to the raw
+error on agent runs.
+
+**A slow coder and a dead one looked identical, and only one of them is fixed by
+failing fast.** Chat emitted no milestone until its first TOOL call, and a
+conversational turn makes none — so every turn opened on an empty card, and a
+local model loading weights on the first request of the day showed a blank screen
+for a minute. `runChatCoder` now emits `💭 Contacting <coder.Name()>…` before the
+first provider call (naming the model, which is also the first thing an owner
+checks when it is the wrong one), and the turn tracker arms a one-shot
+`chatSlowTurnAfter` (20s, a `var` so tests need not wait it out) notice that fires
+only if nothing else has been said — a turn making visible tool calls never
+accumulates filler, and the timer is stopped on every exit path.
+
 ### The browser (JavaScript-rendered pages, and acting on them)
 
 `web_fetch` is an HTTP client, so a single-page app returns ~400 bytes of markup

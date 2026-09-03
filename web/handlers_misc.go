@@ -276,6 +276,17 @@ func (s *Server) runChatCoder(
 	// workspaces simply see the typing indicator, exactly as before.
 	if onProgress != nil {
 		coder = coder.WithProgress(onProgress)
+		// The opening milestone, emitted BEFORE the first provider call.
+		//
+		// Until now the first line a chat turn produced was its first TOOL call,
+		// so every turn opened on an empty activity card — and a turn that never
+		// calls a tool (most conversational ones) showed nothing at all until the
+		// answer arrived. On a local model that can be a minute of blank screen
+		// while it loads weights, which is indistinguishable from the coder being
+		// dead. Naming the model is the point: it also tells the owner which one
+		// is about to answer, which is the first thing they check when it is the
+		// wrong one.
+		onProgress("💭 Contacting " + coder.Name() + "…")
 	}
 
 	result, err := coder.Chat(ctx, workspaceID, history, sysCtx, text)
