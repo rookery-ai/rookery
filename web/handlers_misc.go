@@ -109,6 +109,9 @@ func (s *Server) runChatCoder(
 	if s.testCoderErr != "" {
 		return "", errors.New(s.testCoderErr)
 	}
+	if s.testCoderReply != "" {
+		return s.testCoderReply, nil
+	}
 
 	// System context: a read+write knowledge-base instruction (so the chat can retrieve
 	// and edit notes on demand) + the user's always-on identity context (profile/memory/

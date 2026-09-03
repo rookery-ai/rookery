@@ -103,6 +103,11 @@ type Server struct {
 	testHistoryHook func(int)
 	testCoderBlock  chan struct{}
 	testCoderErr    string
+	// testCoderReply drives the SUCCESS path without a configured coder, so a
+	// test can assert the completion ORDERING there too — the reply must be
+	// persisted before the turn reports done, or a client that refetches on
+	// seeing done gets a conversation missing the message it waited for.
+	testCoderReply string
 }
 
 // NewServer wires up all routes and middleware.

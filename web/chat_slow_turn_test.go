@@ -83,8 +83,14 @@ func TestAQuietTurnSaysItIsStillWaiting(t *testing.T) {
 // The delay is tuned so the timer fires at roughly the moment the turn ends,
 // which is the interleaving that matters; -race is what turns a lost coin toss
 // into a failure rather than a silent pass.
+//
+// A handful of iterations rather than many: -race reports the unsynchronised
+// access on ANY occurrence, and at a 1ms timer against a turn ending in the
+// same millisecond most iterations exercise it. A 40-iteration version cost
+// 77s under -race in this package alone, which is not a good trade for a
+// property that reproduces almost every time.
 func TestTheQuietTimerCannotOutliveTheTurn(t *testing.T) {
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 8; i++ {
 		s, workspaceID, chatID := chatTurnFixture(t)
 		withFastSlowNotice(t, time.Millisecond)
 
