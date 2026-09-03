@@ -71,6 +71,33 @@ func TestAQuietTurnSaysItIsStillWaiting(t *testing.T) {
 	t.Fatalf("no quiet-turn notice was emitted; lines = %q", linesOf(t, s, chatID))
 }
 
+// The quiet-turn timer must not be able to send on the turn's progress channel
+// after it has been closed.
+//
+// time.Timer.Stop reports false when the callback is already running and does
+// NOT wait for it, so stopping the timer on the way out cannot prevent this on
+// its own. Before onProgress took the closed flag under the same lock as the
+// close, this was a send on a closed channel — a panic in the server, not a
+// flaky test. Caught by CI's -race run, not locally.
+//
+// The delay is tuned so the timer fires at roughly the moment the turn ends,
+// which is the interleaving that matters; -race is what turns a lost coin toss
+// into a failure rather than a silent pass.
+func TestTheQuietTimerCannotOutliveTheTurn(t *testing.T) {
+	for i := 0; i < 40; i++ {
+		s, workspaceID, chatID := chatTurnFixture(t)
+		withFastSlowNotice(t, time.Millisecond)
+
+		s.testCoderErr = "stop here"
+		if _, ok := s.startChatTurn(workspaceID, chatID, "hello"); !ok {
+			t.Fatal("startChatTurn refused")
+		}
+		waitForTurn(t, s, chatID)
+		// Give a timer that fired late every chance to reach the closed channel.
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // A turn that finishes promptly must NOT be annotated after the fact. The timer
 // is stopped on the way out, so a fast turn's transcript is exactly what it was
 // before this change — otherwise every short conversational exchange would

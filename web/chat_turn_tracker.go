@@ -38,6 +38,16 @@ type chatTurnState struct {
 	mu   sync.Mutex
 	done bool
 	err  error
+	// closed guards progressCh, which has more than one sender: the turn
+	// goroutine and the quiet-turn timer. time.Timer.Stop reports false when the
+	// callback is ALREADY RUNNING and does not wait for it, so stopping the
+	// timer on the way out is not enough on its own — the callback can be
+	// mid-flight while this goroutine closes the channel. That is a send on a
+	// closed channel, which panics the server rather than merely racing.
+	//
+	// Set and read under mu, together with the close itself, so "may I send?"
+	// and "close" cannot interleave.
+	closed bool
 	// lines accumulates every milestone so a client attaching MID-turn receives
 	// the history it missed rather than only what arrives after it connects.
 	// Following the live channel alone would show such a client an empty card on
@@ -98,9 +108,19 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		ctx := context.Background()
 
 		onProgress := func(msg string) {
+			// The append and the send are under ONE lock hold, so a concurrent
+			// caller cannot observe the channel open, be descheduled, and send
+			// into it after it has been closed. The send is non-blocking, so
+			// holding the lock across it cannot deadlock.
 			st.mu.Lock()
+			defer st.mu.Unlock()
+			if st.closed {
+				// The turn is over. A late milestone has nothing to attach to
+				// and no reader left; recording it would also grow lines after
+				// the transcript was considered final.
+				return
+			}
 			st.lines = append(st.lines, msg)
-			st.mu.Unlock()
 			select {
 			case st.progressCh <- msg:
 			default:
@@ -118,7 +138,15 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		// It fires only if nothing else has been said since the opening
 		// milestone, so a turn making visible tool calls never accumulates
 		// filler. AfterFunc rather than a goroutine and a select: there is
-		// nothing to wait on, and the timer is stopped on every exit path below.
+		// nothing to wait on.
+		//
+		// Stopping it below is an optimisation, NOT the safety property. Stop
+		// reports false when the callback is already running and does not wait
+		// for it, so this callback can still be in flight while the turn
+		// goroutine finishes — which is why onProgress checks st.closed under
+		// the lock rather than relying on the Stop. Sending on the closed
+		// channel would panic the server, and -race caught it where a local run
+		// did not.
 		slowNotice := time.AfterFunc(chatSlowTurnAfter, func() {
 			st.mu.Lock()
 			quiet := len(st.lines) <= 1 && !st.done
@@ -178,7 +206,13 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 				chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, cleaned)
 			}
 		}
+		// Under the lock, and paired with the closed flag onProgress checks:
+		// slowNotice.Stop() above cannot promise the timer callback has
+		// finished, only that it will not start again.
+		st.mu.Lock()
+		st.closed = true
 		close(st.progressCh)
+		st.mu.Unlock()
 
 		// Evict after a grace period so a late or reconnecting viewer can still
 		// observe the terminal state; the durable record is the chat history.
