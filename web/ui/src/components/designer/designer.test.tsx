@@ -554,10 +554,19 @@ test("a build finishing while the Spec tab is already open refreshes it automati
   // What this test still guarantees, and the reason the refetch above must keep
   // happening: the spec is not STALE when the user goes back to it. Without the
   // refetch they would click Spec and see the pre-build placeholder.
+  // Wait for the REFETCH, which is the thing under test — not for the placeholder
+  // to disappear, which is a different event that merely tends to happen first.
+  //
+  // `generating` flipping false is what removes that text, and the refetch is an
+  // effect of the same flip: two consequences of one state change, with no
+  // ordering between them. Waiting on one and then asserting the other passes
+  // whenever the machine is quick enough and fails under load — it failed in CI
+  // at exactly this line with stateCalls == 2, while the whole suite passed
+  // locally.
   await waitFor(() => {
-    expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
+    expect(stateCalls).toBeGreaterThanOrEqual(3);
   });
-  expect(stateCalls).toBeGreaterThanOrEqual(3);
+  expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Spec" }));
   expect(await screen.findByRole("heading", { name: "Daily digest" })).toBeInTheDocument();
