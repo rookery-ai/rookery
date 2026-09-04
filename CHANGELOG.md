@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/rookery-ai/rookery/compare/v0.14.2...v0.15.0) (2026-09-04)
+
+
+### Features
+
+* **export:** keep image sizes and grid layout in exported documents ([#300](https://github.com/rookery-ai/rookery/issues/300)) ([fe7624e](https://github.com/rookery-ai/rookery/commit/fe7624e10a1d5288a563e25d9da4054b5930561b))
+* **onboard:** start Rookery at login on macOS via a launchd user agent ([#299](https://github.com/rookery-ai/rookery/issues/299)) ([0f4968e](https://github.com/rookery-ai/rookery/commit/0f4968edff38762d31c5509a6382ba7d09ac5f5d))
+* **skills:** teach judgment, and stop competing with the tools ([#301](https://github.com/rookery-ai/rookery/issues/301)) ([c5ed72c](https://github.com/rookery-ai/rookery/commit/c5ed72cb764b88c32646d018e8b17061d1154cd1))
+
+
+### Bug Fixes
+
+* **coder:** report an unreachable coder instead of hanging silently ([#298](https://github.com/rookery-ai/rookery/issues/298)) ([7a7db6a](https://github.com/rookery-ai/rookery/commit/7a7db6a1eecd3e5317277bfd3d0bf7de4d2b4291))
+
 ## [0.14.2](https://github.com/rookery-ai/rookery/compare/v0.14.1...v0.14.2) (2026-09-02)
 
 
