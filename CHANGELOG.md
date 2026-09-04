@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/rookery-ai/rookery/compare/v0.15.0...v0.16.0) (2026-09-04)
+
+
+### Features
+
+* **web/kb:** show the slash-menu hint on any blank line ([#305](https://github.com/rookery-ai/rookery/issues/305)) ([8587c3c](https://github.com/rookery-ai/rookery/commit/8587c3c2ab359cb3310138777cba21373b8cd47a))
+
+
+### Bug Fixes
+
+* **config:** change the default port from 8080 to 8899 ([#306](https://github.com/rookery-ai/rookery/issues/306)) ([71c285b](https://github.com/rookery-ai/rookery/commit/71c285be01aa521e9a54522473d24fd6ac631199))
+* **vault:** let the user delete the knowledge base home note ([#304](https://github.com/rookery-ai/rookery/issues/304)) ([efd4aff](https://github.com/rookery-ai/rookery/commit/efd4aff7dbda875331611fa8b99a797dcf9108e1))
+
 ## [0.15.0](https://github.com/rookery-ai/rookery/compare/v0.14.2...v0.15.0) (2026-09-04)
 
 
