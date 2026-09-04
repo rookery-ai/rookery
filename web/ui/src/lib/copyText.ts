@@ -2,7 +2,7 @@
 //
 // The non-secure-context path is the MAIN path here, not an exotic fallback: a
 // self-hosted install is reached over plain HTTP on the LAN
-// (http://<host>:8080), and `navigator.clipboard` only exists in a secure
+// (http://<host>:8899), and `navigator.clipboard` only exists in a secure
 // context (https, or localhost). Without the fallback the button does nothing.
 //
 // Extracted from MessageMeta so the connections wizard's redirect-URI copy

@@ -178,7 +178,7 @@ serve_pid=$!
 
 # `rookery healthcheck` resolves its target port the same way `serve` does
 # (config.Load reads ROOKERY_PORT from the environment), so probing with the
-# same env var — rather than hardcoding 8080 or reaching for curl, which a
+# same env var — rather than hardcoding 8899 or reaching for curl, which a
 # minimal host may lack — reuses the exact mechanism the container cases use.
 healthy=0
 for i in $(seq 1 45); do

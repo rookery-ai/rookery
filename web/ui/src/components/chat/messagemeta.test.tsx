@@ -61,7 +61,7 @@ test("with no createdAt the copy button remains and no time is shown", () => {
   expect(screen.queryByTestId("message-time")).not.toBeInTheDocument();
 });
 
-// The server is reached over plain HTTP on the LAN (http://<host>:8080), which
+// The server is reached over plain HTTP on the LAN (http://<host>:8899), which
 // is NOT a secure context — so `navigator.clipboard` is undefined and the
 // Clipboard API path throws before it can copy anything. This is the real
 // reported failure: the button did nothing at all, silently.
