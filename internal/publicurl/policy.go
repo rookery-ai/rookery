@@ -114,7 +114,7 @@ func Check(base string, p Policy) []Problem {
 			Severity: SeverityHard,
 			Code:     "malformed_url",
 			Message:  "This is not a complete URL.",
-			Fix:      "Enter a full URL including the scheme, for example https://agents.example.com or http://localhost:8080.",
+			Fix:      "Enter a full URL including the scheme, for example https://agents.example.com or http://localhost:8899.",
 		}}
 	}
 
@@ -138,14 +138,14 @@ func Check(base string, p Policy) []Problem {
 		if u.Scheme != "https" && class != classLoopback {
 			out = append(out, Problem{sev, "scheme_not_https",
 				"This provider requires an https address for anything other than localhost.",
-				"Open the app at http://localhost:8080, or put it behind a reverse proxy that terminates HTTPS."})
+				"Open the app at http://localhost:8899, or put it behind a reverse proxy that terminates HTTPS."})
 		}
 	}
 
 	if class == classRawIP && (p.AllowRawIP == "no" || p.AllowRawIP == "loopback_only") {
 		out = append(out, Problem{sev, "raw_ip",
 			"This provider does not accept an IP address as the redirect host.",
-			"Use a hostname instead — open the app at http://localhost:8080, or give it a domain name."})
+			"Use a hostname instead — open the app at http://localhost:8899, or give it a domain name."})
 	}
 
 	if p.RequirePublicHost {
@@ -153,7 +153,7 @@ func Check(base string, p Policy) []Problem {
 		case classReserved:
 			out = append(out, Problem{sev, "non_public_host",
 				"This provider requires a registrable public domain, and this name uses a reserved suffix that cannot be registered.",
-				"Use a real domain you own (it can still resolve to a private IP on your own network), or open the app at http://localhost:8080."})
+				"Use a real domain you own (it can still resolve to a private IP on your own network), or open the app at http://localhost:8899."})
 		case classUncertain:
 			out = append(out, Problem{SeveritySoft, "unverified_host",
 				"We could not confirm this hostname uses a registrable public suffix.",

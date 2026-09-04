@@ -57,7 +57,7 @@ make docker-build / docker-run   # slim container image (podman or docker)
 # Frontend (web/ui): build the SPA into the binary
 make ui        # npm ci + vite build → web/ui/dist (embedded on next go build)
 make build     # ui + go build (full artifact); make build-go for Go-only
-# Dev loop: cd web/ui && npm run dev  (Vite on :5173, proxies /api to :8080)
+# Dev loop: cd web/ui && npm run dev  (Vite on :5173, proxies /api to :8899)
 ```
 
 AST guardrail tests shell out to `python3`. If Python is not available, those tests self-skip.
@@ -65,15 +65,15 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > **Deploy workflow:** When the user says "restart the server", "rebuild", or
 > "deploy", run `make deploy` — it stops the running server, rebuilds, and
 > starts it in the background with logs captured to `logs/server.log`. The
-> server listens on `0.0.0.0:8080` by default (override host with `ROOKERY_HOST=…`, port
+> server listens on `0.0.0.0:8899` by default (override host with `ROOKERY_HOST=…`, port
 > with `ROOKERY_PORT=…`). Set `ROOKERY_PUBLIC_URL` to the externally-reachable base URL so OAuth
 > callbacks are correct. `rookery connector exec <tool> --args '<json>'` is the
 > subcommand CLI coders use to reach the connector bridge (not for manual use).
-> The UI is the embedded React SPA served at `http://host:8080/` (build it into the
+> The UI is the embedded React SPA served at `http://host:8899/` (build it into the
 > binary with `make ui` before `go build`; `/app` + `/app/*` 301-redirect to `/`).
 > Verify with `make status` / `make logs`; smoke-test the SPA + API with
-> `curl -sS http://127.0.0.1:8080/` (200 HTML) and
-> `curl -sS http://127.0.0.1:8080/api/v1/auth/session` (200 JSON).
+> `curl -sS http://127.0.0.1:8899/` (200 HTML) and
+> `curl -sS http://127.0.0.1:8899/api/v1/auth/session` (200 JSON).
 
 ## Git workflow
 
@@ -445,9 +445,9 @@ an SBOM per archive.
 
 ```bash
 make docker-build           # honours podman or docker, whichever is installed
-make docker-run             # port 8080, data in the rookery-data volume
+make docker-run             # port 8899, data in the rookery-data volume
 
-podman run -d --name rookery -p 8080:8080 \
+podman run -d --name rookery -p 8899:8899 \
   -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
@@ -471,7 +471,7 @@ longer reach a user.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
-| `ROOKERY_PORT` | `8080` | listen port |
+| `ROOKERY_PORT` | `8899` | listen port |
 | `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the DB |
 | `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
@@ -3102,7 +3102,7 @@ the mount, before the active check, so a later manual Stop sticks.
 
 **Copying a message works without a secure context.** `navigator.clipboard` exists ONLY in a secure
 context (https, or localhost) — and the normal way to reach a self-hosted install is plain HTTP on
-the LAN (`http://<host>:8080`), where it is `undefined` and reading `.writeText` off it throws. So
+the LAN (`http://<host>:8899`), where it is `undefined` and reading `.writeText` off it throws. So
 `MessageMeta.copy()` guards with `navigator.clipboard?.writeText` and falls back to
 `document.execCommand("copy")` via an off-screen (NOT `display:none` — a hidden node is unselectable
 and copies nothing) textarea, restoring the user's own selection afterwards. When both paths fail the

@@ -97,7 +97,7 @@ COPY --from=build /out/rookery /usr/bin/rookery
 #   -e ROOKERY_PUBLIC_URL=https://agents.example.com
 ENV ROOKERY_DATA_DIR=/data \
     ROOKERY_HOST=0.0.0.0 \
-    ROOKERY_PORT=8080 \
+    ROOKERY_PORT=8899 \
     ROOKERY_CODER_MODE=slim \
     HOME=/data
 
@@ -105,7 +105,7 @@ RUN mkdir -p /data && chown -R app:app /data
 VOLUME ["/data"]
 WORKDIR /data
 USER app
-EXPOSE 8080
+EXPOSE 8899
 
 # Shells the binary's own subcommand rather than curl, which this image does not
 # ship and which would be dead weight added purely for a health probe.

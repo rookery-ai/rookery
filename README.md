@@ -56,7 +56,7 @@ curl -fsSL https://rookery.cloud/install.sh | sh
 rookery onboard
 ```
 
-Then open `http://localhost:8080`, log in, and create your first workspace.
+Then open `http://localhost:8899`, log in, and create your first workspace.
 
 <details>
 <summary>Windows</summary>
@@ -78,7 +78,7 @@ that `rookery service` registers for you — see
 <summary>Container</summary>
 
 ```bash
-docker run -d --name rookery -p 8080:8080 \
+docker run -d --name rookery -p 8899:8899 \
   -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
@@ -135,7 +135,7 @@ Read more —
 | Variable | Default | Purpose |
 |---|---|---|
 | `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
-| `ROOKERY_PORT` | `8080` | listen port |
+| `ROOKERY_PORT` | `8899` | listen port |
 | `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the database |
 | `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
 | `ROOKERY_SYSTEM_KEY` | generated | hex key encrypting stored credentials |

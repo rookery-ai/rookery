@@ -34,7 +34,7 @@ body:
     attributes:
       label: /healthz output
       description: >
-        `curl -s localhost:8080/healthz`. Reports sandbox status, coder mode and
+        `curl -s localhost:8899/healthz`. Reports sandbox status, coder mode and
         host-tool presence — booleans only, never paths. Redact anything you are
         unsure about.
       render: json

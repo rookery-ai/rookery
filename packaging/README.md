@@ -32,7 +32,7 @@ Check it:
 
 ```bash
 systemctl --user status rookery
-curl -sS http://127.0.0.1:8080/healthz
+curl -sS http://127.0.0.1:8899/healthz
 ```
 
 ## Reading `/healthz`
@@ -56,7 +56,7 @@ unavailable).
 rookery owner bootstrap -u <username> -p <password>
 ```
 
-Then open `http://<host>:8080/`.
+Then open `http://<host>:8899/`.
 
 ## OAuth and your instance URL
 
@@ -66,8 +66,8 @@ gets validated is the **redirect URI string**, when you register it.
 
 | How you reach the app | Redirect URI | Outcome |
 |---|---|---|
-| `http://localhost:8080` | `http://localhost:8080/…` | Google, GitHub, Notion work. Slack-class providers need HTTPS. |
-| LAN server, plain HTTP on an IP | `http://192.168.1.50:8080/…` | Google rejects raw IP addresses. GitHub works. |
+| `http://localhost:8899` | `http://localhost:8899/…` | Google, GitHub, Notion work. Slack-class providers need HTTPS. |
+| LAN server, plain HTTP on an IP | `http://192.168.1.50:8899/…` | Google rejects raw IP addresses. GitHub works. |
 | LAN server, internal CA, `.lan` name | `https://agents.example.lan/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
 | **Real domain, DNS-01 certificate, resolved on your LAN** | `https://agents.example.com/…` | **All providers work, with no inbound exposure.** |
 

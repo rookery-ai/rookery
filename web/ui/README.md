@@ -6,7 +6,7 @@ at `/app` (see `web/spa.go`).
 
 ```bash
 npm install       # first time only
-npm run dev       # dev server on :5173, proxies /api to the Go server on :8080
+npm run dev       # dev server on :5173, proxies /api to the Go server on :8899
 npm test -- --run # vitest
 npm run build     # production build → dist/ (embedded via go:embed)
 ```
