@@ -1110,6 +1110,56 @@ func (s *Server) inlineVaultAssets(workspaceID string, md []byte) []byte {
 	})
 }
 
+// mdLinkRE matches a markdown LINK (no leading "!") and captures its label and
+// destination. The negative context is handled by the caller, since Go's regexp
+// has no lookbehind.
+var mdLinkRE = regexp.MustCompile(`!?\[([^\]]*)\]\(([^)\s]+)\)`)
+
+// collectAttachments lists the non-image files a note links to.
+//
+// These cannot be embedded the way images are: inlineVaultAssets inlines an
+// image as a data: URI, but goldmark deliberately blanks a data: URI in an
+// <a href> — a security property this export path keeps — so a linked PDF would
+// end up with an empty link. Listing them is the honest alternative: the reader
+// of a downloaded document is told what it referenced even though the file did
+// not travel with it.
+//
+// Only vault-relative destinations are collected. An http link is already
+// portable and needs no help, and a fragment points inside the document itself.
+func collectAttachments(md []byte) []export.Attachment {
+	var out []export.Attachment
+	seen := map[string]bool{}
+
+	for _, m := range mdLinkRE.FindAllSubmatchIndex(md, -1) {
+		// An IMAGE, not a link: images are inlined, and listing them as
+		// attachments would double-count what the document already carries.
+		if md[m[0]] == '!' {
+			continue
+		}
+		label := string(md[m[2]:m[3]])
+		dest := string(md[m[4]:m[5]])
+
+		if strings.Contains(dest, "://") || strings.HasPrefix(dest, "//") ||
+			strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "#") ||
+			strings.HasPrefix(dest, "data:") || strings.HasPrefix(dest, "mailto:") {
+			continue
+		}
+		// An image linked (rather than embedded) is still an image; the
+		// document does not carry it, so it belongs in the list.
+		if seen[dest] {
+			continue
+		}
+		seen[dest] = true
+
+		name := strings.TrimSpace(label)
+		if name == "" {
+			name = path.Base(dest)
+		}
+		out = append(out, export.Attachment{Name: name, Path: dest})
+	}
+	return out
+}
+
 // apiExportKBNote renders a markdown note to HTML, DOCX, or PDF and streams it
 // as a download. Export is note-only (a non-.md file is 400) and is the
 // sanctioned reverse of internal/convert.
@@ -1135,7 +1185,7 @@ func (s *Server) apiExportKBNote(c echo.Context) error {
 	}
 	stem := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
 	body := []byte(stripFrontmatter(string(data)))
-	opts := export.Options{Title: stem}
+	opts := export.Options{Title: stem, Attachments: collectAttachments(body)}
 
 	var (
 		out         []byte
@@ -1147,10 +1197,16 @@ func (s *Server) apiExportKBNote(c echo.Context) error {
 		out, err = export.ToHTML(s.inlineVaultAssets(u.ID, body), opts)
 		contentType, ext = "text/html; charset=utf-8", "html"
 	case "docx":
-		// DOCX degrades images to alt-text by design (internal/export/docx.go),
-		// so inlining data URIs would only bloat it (or worse, turn a link into
-		// a giant data: hyperlink target) — export the note as-is.
-		out, err = export.ToDOCX(body, opts)
+		// DOCX now embeds images as real OOXML media parts, so it takes the
+		// SAME inlined markdown the other two formats do. It used to be handed
+		// the note as-is, because the writer degraded every image to alt text
+		// and data URIs would only have bloated the file.
+		//
+		// The data URI is what carries the bytes: inlineVaultAssets is the one
+		// place that reads the vault, and routing DOCX through it means the
+		// writer needs no vault access of its own and stays a pure function of
+		// its input.
+		out, err = export.ToDOCX(s.inlineVaultAssets(u.ID, body), opts)
 		contentType, ext = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
 	case "pdf":
 		out, err = export.ToPDF(s.inlineVaultAssets(u.ID, body), opts)
