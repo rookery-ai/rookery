@@ -71,7 +71,15 @@
 .note-editor-content .tiptap ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; }
 .note-editor-content .tiptap ul[data-type="taskList"] li > label { margin-top: 0.35em; }
 .note-editor-content .tiptap a { color: var(--color-accent); text-decoration: underline; }
-.note-editor-content .tiptap p.is-editor-empty:first-child::before {
+/* The slash-menu hint, shown on whichever blank line the caret is on — not
+   just the first line of an empty note, which is all `is-editor-empty:first-child`
+   ever matched. TipTap decorates the empty top-level textblock holding the
+   caret with `is-empty` AND `data-placeholder` on the same node, so `attr()`
+   resolves here; `is-editor-empty` is added to that same node only when the
+   whole document is empty, which this rule now covers as a special case of the
+   general one. Scoped to `p` deliberately: an empty heading is mid-edit typing,
+   and a hint there reads as noise rather than help. */
+.note-editor-content .tiptap p.is-empty::before {
   content: attr(data-placeholder);
   color: var(--color-muted-2);
   float: left;
