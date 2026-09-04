@@ -1,112 +1,84 @@
 ---
 name: pdf
 description: Use this skill whenever the user wants to read, extract text/tables from, merge, split, rotate, or convert PDF files. Triggers include "extract text from pdf", "read this pdf", "merge pdfs", "split pdf", "pdf to markdown", "pdf metadata".
-version: 1.0.0
+version: 2.0.0
 license: MIT-0
 category: File Processing
 metadata:
   requires:
-    anyBins: [pdftotext, pandoc]
+    anyBins: [pdftotext, qpdf]
   install:
-    - kind: binary
-      bin: pandoc
-      url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
-      strip: 1
-    - kind: pip
-      package: pdfplumber
     - kind: pip
       package: pypdf
 ---
 
 # PDF
 
-Read, extract, merge, split, and convert PDF files. Mixed toolchain: CLI tools
-(pdftotext/pandoc) for fast text, Python (pdfplumber/pypdf) for tables and
-manipulation.
-
-## Requirements
-
-- `pdftotext` (poppler) — fastest plain-text extraction. Installed via the
-  `cli-tool-installer` skill if missing (no clean static binary; pip fallback
-  below covers text).
-- `pandoc` — for PDF↔Markdown/DOCX round-trips.
-- Python: `pdfplumber` (text+tables), `pypdf` (merge/split/rotate/metadata).
-  Install with `python3 -m pip install --user pdfplumber pypdf`.
-
-The runtime environment block tells you the absolute path of any installed CLI
-tool. Invoke CLI tools by that absolute path; invoke Python via `python3`.
-
-## Extract text
+## Reading — the platform already does this well
 
 ```bash
-# Fastest — poppler
-pdftotext -layout input.pdf output.txt
+rookery kb convert paper.pdf --dest notes
 ```
 
-```python
-# pdfplumber — page-by-page with layout preserved
-import pdfplumber, json, sys
-with pdfplumber.open(sys.argv[1]) as pdf:
-    pages = [{"page": i+1, "text": (p.extract_text() or "")} for i, p in enumerate(pdf.pages)]
-print(json.dumps(pages))
+This is not a thin wrapper. It prefers `pdftotext -layout` when poppler is
+installed, falls back to a pure-Go extractor otherwise, **recovers `-layout`
+column blocks into real markdown tables**, and **falls back to OCR** (`pdftoppm`
++ `tesseract`) when the PDF has no usable text layer at all.
+
+Most importantly it **warns when the extraction looks thin**, so a scanned
+document cannot quietly pass as a clean one. That warning lands in the note's
+frontmatter. Read it: an empty-looking PDF is nearly always a scan, and the
+answer is OCR rather than a different library.
+
+**Do not install pdfplumber to read a PDF.** It was previously recommended here
+and it does less: no OCR fallback, no thin-extraction warning, and a table
+recovery you have to drive yourself.
+
+## Reading a long one
+
+```
+kb_file_map(path="notes/paper.md")
+read_file(path="notes/paper.md", section="Results")
 ```
 
-## Extract tables
+A converted paper is often tens of thousands of words. Map it, then fetch the
+section you need — reading the whole thing to answer one question is how a run
+spends its turn budget and returns nothing.
 
-```python
-import pdfplumber, json, sys
-with pdfplumber.open(sys.argv[1]) as pdf:
-    tables = [{"page": i+1, "rows": t} for i, p in enumerate(pdf.pages) for t in p.extract_tables()]
-print(json.dumps(tables))
+## Tables inside a PDF
+
+The converter already turns `-layout` column blocks into markdown tables, so
+once converted:
+
+```
+kb_table_query(path="notes/paper.md", op="sum", column="amount")
 ```
 
-## Merge / split / rotate / metadata
+If the table did not survive conversion, the frontmatter warning will say the
+extraction was thin. That is a scan — OCR it rather than reaching for a parsing
+library.
+
+## Manipulating the file itself
+
+Merging, splitting, rotating and reading metadata are not conversion, and there
+is no platform tool for them. `pypdf` is declared for exactly this:
 
 ```python
 from pypdf import PdfReader, PdfWriter
-import sys
-# Merge
 w = PdfWriter()
-for f in sys.argv[2:]:
-    w.append(f)
-w.write(sys.argv[1])  # output path
-# Split: write each page
-r = PdfReader(sys.argv[1])
-for i, page in enumerate(r.pages):
-    o = PdfWriter(); o.add_page(page)
-    with open(f"page-{i+1}.pdf", "wb") as fh: o.write(fh)
+for path in ["a.pdf", "b.pdf"]:
+    for page in PdfReader(path).pages:
+        w.add_page(page)
+with open("merged.pdf", "wb") as f:
+    w.write(f)
 ```
 
-## Extracting text
+`qpdf` does the same from the shell if it is installed
+(`qpdf --empty --pages a.pdf b.pdf -- merged.pdf`) and is worth preferring when
+it is: one command beats a program.
 
-`pdftotext` is the fastest path and preserves layout:
+## Producing a PDF
 
-```bash
-"$HOME/.local/bin/pdftotext" -layout report.pdf -          # whole document to stdout
-"$HOME/.local/bin/pdftotext" -layout -f 1 -l 5 report.pdf - # pages 1-5 only
-```
-
-Resolve the tool at `$HOME/.local/bin/<tool>` first (that is where the
-cli-tool-installer skill puts it, and it is NOT on the sandboxed PATH), then fall back to
-whatever `command -v pdftotext` finds.
-
-If `pdftotext` is unavailable, `pdfplumber` handles the same job in Python and also reads
-scanned-but-OCR'd files:
-
-```python
-import pdfplumber
-with pdfplumber.open("report.pdf") as pdf:
-    text = "\n\n".join(p.extract_text() or "" for p in pdf.pages[:5])
-print(text)
-```
-
-Install it with `python3 -m pip install --user pdfplumber` if it is missing. If neither is
-available, say which tool is missing and how to install it — do not guess at the content.
-
-## Notes
-
-- Scanned/image-only PDFs return empty text — they need OCR (tesseract + the
-  `cli-tool-installer` skill). Surface this to the user rather than reporting
-  "empty".
-- Always write outputs into the vault or `$TMPDIR`, never `/tmp`.
-- `extract_text()` can return `None` for image pages — guard with `or ""`.
+Write markdown into the knowledge base and export it from there. The platform
+has a renderer already (`rookery browser install` provides one), so this needs
+no LaTeX and no extra dependency.

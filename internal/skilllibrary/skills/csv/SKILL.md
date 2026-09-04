@@ -1,71 +1,89 @@
 ---
 name: csv
-description: Use this skill whenever the user wants to read, transform, filter, aggregate, or convert CSV/TSV data — pivots, summaries, joins, type coercion, or CSV↔JSON/Excel conversion. Triggers include "analyze this csv", "summarize csv", "filter rows", "csv to json", "merge csv files".
-version: 1.0.0
+description: Use this skill whenever the user wants to read, filter, aggregate, or summarise CSV/TSV data — totals, counts, averages, group-by summaries, or turning a spreadsheet export into something readable. Triggers include "analyze this csv", "summarize csv", "filter rows", "how much did I spend", "csv to json", "merge csv files".
+version: 2.0.0
 license: MIT-0
 category: File Processing
-metadata:
-  install:
-    - kind: pip
-      package: pandas
 ---
 
 # CSV
 
-Read, transform, aggregate, and convert CSV/TSV data. Use `pandas` for
-analysis/aggregation; the built-in `csv` module is enough for simple
-row-by-row work (no extra install).
+**You do not write code to read a CSV here.** The platform converts it and
+queries it for you, and those tools handle the parts that go wrong silently —
+encodings, delimiters, huge columns, type coercion.
 
-## Requirements
+## Get it into the knowledge base first
 
-- `pandas` (Python) — `python3 -m pip install --user pandas`. Optional but
-  recommended for joins/pivots/aggregations.
-- Built-in `csv` module — always available, no install.
-
-## Read + summarize
-
-```python
-import pandas as pd, json, sys
-df = pd.read_csv(sys.argv[1])
-print(json.dumps({
-    "rows": int(len(df)),
-    "columns": list(df.columns),
-    "dtypes": {c: str(t) for c, t in df.dtypes.items()},
-    "head": df.head(5).fillna("").to_dict(orient="records"),
-}, default=str))
+```bash
+rookery kb convert data.csv --dest notes
 ```
 
-## Aggregate / pivot
+That produces a markdown table with the header intact. Everything below works on
+that note.
 
-```python
-import pandas as pd
-df = pd.read_csv("sales.csv")
-summary = df.groupby("region")["revenue"].sum().sort_values(ascending=False)
-summary.to_csv("revenue_by_region.csv")
+If the file is already in the knowledge base, skip this step.
+
+## Look before you read
+
+A converted spreadsheet can be enormous, and most of the bytes are usually in
+one column nobody asked about. Map it first:
+
+```
+kb_file_map(path="notes/data.md")
 ```
 
-## Simple row filter (no pandas)
+You get the columns, the row count, the reading cost, and a warning when one
+column dominates the file. **Read that warning.** A 155 KB export whose
+`apiTransaction` column is 88% of the bytes has only 8 KB of answerable data in
+it — reading the whole thing wastes the turn budget and can end the run with no
+answer at all.
+
+## Ask the question directly
+
+`kb_table_query` filters, groups and aggregates host-side. You fill in
+parameters; you never write SQL or a DataFrame expression.
+
+```
+kb_table_query(path="notes/data.md", op="sum", column="amount")
+kb_table_query(path="notes/data.md", op="sum", column="amount", group_by="region")
+kb_table_query(path="notes/data.md", op="count", where_column="status", where_equals="paid")
+```
+
+This is the whole point of the tool: totals and group-bys computed by the host
+are right or they error. The same arithmetic written as code is right or it is
+quietly wrong, and a wrong number looks exactly like a correct one.
+
+If the operation set cannot express your question, project the useful columns
+and read them — the default projection already drops a dominant column.
+
+## Converting to another format
+
+```bash
+rookery kb convert data.csv --dest notes     # → markdown
+```
+
+For CSV → JSON or CSV → Excel, say what you need in your reply rather than
+generating a file: the user asked a question, and a converted file they have to
+open is rarely the answer.
+
+## When you genuinely need code
+
+Only when the tools above cannot express it — a reshape, a join across two
+files, a custom parse. Then use the standard library `csv` module, which needs
+no install:
 
 ```python
 import csv, json, sys
-with open(sys.argv[1], newline="") as f:
+with open(sys.argv[1], newline="", encoding="utf-8-sig") as f:
     rows = [r for r in csv.DictReader(f) if r.get("status") == "paid"]
-print(json.dumps(rows))
+print(json.dumps(rows[:20]))
 ```
 
-## CSV ↔ JSON ↔ Excel
+`utf-8-sig` is deliberate: a spreadsheet export usually carries a byte-order
+mark, and reading it as plain UTF-8 leaves the mark glued to your first column
+name so every lookup on it fails.
 
-```python
-import pandas as pd
-df = pd.read_csv("data.csv")
-df.to_json("data.json", orient="records")
-df.to_excel("data.xlsx", index=False)
-```
-
-## Best practices
-
-- Always pass the right delimiter/encoding: `pd.read_csv(path, sep="\t", encoding="utf-8")`.
-  For messy encodings try `encoding="utf-8-sig"` or `latin-1`.
-- Coerce types explicitly (`df["amount"] = pd.to_numeric(df["amount"], errors="coerce")`)
-  rather than trusting inferred dtypes.
-- Write outputs into the vault or `$TMPDIR`, never `/tmp`.
+**Do not install pandas for this.** It was previously recommended here, and it is
+the wrong tool on this platform: it is a large dependency to fetch on every run,
+and a groupby written by a small model produces a number rather than an error
+when it is wrong.

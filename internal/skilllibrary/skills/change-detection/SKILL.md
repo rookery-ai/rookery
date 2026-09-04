@@ -33,6 +33,26 @@ respected. `state.md` also has a `## Notes` section for human-facing prose about
 the agent's own behavior — that's fine to extend directly, it's separate from
 the json fence.
 
+### Reading and writing state mid-run
+
+`[STATE]` is emitted at the END of a run, which is too late when you need to
+record progress as you go — a run that dies halfway then repeats work it had
+already done. Two tools do the same merge at any point:
+
+```
+get_state()
+set_state(patch={"seen_ids": ["1042", "1043"], "cursor": "2026-07-21T09:00:00Z"})
+```
+
+`set_state` merges exactly as `[STATE]` does — omitted keys are left alone, a
+key set to `null` is deleted — so the two are interchangeable and safe to use in
+the same run. Prefer them over `[STATE]` when you are working through a batch:
+record each item as you finish it, and an interrupted run resumes instead of
+starting over.
+
+A CLI coder reaches the same thing as `rookery state get` and
+`rookery state set '<json>'`.
+
 ## What to store: seen IDs vs a cursor
 
 Pick based on what the source gives you:

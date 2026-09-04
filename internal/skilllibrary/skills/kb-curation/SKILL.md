@@ -32,6 +32,28 @@ useful.
 transcripts, system-written), and other agents' `agents/<other-id>/` directories.
 Don't write there and don't rely on their contents being stable.
 
+## Finding something without reading everything
+
+Listing directories and opening files to look for something is the slowest way
+to use a knowledge base, and on a large one it exhausts the run before it
+answers anything. Three tools do it directly:
+
+- **`search_files(query=…)`** — full-text across the whole vault. "Find the note
+  where I mentioned the dentist" is one call, not a walk.
+- **`glob(pattern=…)`** — find by name or shape, e.g. `notes/**/2026-*.md`.
+- **`kb_file_map(path=…)`** — describe ONE file before reading it: its headings,
+  its size, and a warning when one section or column dominates it.
+
+`kb_file_map` matters most on anything converted from a spreadsheet or an
+export. Such a file is routinely dominated by a single wide column, so reading it
+whole spends the entire turn budget on bytes that answer nothing. Map it, then
+`read_file(path=…, section=…)` for the part you need, or `kb_table_query` if the
+question is arithmetic.
+
+Write with the same discipline: a note someone can find is worth more than a
+note that is merely correct, which is what the naming and linking sections below
+are for.
+
 ## Choosing notes/ vs memory/
 
 Ask: is this a durable fact ABOUT the user (memory/) or a piece of CONTENT the

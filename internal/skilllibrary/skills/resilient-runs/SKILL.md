@@ -65,10 +65,24 @@ action completed, say so rather than guessing optimistically.
 
 ## Record what completed, so the next run resumes instead of repeats
 
-For anything that processes a list or does multi-step work, track progress in
-`[STATE]` as you go — not just at the very end. If the run dies partway
-(timeout, crash, killed), the NEXT run should pick up where this one left off,
-not redo everything or skip everything.
+For anything that processes a list or does multi-step work, record progress as
+you go — not just at the very end. If the run dies partway (timeout, crash,
+killed), the NEXT run should pick up where this one left off, not redo
+everything or skip everything.
+
+**Use `set_state` for this, not `[STATE]`.** The `[STATE]` marker is read from
+your final output, so a run that dies before producing output records nothing —
+which is precisely the run you were protecting against. `set_state` writes
+immediately:
+
+```
+set_state(patch={"processed_ids": ["inv-101", "inv-102"], "last_run_partial": true})
+```
+
+It merges the same way, so a closing `[STATE]` block still works alongside it.
+A CLI coder uses `rookery state set '<json>'`.
+
+The `[STATE]` form remains correct for a summary written once at the end:
 
 ```
 [STATE]

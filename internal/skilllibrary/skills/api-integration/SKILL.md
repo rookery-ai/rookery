@@ -25,8 +25,17 @@ an SDK, do not write request code by hand for these services — the tool is
 already there. If the agent doesn't have the connection bound yet, say so in
 plain language rather than working around it with a manual key.
 
-Only fall back to raw HTTP calls (this skill) when the service genuinely
-ISN'T one of those 28.
+That list is not exhaustive — the platform ships well over a hundred providers,
+so check what the workspace actually has connected before assuming a service is
+absent. A CLI coder lists and calls them with `rookery connector exec`.
+
+**Then check for an MCP server.** If the owner has connected one, its tools are
+offered to you as `mcp__<server>__<tool>` and are the same kind of answer as a
+connector: auth already handled, typed parameters, normalized errors. A CLI
+coder reaches them with `rookery mcp exec`.
+
+Only fall back to raw HTTP calls (this skill) when the service is reachable
+through neither.
 
 ## Authenticating with a stored secret
 

@@ -106,7 +106,7 @@ make build
 </picture>
 
 **100+ services** and **900+ curated actions**, over OAuth or an API key you
-paste — never a broker. **21 skills** built in, plus any you create the same
+paste — never a broker. **22 skills** built in, plus any you create the same
 conversational way.
 
 Read more —
