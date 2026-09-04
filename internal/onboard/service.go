@@ -48,11 +48,26 @@ func ServiceFor(goos string) ServiceSupport {
 			Restart:    "systemctl --user restart rookery.service",
 		}
 	case "darwin":
+		// A per-user launch AGENT, not a system launch DAEMON — the same
+		// decision, for the same reason, as the Windows branch below choosing a
+		// logon task over a Service Control Manager service. A LaunchDaemon
+		// starts at boot but needs administrator rights to install and runs as
+		// root or another principal, so it could not reach a data directory
+		// under the user's own profile. That is precisely the problem the Linux
+		// side avoids by using a systemd USER unit.
+		//
+		// Accepted cost, recorded rather than engineered around: an agent starts
+		// at LOGIN, not at boot. Linux gets boot-start from `loginctl
+		// enable-linger`, and launchd has no equivalent for an agent — so a
+		// headless Mac that reboots does not start Rookery until someone signs
+		// in. The macOS installation page says so.
 		return ServiceSupport{
-			Kind:       "launchd",
+			Managed:    true,
+			Kind:       "launchd user agent",
 			Foreground: "rookery serve",
-			Note: "launchd registration is not built yet, so Rookery does not start at login on macOS. " +
-				"Run it in a terminal, or keep it alive with your own launchd agent.",
+			// $(id -u) stays literal: this is a command the operator pastes into
+			// a shell, and Restart is a static field with no host context.
+			Restart: "launchctl kickstart -k gui/$(id -u)/" + LaunchAgentLabel,
 		}
 	case "windows":
 		// A Task Scheduler task triggered at logon, not a Service Control

@@ -240,7 +240,7 @@ non-public hostnames, so a `.lan` address fails Google's validation outright.
 |---|---|---|---|
 | linux amd64/arm64 | Landlock | systemd **user** unit + `enable-linger` | 1 |
 | container (linux) | Landlock (verified ABI 8 under rootless Podman) | runtime-managed | 1 |
-| darwin amd64/arm64 | **none** | launchd (not yet shipped) | 2 |
+| darwin amd64/arm64 | **none** | launchd **user** agent (at login, not boot) | 2 |
 | windows amd64/arm64 | **none** | Task Scheduler logon task | 2 |
 
 **Off Linux there is no filesystem sandbox at all** — `sandbox.Supported()`
@@ -252,7 +252,50 @@ Linux + macOS) and `install.ps1` (Windows). Each does exactly one job: fetch the
 goreleaser archive for the detected platform, verify it against the release's
 `checksums.txt`, put the binary on `PATH`, offer the four host tools, and hand
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
-A Homebrew tap remains deferred, as does launchd registration on macOS.
+A Homebrew tap remains deferred.
+
+**macOS autostart is a launchd USER AGENT, not a launch daemon, and it starts at
+login rather than at boot.** The mechanism is decided by the same constraint that
+chose a Task Scheduler logon task on Windows and a systemd *user* unit on Linux:
+the server's data lives under the user's own profile, so anything running as
+another principal cannot reach it. A LaunchDaemon in `/Library/LaunchDaemons`
+does start at boot, but it needs administrator rights to install and runs as
+root — reintroducing exactly that problem.
+
+**The accepted cost is stated rather than engineered around: a headless Mac that
+reboots does not start Rookery until someone signs in.** Linux gets boot-start
+from `loginctl enable-linger`; launchd has no equivalent for an agent. The macOS
+installation page and `rookery service install` both say so.
+
+**Four plist keys are load-bearing, and for three of them the obvious spelling is
+wrong** (`internal/onboard/launchd.go`, generated against the running binary for
+the same reason `UnitFileFor` is). `KeepAlive` is a dict with
+`SuccessfulExit=false`, never a bare `<true/>`: bare true restarts the server
+after a CLEAN exit too, so a deliberate stop — or `rookery uninstall` — brings it
+straight back and it cannot be stopped without unloading the agent; the dict form
+mirrors the systemd unit's `Restart=on-failure`. `StandardOutPath` and
+`StandardErrorPath` are mandatory because launchd has no journal, so a job that
+names no file has its output discarded entirely — and their directory must
+already exist, since launchd cannot create it and a job whose redirect target is
+missing **fails to spawn**, reporting it only to the system log (so from the
+outside the install looked fine and the server simply never started).
+`PATH` is set explicitly because a launchd-started process inherits a minimal one
+containing neither `/opt/homebrew/bin` nor `/usr/local/bin` — the same trap
+`coder.coderSearchDirs` records from the other direction, except that detection
+can search harder while anything that later shells out cannot. And `ProcessType`
+is deliberately **not** `Background`, which would let launchd throttle CPU and
+I/O on a process serving HTTP and firing scheduled runs.
+
+`installAutostart` **boots the agent out before bootstrapping it**, ignoring the
+failure: `bootstrap` refuses a label that is already loaded, so reinstalling over
+an existing agent — an upgrade, or a changed data directory — would otherwise
+fail with "service already loaded" and leave the OLD plist running while the new
+file sat on disk unused. It then calls `launchctl enable` separately, because an
+agent the user previously disabled stays disabled across a bootstrap and the
+install would otherwise appear to succeed and start nothing. None of this runs
+here — there is no macOS host — so like the Windows half it is authored,
+unit-tested for the generated document's content, and checked by the
+cross-compile gate.
 
 **Windows autostart is a Task Scheduler logon task, not an SCM service, and
 `rookery service` is what registers it.** Windows had no autostart at all: the
@@ -585,7 +628,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
 | `internal/nethttp` | The single private-address dial guard (`GuardedClient`, `DenyPrivateAddr`, `IsBlockedIP`). Enforced at DIAL time via `net.Dialer.Control`, not by URL inspection — the only approach that catches a hostname RESOLVING into private space and every redirect hop. Blocks loopback/RFC1918/link-local/unique-local/CGNAT-tailscale/cloud-metadata, plus the NAT64/6to4/Teredo transition ranges that embed an IPv4 address (partial by nature — a network-specific NAT64 prefix cannot be enumerated). Load-bearing because chat can now reach the web and the loopback interface hosts the connector + KB bridges and their per-run bearer tokens. `internal/coder/netguard.go` delegates here; do not fork a second copy. |
 | `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
-| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. Also `Resolve`/`MissingOn`/`ToolDirs`/`AugmentProcessPath` — see "Host tools are resolved once, then put on PATH" below. |
+| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`/`TaskXMLFor`/`LaunchAgentPlistFor`. The three service documents are **pure functions with no build tag**, so a Windows task and a macOS agent can be tested on a Linux host — which is the only place they are checked at all, since this project has neither machine. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. Also `Resolve`/`MissingOn`/`ToolDirs`/`AugmentProcessPath` — see "Host tools are resolved once, then put on PATH" below. |
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). **`Usage.Add` is the ONE place usage is summed** — there were two, and the second (in `internal/agentrunner`) enumerated three fields, so `CachedTokens`/`CacheReported` were parsed correctly, carried out of the engine correctly, and discarded one layer up: the run log reported `n/a` for a provider that reports cache statistics on *every* response. A reflection test walks the struct, so a field added later fails until `Add` carries it. `Usage` also carries `Cost`/`CostReported`, read from the provider (OpenRouter reports it on every response) rather than computed from a price table — a table is a second copy of someone else's pricing and goes stale in silence. `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
