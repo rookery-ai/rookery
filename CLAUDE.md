@@ -683,7 +683,25 @@ chats are *reflected* into the vault as markdown + JSON sidecars.
 **Memory injection.** All `.md` files in `memory/` are automatically injected into every LLM
 context (design sessions, agent runs, one-off chat) via `memory.ContextString()`. Files whose
 body is only headings and HTML placeholder comments are silently skipped until the user fills
-them in. `EnsureScaffold` creates `USER.md` and `SOUL.md` with placeholder content on first visit.
+them in. `memory.SeedIdentity` owns `ABOUT.md` and `STYLE.md` and writes them from the values
+setup collected; `EnsureScaffold` deliberately writes no `memory/*.md` at all, because one file
+with two writers is what made the workspace's identity reach no prompt at all.
+
+**The home note is a starting point, and the user may delete it.** `README.md` is not
+system-managed — it is not in `protectedTopDirs`, so the KB API deletes it on request — but
+`EnsureScaffold` runs on every KB tree and folder load (`api_kb.go:369`, `:664`), so an
+unconditional create wrote it straight back and deleting it read as a silent no-op. The create
+branch is therefore gated on `.kb/scaffolded`, a marker written once on first scaffold.
+
+**That marker is deliberately NOT `os.Stat` on the vault root**, which answers a different
+question and would have swallowed the home note for every NEW workspace: `memory.seedIdentity`
+MkdirAlls `<root>/memory` during setup, and nothing calls `EnsureScaffold` at workspace creation
+— the two KB endpoints are its only callers outside migration — so the root routinely exists
+before the first KB visit. `.kb/` alone is no good either: the reflector MkdirAlls it for
+db-export sidecars, so a chat can create it first. A vault scaffolded before the marker existed
+gets it on its next KB load, which recreates an already-deleted README one final time; after
+that the deletion sticks. The `isPristineREADME` upgrade branch is untouched — it fires only
+when a README exists and is byte-identical to a shipped template, so it cannot resurrect one.
 
 Key types in `internal/vault`:
 - **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(workspaceID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.

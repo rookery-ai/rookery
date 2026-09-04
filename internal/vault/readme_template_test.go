@@ -180,3 +180,56 @@ func TestReadmeDescribesFilesThatExist(t *testing.T) {
 		t.Error("if GENERAL.md is named, the README must say it appears when you use /memory")
 	}
 }
+
+// TestScaffoldDoesNotResurrectADeletedREADME is the reason EnsureScaffold's
+// create branch is gated on the vault having been absent. The home note is a
+// starting point, not a system-managed file: the KB API deletes it happily
+// (vault.IsUserMutationProtected does not cover it, and neither does the SPA's
+// PROTECTED_TOP_DIRS), but EnsureScaffold runs on every KB tree and folder
+// load, so an unconditional create wrote it straight back. The file reappeared
+// before the user had finished looking at the tree, which reads as a delete
+// that silently failed.
+func TestScaffoldDoesNotResurrectADeletedREADME(t *testing.T) {
+	v := New(t.TempDir())
+	ws := "ws-readme-deleted"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	readme := filepath.Join(v.Root(ws), "README.md")
+	if err := os.Remove(readme); err != nil {
+		t.Fatalf("remove README: %v", err)
+	}
+	// Twice: the KB tree and folder endpoints each scaffold once per request,
+	// so a returning user hits this on the very next page load.
+	for i := range 2 {
+		if err := v.EnsureScaffold(ws); err != nil {
+			t.Fatalf("rescaffold %d: %v", i, err)
+		}
+	}
+	if _, err := os.Stat(readme); !os.IsNotExist(err) {
+		t.Fatalf("deleted README came back (stat err = %v)", err)
+	}
+}
+
+// TestScaffoldStillWritesTheREADMEWhenSetupTouchedTheVaultFirst is the reason
+// "has this vault been scaffolded?" is a sentinel and NOT os.Stat on the root.
+// memory.seedIdentity runs during setup and MkdirAlls <root>/memory to write
+// ABOUT.md and STYLE.md, and nothing calls EnsureScaffold at workspace
+// creation — the two KB endpoints are its only callers outside migration. So
+// the root routinely exists before the first KB visit, and gating the create
+// on the root's absence would mean a brand-new workspace never gets a home
+// note at all: the deleted-README fix, silently swallowing the first one.
+func TestScaffoldStillWritesTheREADMEWhenSetupTouchedTheVaultFirst(t *testing.T) {
+	v := New(t.TempDir())
+	ws := "ws-seeded-first"
+	// Exactly what memory.seedIdentity does before any KB page is opened.
+	if err := os.MkdirAll(filepath.Join(v.Root(ws), "memory"), 0o750); err != nil {
+		t.Fatalf("pre-create memory dir: %v", err)
+	}
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(v.Root(ws), "README.md")); err != nil {
+		t.Fatalf("first scaffold of a seeded vault wrote no README: %v", err)
+	}
+}
