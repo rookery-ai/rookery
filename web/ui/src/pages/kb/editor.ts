@@ -40,7 +40,17 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
       HTMLAttributes: { target: "_blank", rel: "noopener nofollow", title: "Click to open" },
     }),
     KBImage,
-    Placeholder.configure({ placeholder: "Type / for blocks…" }),
+    // The defaults are load-bearing and deliberately not overridden.
+    // showOnlyCurrent:true + includeChildren:false send the plugin down its
+    // `useResolvedPath` branch, which decorates `resolved.node(1)` — the
+    // TOP-LEVEL block holding the caret. So the hint follows the caret onto any
+    // blank line, and an empty paragraph nested inside a callout, toggle,
+    // column cell, blockquote or list item gets nothing, because node(1) there
+    // is the wrapper and a wrapper is not a textblock. includeChildren:true
+    // would reach those, and would also fire in every empty table cell and
+    // toggle summary, which is noise on exactly the notes that have the most
+    // of them.
+    Placeholder.configure({ placeholder: "Press / for commands…" }),
     TaskList,
     TaskItem.configure({ nested: true }),
     PipeSafeTable.configure({ resizable: false }),

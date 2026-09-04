@@ -1000,6 +1000,22 @@ this — each currently documented only inline, in the file it governs:
   prior reverted attempt that glued them — do not "fix" this back to gluing, it would only move the
   read-only-until-first-save gap onto the more common input.
 
+**The slash-menu hint follows the caret, and both halves of that live in different files.**
+`editor.css` keys on `p.is-empty::before`, not the `p.is-editor-empty:first-child::before` it
+used to: TipTap adds `is-editor-empty` only when the WHOLE document is empty, so on a note with
+any content the hint never appeared and clicking a blank line showed nothing. `is-empty` and
+`data-placeholder` are set by ONE `Decoration.node` on the same node, which is what lets
+`content: attr(data-placeholder)` resolve — splitting them would render an empty `::before`.
+The Placeholder options are deliberately left at their defaults: `showOnlyCurrent: true` +
+`includeChildren: false` send the plugin down its `useResolvedPath` branch, which decorates
+`resolved.node(1)` — the TOP-LEVEL block holding the caret. So an empty paragraph nested in a
+callout, toggle, column cell, blockquote or list item gets nothing, because `node(1)` there is
+the wrapper and a wrapper is not a textblock. `includeChildren: true` would reach those and would
+also fire in every empty table cell and toggle summary, which is noise on exactly the notes that
+have the most of them. The rule is scoped to `p` so an empty heading — mid-edit typing — stays
+clean. jsdom computes no `::before`, so `placeholder.test.ts` asserts the class and attribute
+placement and reads the stylesheet for the selector; only a real browser could check the paint.
+
 Also worth carrying over: `AIActions.tsx`'s `selectionMarkdown`/`accept()` are what make the AI
 actions panel selection-aware rather than document-wide (captured range remapped through every
 editor transaction while the bubble menu is unmounted, verified live before writing); `lib/copyText`
