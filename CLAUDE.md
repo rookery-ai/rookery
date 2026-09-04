@@ -240,7 +240,7 @@ non-public hostnames, so a `.lan` address fails Google's validation outright.
 |---|---|---|---|
 | linux amd64/arm64 | Landlock | systemd **user** unit + `enable-linger` | 1 |
 | container (linux) | Landlock (verified ABI 8 under rootless Podman) | runtime-managed | 1 |
-| darwin amd64/arm64 | **none** | launchd (not yet shipped) | 2 |
+| darwin amd64/arm64 | **none** | launchd **user** agent (at login, not boot) | 2 |
 | windows amd64/arm64 | **none** | Task Scheduler logon task | 2 |
 
 **Off Linux there is no filesystem sandbox at all** — `sandbox.Supported()`
@@ -252,7 +252,50 @@ Linux + macOS) and `install.ps1` (Windows). Each does exactly one job: fetch the
 goreleaser archive for the detected platform, verify it against the release's
 `checksums.txt`, put the binary on `PATH`, offer the four host tools, and hand
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
-A Homebrew tap remains deferred, as does launchd registration on macOS.
+A Homebrew tap remains deferred.
+
+**macOS autostart is a launchd USER AGENT, not a launch daemon, and it starts at
+login rather than at boot.** The mechanism is decided by the same constraint that
+chose a Task Scheduler logon task on Windows and a systemd *user* unit on Linux:
+the server's data lives under the user's own profile, so anything running as
+another principal cannot reach it. A LaunchDaemon in `/Library/LaunchDaemons`
+does start at boot, but it needs administrator rights to install and runs as
+root — reintroducing exactly that problem.
+
+**The accepted cost is stated rather than engineered around: a headless Mac that
+reboots does not start Rookery until someone signs in.** Linux gets boot-start
+from `loginctl enable-linger`; launchd has no equivalent for an agent. The macOS
+installation page and `rookery service install` both say so.
+
+**Four plist keys are load-bearing, and for three of them the obvious spelling is
+wrong** (`internal/onboard/launchd.go`, generated against the running binary for
+the same reason `UnitFileFor` is). `KeepAlive` is a dict with
+`SuccessfulExit=false`, never a bare `<true/>`: bare true restarts the server
+after a CLEAN exit too, so a deliberate stop — or `rookery uninstall` — brings it
+straight back and it cannot be stopped without unloading the agent; the dict form
+mirrors the systemd unit's `Restart=on-failure`. `StandardOutPath` and
+`StandardErrorPath` are mandatory because launchd has no journal, so a job that
+names no file has its output discarded entirely — and their directory must
+already exist, since launchd cannot create it and a job whose redirect target is
+missing **fails to spawn**, reporting it only to the system log (so from the
+outside the install looked fine and the server simply never started).
+`PATH` is set explicitly because a launchd-started process inherits a minimal one
+containing neither `/opt/homebrew/bin` nor `/usr/local/bin` — the same trap
+`coder.coderSearchDirs` records from the other direction, except that detection
+can search harder while anything that later shells out cannot. And `ProcessType`
+is deliberately **not** `Background`, which would let launchd throttle CPU and
+I/O on a process serving HTTP and firing scheduled runs.
+
+`installAutostart` **boots the agent out before bootstrapping it**, ignoring the
+failure: `bootstrap` refuses a label that is already loaded, so reinstalling over
+an existing agent — an upgrade, or a changed data directory — would otherwise
+fail with "service already loaded" and leave the OLD plist running while the new
+file sat on disk unused. It then calls `launchctl enable` separately, because an
+agent the user previously disabled stays disabled across a bootstrap and the
+install would otherwise appear to succeed and start nothing. None of this runs
+here — there is no macOS host — so like the Windows half it is authored,
+unit-tested for the generated document's content, and checked by the
+cross-compile gate.
 
 **Windows autostart is a Task Scheduler logon task, not an SCM service, and
 `rookery service` is what registers it.** Windows had no autostart at all: the
@@ -581,11 +624,11 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
 | `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one, recovers `-layout` column blocks as markdown tables, and **falls back to OCR** via `pdftoppm`+`tesseract` when there is no usable text layer), json, and images (OCR via tesseract when installed; an honest stub naming what is missing when not). Embedded images are extracted from docx/pptx and returned in `Result.Assets` — the package stays pure, so the CALLER stores them (see "KB import fidelity" below). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); the sanctioned reverse is `internal/export`. |
-| `internal/export` | Markdown note → HTML, DOCX or PDF, the sanctioned reverse of `internal/convert` and a separate package precisely so convert stays into-markdown-only. HTML and DOCX are pure Go and always available; PDF shells out to a headless renderer. **The renderer is looked for in Playwright's cache BEFORE PATH** (`browser.ChromiumExecutable`), because the platform installs its own Chromium via `rookery browser install` and probing PATH alone reported "PDF unavailable" on a host whose `/healthz` said `"browser": true`. `pandoc` is deliberately NOT a supported engine: it cannot render HTML→PDF without a LaTeX engine it does not bundle, so probing it turned an honest "unavailable" into a button that failed with an opaque 500. Chromium's argv carries `--no-pdf-header-footer`, or every page is stamped with the print date and the source `file://` temp path. |
+| `internal/export` | Markdown note → HTML, DOCX or PDF, the sanctioned reverse of `internal/convert` and a separate package precisely so convert stays into-markdown-only. HTML and DOCX are pure Go and always available; PDF shells out to a headless renderer. **The renderer is looked for in Playwright's cache BEFORE PATH** (`browser.ChromiumExecutable`), because the platform installs its own Chromium via `rookery browser install` and probing PATH alone reported "PDF unavailable" on a host whose `/healthz` said `"browser": true`. `pandoc` is deliberately NOT a supported engine, and has now been rejected TWICE for different reasons: as a PDF engine it cannot render HTML→PDF without a LaTeX engine it does not bundle, so probing it turned an honest "unavailable" into a button that failed with an opaque 500; as a DOCX engine it is unverifiable here and would produce stacked cells where the grid should be (see "Export fidelity" below). A `layout.go` AST transformer gives both renderers columns, alignment and real image widths from one pass, so a `pandoc` route would add a host dependency to be strictly worse. Chromium's argv carries `--no-pdf-header-footer`, or every page is stamped with the print date and the source `file://` temp path. |
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
 | `internal/nethttp` | The single private-address dial guard (`GuardedClient`, `DenyPrivateAddr`, `IsBlockedIP`). Enforced at DIAL time via `net.Dialer.Control`, not by URL inspection — the only approach that catches a hostname RESOLVING into private space and every redirect hop. Blocks loopback/RFC1918/link-local/unique-local/CGNAT-tailscale/cloud-metadata, plus the NAT64/6to4/Teredo transition ranges that embed an IPv4 address (partial by nature — a network-specific NAT64 prefix cannot be enumerated). Load-bearing because chat can now reach the web and the loopback interface hosts the connector + KB bridges and their per-run bearer tokens. `internal/coder/netguard.go` delegates here; do not fork a second copy. |
 | `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
-| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. Also `Resolve`/`MissingOn`/`ToolDirs`/`AugmentProcessPath` — see "Host tools are resolved once, then put on PATH" below. |
+| `internal/onboard` | The platform knowledge behind `rookery onboard`: the four `HostTools` (with `Critical` marking python3 alone, whose absence disables the AST guardrail rather than merely degrading a feature), `Missing`/`DetectManager`/`PackageFor`/`InstallCommands` over six package managers, and `ServiceFor`/`UnitFileFor`/`SystemdUnitPath`/`TaskXMLFor`/`LaunchAgentPlistFor`. The three service documents are **pure functions with no build tag**, so a Windows task and a macOS agent can be tested on a Linux host — which is the only place they are checked at all, since this project has neither machine. Its own package, and its `LookPath` is injectable, because the package-name mapping is exactly what shipped wrong in the rpm and a host we cannot run has to be describable in a test. `UnitFileFor` **generates** the unit against the running binary rather than copying the packaged one — that file hardcodes `/usr/bin/rookery`, so an `install.sh` user with the binary in `~/.local/bin` would enable a service that starts nothing. Also `Resolve`/`MissingOn`/`ToolDirs`/`AugmentProcessPath` — see "Host tools are resolved once, then put on PATH" below. |
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). **`Usage.Add` is the ONE place usage is summed** — there were two, and the second (in `internal/agentrunner`) enumerated three fields, so `CachedTokens`/`CacheReported` were parsed correctly, carried out of the engine correctly, and discarded one layer up: the run log reported `n/a` for a provider that reports cache statistics on *every* response. A reflection test walks the struct, so a field added later fails until `Add` carries it. `Usage` also carries `Cost`/`CostReported`, read from the provider (OpenRouter reports it on every response) rather than computed from a price table — a table is a second copy of someone else's pricing and goes stale in silence. `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
@@ -1024,14 +1067,83 @@ degrades each one differently depending on whether it's raw HTML on the wire or 
 - **Underline, both colour marks** — the `<span style>`/`<u>` wrapper is raw HTML and is dropped,
   but the enclosed TEXT is an ordinary child node the renderer still walks, so the words survive with
   formatting stripped.
-- **Callouts, resized images** — markdown, not raw HTML, so both survive structurally, just
-  degraded: a callout serializes as a plain `> [!kind] title` blockquote (`nodes/callout.ts`), which
-  goldmark renders as an ordinary `<blockquote>` with the literal `[!kind]` marker text visible,
-  since it has no notion of Obsidian's callout syntax; a resized image's width lives in the alt
-  slot (`![alt|420](src)`, `kbImage.ts`), so the exported `<img>`'s alt text carries the literal
-  `|420` as visible noise rather than an actual size.
+- **Callouts** — markdown, not raw HTML, so they survive structurally but degraded: a callout
+  serializes as a plain `> [!kind] title` blockquote (`nodes/callout.ts`), which goldmark renders as
+  an ordinary `<blockquote>` with the literal `[!kind]` marker text visible, since it has no notion
+  of Obsidian's callout syntax.
+- **Columns, alignment and resized images NO LONGER degrade** — see below.
 
 See `marks/colors.ts`'s top comment for the toggle/colour-mark case specifically.
+
+**Three of those degradations were one reported bug, and the fix is an AST transformer rather
+than `WithUnsafe()`.** A note with resized images in a two-column grid exported as full-size
+images stacked in PDF, and in DOCX with no images at all. Three independent causes:
+
+- **An image's width was written and never read.** The editor serializes a resized image as
+  `![alt|420](src)` with the width in the ALT SLOT (`kbImage.ts`), and nothing on the export side
+  split it — `inlineVaultAssets` copies alt through verbatim, so goldmark emitted
+  `alt="before|420"` with no width and the literal `|420` as visible noise. `export.SplitAltWidth`
+  mirrors the editor's TypeScript `splitAltWidth` rule for rule (split on the LAST pipe, only when
+  the tail is a bare integer, so an alt containing a pipe survives); a shared test corpus is not
+  possible across the language boundary, so `TestSplitAltWidthAgreesWithTheEditor` enumerates the
+  contract instead.
+- **The layout wrappers were dropped as raw HTML.** `internal/export/layout.go` is a goldmark
+  `ASTTransformer` that matches exactly `<div data-cols="N">` and `<div align="…">`, finds the
+  matching `</div>` sibling, and moves what is between them into a real node.
+- **DOCX had no image support at all** — its block switch had no `ast.Image` case, and the handler
+  deliberately skipped inlining for it. It now takes the same inlined markdown the other two
+  formats do.
+
+**The transformer is NOT a `WithUnsafe()` in disguise, and the distinction is the whole point:
+user HTML is never passed through.** Two known shapes are recognised and OUR OWN markup is emitted
+from a fixed whitelist; every other raw HTML block still renders as `<!-- raw HTML omitted -->`.
+`TestOtherRawHTMLIsStillDropped` pins it, because the tempting future "simplification" is to turn
+unsafe mode on and delete the file.
+
+**It works at all because of a measured fact about goldmark**, and checking it was what decided the
+design: goldmark parses the wrapper as a CommonMark **type-6** HTML block that CLOSES at the blank
+line, so the opener and closer arrive as SEPARATE sibling `HTMLBlock` nodes with the body between
+them as ordinary block nodes carrying real inline marks. The wrapper is addressable and the content
+is not trapped inside it. (markdown-it behaves identically, which is why the editor's
+blank-line-separated form round-trips there — see `nodes/columns.ts`.) Had goldmark swallowed the
+region into one block, this approach would have been impossible.
+
+**One transformation feeds BOTH renderers**, because the DOCX writer walks the same AST. That is the
+property a converter-based approach could not have had, and it is why **pandoc was scoped and
+dropped** — recorded here so it is not re-proposed: it cannot be verified (not installed on the
+development host, so every claim about its output would be untested, which is an `unverified: true`
+connector's standing applied to the one component whose whole justification is fidelity), and
+**Word has no CSS grid**, so pandoc converting a `<div data-cols>` produces the stacked cells that
+are the reported symptom. It would also have turned `AvailableFormats()`'s unconditional
+`DOCX: true` into a host probe.
+
+Three implementation details are load-bearing:
+
+- **An unbalanced opener leaves the AST untouched.** Consuming the rest of the document into a
+  wrapper its author never closed turns a cosmetic defect into a note that has visibly lost its
+  ending. The two wrappers also NEST (the editor produces align inside columns), so the scan
+  recurses into a node it has just built.
+- **HTML emits `repeat(N, minmax(0, 1fr))` and never a bare `1fr`** — a grid item's automatic
+  minimum size is content-based (CSS Grid §6.6), the same trap already recorded for `DialogContent`
+  and `PageContainer`.
+- **DOCX renders a grid as a BORDERLESS single-row table**, which is Word's only side-by-side
+  construct, with every border explicitly `none` (a `w:tbl` without `tblBorders` inherits the
+  document default and arrives with visible gridlines). Alignment is a PARAGRAPH property there, so
+  `applyJustification` reaches each `<w:p>` rather than wrapping — a `w:jc` outside `w:pPr` makes
+  Word report the whole document as damaged. An image whose bytes cannot be decoded is **degraded
+  to its alt text rather than embedded at a guessed size**: DOCX requires an explicit extent in EMU
+  (`px × 9525`), and a stretched picture is worse than an absent one and much harder to attribute.
+  The DOCX tests **unzip the output** and assert the media part, the image-type relationship, the
+  content-type declaration and the real EMU extent, because every one of those can be wrong while
+  the file is still a well-formed zip of well-formed XML that Word opens and renders incorrectly.
+
+**Attachments are LISTED, not embedded, and that is a constraint rather than an oversight.**
+`inlineVaultAssets` is image-only because goldmark deliberately blanks a `data:` URI in an
+`<a href>` — a security property this path keeps — so a linked PDF cannot ride the same mechanism.
+`web.collectAttachments` gathers non-image vault-relative link destinations and both renderers
+append an **Attachments** section naming each file AND its path: the reader of a downloaded
+document cannot follow a relative link, and the path is what lets them ask for the right thing.
+Images are excluded from the list, since the document already carries them.
 
 **KB table editing is a control surface, not a capability.** TipTap already implements
 `addRowAfter`/`deleteColumn`/etc.; nothing reached them, so a table was inserted at a fixed 3x3 and

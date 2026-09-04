@@ -41,6 +41,7 @@ func ToDOCX(md []byte, opts Options) ([]byte, error) {
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 		d.block(c, source, 0)
 	}
+	d.attachments(opts.Attachments)
 	if d.body.Len() == 0 {
 		// A body with no block-level content still needs one paragraph or Word
 		// treats the file as damaged.
@@ -56,27 +57,62 @@ type runProps struct {
 	bold, italic, code, strike, link bool
 }
 
-// docxRel is one external hyperlink relationship written into
-// word/_rels/document.xml.rels.
+// docxRel is one relationship written into word/_rels/document.xml.rels.
+//
+// It carries its type because there are now two: an EXTERNAL hyperlink, and an
+// INTERNAL image pointing at a media part inside the package. Word resolves a
+// relationship by type, so an image registered with the hyperlink type is
+// simply not found and the drawing renders as a missing-picture box.
 type docxRel struct {
 	id, target string
+	relType    string
+	external   bool
 }
 
-// docxBuilder accumulates the document body XML and the hyperlink relationships
-// discovered while walking the AST.
+const (
+	relTypeHyperlink = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+	relTypeImage     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+)
+
+// docxMedia is one embedded image part.
+type docxMedia struct {
+	name string // part name relative to word/, e.g. "media/image1.png"
+	ext  string // "png", "jpeg", "gif" — Word picks its decoder from this
+	data []byte
+}
+
+// docxBuilder accumulates the document body XML plus the relationships and
+// media parts discovered while walking the AST.
 type docxBuilder struct {
-	body   strings.Builder
-	rels   []docxRel
-	relSeq int
+	body     strings.Builder
+	rels     []docxRel
+	relSeq   int
+	media    []docxMedia
+	mediaSeq int
+	// drawingSeq numbers the <wp:docPr> ids. Word requires them to be unique
+	// within the document and treats a duplicate as a corrupt file, so this is
+	// deliberately a document-wide counter rather than a per-paragraph one.
+	drawingSeq int
 }
 
 // addRel registers an external hyperlink target and returns its relationship id,
-// which the emitted <w:hyperlink r:id="…"> must match exactly. document.xml.rels
-// holds only hyperlinks here (no styles/numbering parts), so ids can start at 1.
+// which the emitted <w:hyperlink r:id="…"> must match exactly.
 func (d *docxBuilder) addRel(target string) string {
 	d.relSeq++
 	id := fmt.Sprintf("rId%d", d.relSeq)
-	d.rels = append(d.rels, docxRel{id: id, target: target})
+	d.rels = append(d.rels, docxRel{id: id, target: target, relType: relTypeHyperlink, external: true})
+	return id
+}
+
+// addImage stores an image as a media part and returns its relationship id.
+func (d *docxBuilder) addImage(ext string, data []byte) string {
+	d.mediaSeq++
+	name := fmt.Sprintf("media/image%d.%s", d.mediaSeq, ext)
+	d.media = append(d.media, docxMedia{name: name, ext: ext, data: data})
+
+	d.relSeq++
+	id := fmt.Sprintf("rId%d", d.relSeq)
+	d.rels = append(d.rels, docxRel{id: id, target: name, relType: relTypeImage})
 	return id
 }
 
@@ -99,6 +135,10 @@ func (d *docxBuilder) block(n gast.Node, source []byte, indent int) {
 		d.body.WriteString("<w:p>")
 		d.inlineChildren(&d.body, n, source, runProps{})
 		d.body.WriteString("</w:p>")
+	case *columnsNode:
+		d.columns(node, source)
+	case *alignNode:
+		d.align(node, source)
 	case *gast.List:
 		d.list(node, source, indent)
 	case *gast.Blockquote:
@@ -298,8 +338,7 @@ func (d *docxBuilder) inlineChildren(b *strings.Builder, parent gast.Node, sourc
 			writeRun(b, url, rp2)
 			b.WriteString("</w:hyperlink>")
 		case *gast.Image:
-			// No image embedding in this minimal package; degrade to alt text.
-			writeRun(b, nodeText(node, source), rp)
+			d.image(b, node, source, rp)
 		case *gast.RawHTML:
 			// Drop raw inline HTML (safe).
 		default:
@@ -416,7 +455,7 @@ func (d *docxBuilder) zip() ([]byte, error) {
 		name string
 		data string
 	}{
-		{"[Content_Types].xml", contentTypesXML},
+		{"[Content_Types].xml", d.contentTypesXML()},
 		{"_rels/.rels", packageRelsXML},
 		{"word/_rels/document.xml.rels", d.documentRelsXML()},
 		{"word/document.xml", d.documentXML()},
@@ -430,6 +469,17 @@ func (d *docxBuilder) zip() ([]byte, error) {
 			return nil, fmt.Errorf("export: docx: write %s: %w", p.name, err)
 		}
 	}
+	// Media parts are binary, so they are written separately from the XML parts
+	// above rather than being forced through a string.
+	for _, m := range d.media {
+		w, err := zw.Create("word/" + m.name)
+		if err != nil {
+			return nil, fmt.Errorf("export: docx: create media %s: %w", m.name, err)
+		}
+		if _, err := w.Write(m.data); err != nil {
+			return nil, fmt.Errorf("export: docx: write media %s: %w", m.name, err)
+		}
+	}
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("export: docx: finalize archive: %w", err)
 	}
@@ -441,7 +491,17 @@ func (d *docxBuilder) zip() ([]byte, error) {
 func (d *docxBuilder) documentXML() string {
 	var sb strings.Builder
 	sb.WriteString(xmlDecl)
-	sb.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>`)
+	// wp: and a: are required by the <w:drawing> an embedded image emits. They
+	// are declared here rather than on each drawing because an undeclared
+	// prefix makes the document XML malformed, which Word reports as a corrupt
+	// file rather than as a missing image.
+	sb.WriteString(`<w:document ` +
+		`xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ` +
+		`xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ` +
+		`xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ` +
+		`xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ` +
+		`xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"` +
+		`><w:body>`)
 	sb.WriteString(d.body.String())
 	sb.WriteString(`<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`)
 	sb.WriteString(`</w:body></w:document>`)
@@ -455,9 +515,17 @@ func (d *docxBuilder) documentRelsXML() string {
 	sb.WriteString(xmlDecl)
 	sb.WriteString(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`)
 	for _, r := range d.rels {
+		// TargetMode="External" is emitted for hyperlinks ONLY. An image
+		// relationship carrying it makes Word look for the media part outside
+		// the package, where it is not, and the picture renders as a missing
+		// image box with no error.
+		mode := ""
+		if r.external {
+			mode = ` TargetMode="External"`
+		}
 		sb.WriteString(fmt.Sprintf(
-			`<Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="%s" TargetMode="External"/>`,
-			r.id, escXMLAttr(r.target)))
+			`<Relationship Id="%s" Type="%s" Target="%s"%s/>`,
+			r.id, r.relType, escXMLAttr(r.target), mode))
 	}
 	sb.WriteString(`</Relationships>`)
 	return sb.String()
@@ -465,11 +533,32 @@ func (d *docxBuilder) documentRelsXML() string {
 
 const xmlDecl = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n"
 
-const contentTypesXML = xmlDecl + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
-	`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
-	`<Default Extension="xml" ContentType="application/xml"/>` +
-	`<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>` +
-	`</Types>`
+// contentTypesXML declares a content type for every part in the package.
+//
+// It is built rather than constant now that images exist: OPC requires each
+// extension present in the package to be declared, and Word rejects the whole
+// file as unreadable when one is missing — it does not skip the offending part.
+// Each image extension is emitted at most once.
+func (d *docxBuilder) contentTypesXML() string {
+	var sb strings.Builder
+	sb.WriteString(xmlDecl)
+	sb.WriteString(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`)
+	sb.WriteString(`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`)
+	sb.WriteString(`<Default Extension="xml" ContentType="application/xml"/>`)
+
+	seen := map[string]bool{}
+	for _, m := range d.media {
+		if seen[m.ext] {
+			continue
+		}
+		seen[m.ext] = true
+		fmt.Fprintf(&sb, `<Default Extension="%s" ContentType="image/%s"/>`, m.ext, m.ext)
+	}
+
+	sb.WriteString(`<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>`)
+	sb.WriteString(`</Types>`)
+	return sb.String()
+}
 
 const packageRelsXML = xmlDecl + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
 	`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>` +

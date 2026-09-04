@@ -156,7 +156,7 @@ a real hostname or `http://localhost`.
 |---|---|---|
 | linux amd64/arm64 | Landlock | systemd user unit |
 | container (linux) | Landlock | runtime-managed |
-| darwin amd64/arm64 | none | launchd (not yet shipped) |
+| darwin amd64/arm64 | none | launchd user agent (at login) |
 | windows amd64/arm64 | none | Task Scheduler logon task |
 
 **Off Linux there is no filesystem sandbox** — coder subprocesses run
