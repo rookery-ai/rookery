@@ -540,6 +540,12 @@ func (c *Coder) generateCLI(ctx context.Context, workspaceID, prompt string) (*R
 		if backend.looksLikeLimit(stdout.String(), stderr.String()) {
 			return nil, ErrUsageLimit
 		}
+		// A binary that is not installed never produced output to report, and
+		// wrapping it in the stdout/stderr message below buries the one fact
+		// that matters behind two empty sections.
+		if mapped := c.mapCLIErr(err); errors.Is(mapped, ErrCoderUnreachable) {
+			return nil, mapped
+		}
 		return nil, fmt.Errorf("coder exited with error: %w\nstdout: %.500s\nstderr: %.500s", err, stdout.String(), stderr.String())
 	}
 	stdoutBytes := stdout.Bytes()
@@ -580,6 +586,79 @@ var ErrRateLimited = errors.New("coder rate-limited by provider")
 // because it is the one transient case that used to reach the user as a raw
 // internal string after burning the full retry budget.
 var ErrProviderEmpty = errors.New("coder got an empty response from the provider")
+
+// ErrCoderUnreachable indicates the thing that was supposed to answer is not
+// there: an API provider whose endpoint refused the connection, would not
+// resolve or would not verify, or a CLI coder whose binary is not installed.
+//
+// It covers both engines deliberately. The two causes have different remedies
+// (start the model server / install the binary) but the same shape, and every
+// surface that classifies coder failures needs exactly one arm for them; the
+// specificity lives in the wrapped detail, which is generated at the failure
+// site because that is the only place the configuration is in scope.
+//
+// This is the error behind the report that chat "hangs and displays no
+// message". Nothing recognised it, so a dead local model server spent ~68
+// seconds inside the llm retry ladder and then rendered as the generic "see the
+// server log" sentence on every surface.
+var ErrCoderUnreachable = errors.New("coder unreachable")
+
+// UnreachableDetail returns the explanation ErrCoderUnreachable was wrapped
+// with, without the sentinel's own text — turning "coder unreachable: could not
+// reach the model …" into just the second half, so a caller can drop it into a
+// sentence of its own.
+//
+// It lives here, beside the sentinel, because the wrapping convention is this
+// package's: the detail is attached with fmt.Errorf("%w: …") and Go keeps no
+// structured handle on the suffix, so recovering it means knowing how it was
+// attached. Both user-facing classifiers (agentrunner.FriendlyRunError and the
+// web chat turn's) need it, and a second copy would drift from this one.
+//
+// The error may be wrapped again on the way up — agentrunner prefixes "coder
+// generate: " — so it searches for the sentinel text rather than assuming it is
+// at the front. Falling back to the whole message is deliberate: verbose beats
+// blank, and a blank clause would produce a sentence that names nothing, which
+// is the failure this sentinel exists to end.
+func UnreachableDetail(err error) string { return detailAfter(err, ErrCoderUnreachable) }
+
+// RejectedDetail is UnreachableDetail's sibling for ErrCoderRejected.
+func RejectedDetail(err error) string { return detailAfter(err, ErrCoderRejected) }
+
+// detailAfter returns whatever a sentinel was wrapped with, without the
+// sentinel's own text.
+func detailAfter(err, sentinel error) string {
+	msg, marker := err.Error(), sentinel.Error()+": "
+	if i := strings.Index(msg, marker); i >= 0 {
+		if rest := strings.TrimSpace(msg[i+len(marker):]); rest != "" {
+			return rest
+		}
+	}
+	return msg
+}
+
+// ErrCoderRejected indicates the provider ANSWERED and refused the request —
+// nearly always a model name it does not have.
+//
+// Distinct from ErrCoderUnreachable, and the distinction is the whole value:
+// "cannot reach the model server" and "the model server does not have that
+// model" send the owner to completely different settings. It reached them as
+// "The chat turn failed. See the server log for details." while the provider
+// had already said "invalid model name".
+var ErrCoderRejected = errors.New("coder request rejected by the provider")
+
+// mapCLIErr classifies a CLI-engine subprocess failure.
+//
+// Only a missing binary is reclassified. A coder that ran and exited non-zero
+// has reached the thing it was calling, so reporting it as unreachable would
+// send the user to check an installation that is fine — the failure is in what
+// happened after launch, and the existing message carries the captured
+// stdout/stderr that says so.
+func (c *Coder) mapCLIErr(err error) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("%w: the coder binary %q is not installed or is not on PATH", ErrCoderUnreachable, c.bin)
+	}
+	return err
+}
 
 // Chat sends a conversational message to the coder with optional history. It is
 // used by the text-only design conversations (agent designer, skill designer,
@@ -648,7 +727,16 @@ func (c *Coder) Ping(ctx context.Context, workspaceID string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.bin, "--version")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("claude not found at %q: %w", c.bin, err)
+		// This message used to name "claude" unconditionally, from when it was
+		// the only supported CLI — so testing an OpenCode workspace reported a
+		// binary the owner had never configured. It also went unclassified, so
+		// the settings Test button gave a different account of a missing binary
+		// than a run did.
+		if mapped := c.mapCLIErr(err); errors.Is(mapped, ErrCoderUnreachable) {
+			return "", mapped
+		}
+		return "", fmt.Errorf("%w: the coder binary %q at %q did not answer --version: %v",
+			ErrCoderUnreachable, filepath.Base(c.bin), c.bin, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

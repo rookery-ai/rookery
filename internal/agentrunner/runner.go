@@ -1003,6 +1003,25 @@ func FriendlyRunError(err error, coderName string) string {
 		// tells them nothing they can act on, and reads like a bug in their agent.
 		return fmt.Sprintf("⚠️ %s got no response from the provider, on every retry — a temporary problem at their end, not with this agent. Nothing ran, so nothing was lost. Try again.", who)
 	}
+	if errors.Is(err, coder.ErrCoderRejected) {
+		return fmt.Sprintf("⚠️ %s could not run: %s. Check the model name in the workspace's coder settings.",
+			who, coder.RejectedDetail(err))
+	}
+	if errors.Is(err, coder.ErrTimeout) {
+		// Found by the parity test in package web, not by a report: chat has
+		// classified this since it was written, and an agent run showed the raw
+		// "coder timed out after 30m0s" instead. Same failure, two surfaces, two
+		// different answers — which is the divergence that test exists to end.
+		return fmt.Sprintf("⚠️ %s ran past its time limit and was stopped, so this run did not finish. Raising the coder timeout in settings, or narrowing what the agent does in one run, are the two things that help.", who)
+	}
+	if errors.Is(err, coder.ErrCoderUnreachable) {
+		// Nothing about the agent is wrong: the model server or the coder binary
+		// was not there to answer. The wrapped detail names which, and is the
+		// whole remedy — before this arm existed the run reported only its raw
+		// error, after ~68 seconds of silent retrying.
+		return fmt.Sprintf("⚠️ %s could not be reached, so this run did not start — %s. It will retry on the next scheduled run once it is reachable again.",
+			who, coder.UnreachableDetail(err))
+	}
 	if errors.Is(err, coder.ErrMaxTurns) {
 		// Normally unreachable: the API-coder tool loop (api_engine.go's runToolLoop)
 		// gives the model one final text-only turn to explain itself and stop before
@@ -1011,8 +1030,17 @@ func FriendlyRunError(err error, coderName string) string {
 		// prepended by the caller, so this is the fallback for when there's none.
 		return fmt.Sprintf("⚠️ %s ran out of attempts partway through this run and couldn't finish or explain why. It will retry on the next scheduled run — if this keeps happening, the task likely needs to be simplified or split up.", who)
 	}
-	return "⚠️ This agent run failed: " + err.Error()
+	return GenericRunFailurePrefix + err.Error()
 }
+
+// GenericRunFailurePrefix opens the message for a failure nothing classified.
+//
+// Exported for the same reason FriendlyRunError is: the parity test in package
+// web asserts that neither user-facing surface leaves a known coder sentinel
+// falling through to its generic arm, and it can only do that against the real
+// string. A copy in the test would drift the moment this wording changed, and
+// pass while doing so.
+const GenericRunFailurePrefix = "⚠️ This agent run failed: "
 
 // ─── Output parsing ───────────────────────────────────────────────────────────
 

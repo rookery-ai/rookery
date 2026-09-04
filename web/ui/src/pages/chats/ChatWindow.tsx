@@ -80,8 +80,23 @@ function attachErrorMessage(err: unknown): string {
 // "the turn failed" beats an empty banner, which reads as nothing having
 // happened.
 export function turnFailureMessage(lines: string[]): string {
-  const last = lines[lines.length - 1];
-  const cleaned = last?.replace(/^⚠️\s*/, "").trim();
+  // The LAST ⚠️ line, not merely the last line.
+  //
+  // Taking the last line assumed the failure milestone is always final, which
+  // is true only when it arrives at all. A turn can end without it — the stream
+  // can close on a transport drop, or a client can attach just as the turn
+  // finishes — and then the last line is an ordinary progress milestone, which
+  // the banner would present as the reason it failed. Once a turn opens with
+  // "💭 Contacting <model>…" that misreads badly: the owner is told their chat
+  // failed because it was contacting the model.
+  //
+  // Same line-anchored discipline as chat.CleanReply on the server: a marker
+  // identifies the line, position does not.
+  const failure = [...lines].reverse().find((l) => l.trimStart().startsWith("⚠️"));
+  const cleaned = failure?.replace(/^\s*⚠️\s*/, "").trim();
+  // The fallback matters: a turn can fail before emitting anything at all, and
+  // "the turn failed" beats an empty banner, which reads as nothing having
+  // happened.
   return cleaned || "The chat turn failed.";
 }
 

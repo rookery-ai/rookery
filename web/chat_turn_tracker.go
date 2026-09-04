@@ -38,6 +38,16 @@ type chatTurnState struct {
 	mu   sync.Mutex
 	done bool
 	err  error
+	// closed guards progressCh, which has more than one sender: the turn
+	// goroutine and the quiet-turn timer. time.Timer.Stop reports false when the
+	// callback is ALREADY RUNNING and does not wait for it, so stopping the
+	// timer on the way out is not enough on its own — the callback can be
+	// mid-flight while this goroutine closes the channel. That is a send on a
+	// closed channel, which panics the server rather than merely racing.
+	//
+	// Set and read under mu, together with the close itself, so "may I send?"
+	// and "close" cannot interleave.
+	closed bool
 	// lines accumulates every milestone so a client attaching MID-turn receives
 	// the history it missed rather than only what arrives after it connects.
 	// Following the live channel alone would show such a client an empty card on
@@ -50,6 +60,44 @@ type chatTurnState struct {
 func (st *chatTurnState) snapshot() (lines []string, done bool, err error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	return append([]string(nil), st.lines...), st.done, st.err
+}
+
+// attach is snapshot for a client that is about to FOLLOW the live channel: it
+// returns the backlog and discards anything still queued.
+//
+// The SSE handler replays the backlog and then reads progressCh, but nothing
+// else consumes that channel — so every line emitted before the client attached
+// is both in the backlog AND still buffered, and arrives twice. The two are
+// written in one lock hold, so draining here under the same lock is what makes
+// replay exactly-once.
+//
+// Latent until a turn reliably emitted something before a client could attach.
+// The opening "💭 Contacting <model>…" milestone does exactly that, and it is
+// emitted in the same instant the browser is opening the stream, so this went
+// from unreachable to a coin toss.
+//
+// Termination does NOT depend on the closed flag, and that is deliberate. A
+// receive from a closed channel is always ready, so a drain that trusts a flag
+// spins forever — holding this lock — the moment the flag and the channel
+// disagree. They can: a chatTurnState assembled anywhere other than
+// startChatTurn (a test building a finished turn, say) closes the channel
+// without setting it. Reading the comma-ok makes closure observable from the
+// receive itself, so the loop is bounded by construction.
+func (st *chatTurnState) attach() (lines []string, done bool, err error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+drain:
+	for {
+		select {
+		case _, ok := <-st.progressCh:
+			if !ok {
+				break drain // closed: nothing more will ever arrive
+			}
+		default:
+			break drain // empty: everything queued is already in lines
+		}
+	}
 	return append([]string(nil), st.lines...), st.done, st.err
 }
 
@@ -98,9 +146,19 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		ctx := context.Background()
 
 		onProgress := func(msg string) {
+			// The append and the send are under ONE lock hold, so a concurrent
+			// caller cannot observe the channel open, be descheduled, and send
+			// into it after it has been closed. The send is non-blocking, so
+			// holding the lock across it cannot deadlock.
 			st.mu.Lock()
+			defer st.mu.Unlock()
+			if st.closed {
+				// The turn is over. A late milestone has nothing to attach to
+				// and no reader left; recording it would also grow lines after
+				// the transcript was considered final.
+				return
+			}
 			st.lines = append(st.lines, msg)
-			st.mu.Unlock()
 			select {
 			case st.progressCh <- msg:
 			default:
@@ -109,13 +167,54 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			}
 		}
 
+		// A one-shot notice for a turn that has gone quiet. The fail-fast
+		// classification handles a coder that is NOT there; this handles one
+		// that is there and slow, which on a self-hosted local model is the
+		// commoner case — loading weights on the first request of the day can
+		// take a minute, and the two look identical from the browser.
+		//
+		// It fires only if nothing else has been said since the opening
+		// milestone, so a turn making visible tool calls never accumulates
+		// filler. AfterFunc rather than a goroutine and a select: there is
+		// nothing to wait on.
+		//
+		// Stopping it below is an optimisation, NOT the safety property. Stop
+		// reports false when the callback is already running and does not wait
+		// for it, so this callback can still be in flight while the turn
+		// goroutine finishes — which is why onProgress checks st.closed under
+		// the lock rather than relying on the Stop. Sending on the closed
+		// channel would panic the server, and -race caught it where a local run
+		// did not.
+		slowNotice := time.AfterFunc(chatSlowTurnAfter, func() {
+			st.mu.Lock()
+			quiet := len(st.lines) <= 1 && !st.done
+			st.mu.Unlock()
+			if quiet {
+				onProgress("⏳ Still waiting for the first response — a local model may be loading.")
+			}
+		})
+
 		reply, err := s.runChatCoder(ctx, workspaceID, chatID, history, text, onProgress)
+		slowNotice.Stop()
 
-		st.mu.Lock()
-		st.done = true
-		st.err = err
-		st.mu.Unlock()
-
+		// `done` is set BELOW, after every line is recorded and every side
+		// effect has happened — never here.
+		//
+		// The SSE handler snapshots (lines, done) together and, when done is
+		// already true, replays the backlog and stops. So marking done before
+		// appending the "⚠️ …" milestone gives a client attaching in that window
+		// a backlog WITHOUT the failure reason and an immediate close: the
+		// activity card flashes and the turn ends with nothing said about why.
+		//
+		// That window used to be microseconds inside a turn lasting a minute.
+		// Classifying an unreachable coder as terminal made a failing turn end
+		// in about a second, which puts the client's attach right on top of it —
+		// so a latent ordering bug became the common case. Reported as "the tool
+		// box appears and disappears and afterwards no message what happened".
+		//
+		// The same ordering protects the SUCCESS path: a client that sees done
+		// refetches the chat, so marking done before AddChatMessage could hand
+		// it a conversation that is missing the reply it just waited for.
 		switch {
 		case err != nil:
 			// The user's message STAYS. Not persisting on failure was defensible
@@ -145,9 +244,16 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			// against the database by now, so nothing arbitrary should get
 			// this far — but the log line should not be the thing depending on
 			// that, and logsafe costs nothing.
+			// Counted under the lock. The quiet-turn timer is a second writer to
+			// st.lines and Stop() does not promise its callback has finished, so
+			// an unlocked len() here is a genuine race — it was safe only while
+			// this goroutine was the sole writer.
+			st.mu.Lock()
+			milestones := len(st.lines)
+			st.mu.Unlock()
 			slog.Info("chat: turn finished",
 				"chat", logsafe.Value(chatID), "turn", st.id,
-				"milestones", len(st.lines),
+				"milestones", milestones,
 				"reply_bytes", len(cleaned),
 				"empty", strings.TrimSpace(reply) == "")
 			if err := s.db.AddChatMessage(chatID, "assistant", cleaned); err != nil {
@@ -158,7 +264,20 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 				chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, cleaned)
 			}
 		}
+		// Everything the turn will ever say has now been recorded, and every
+		// side effect has happened — so `done` becomes observable here and not
+		// before. A reader that sees it can replay a COMPLETE backlog and
+		// refetch a chat that already holds the reply.
+		//
+		// Closed is set in the same lock hold as the close, paired with the flag
+		// onProgress checks: slowNotice.Stop() cannot promise the timer callback
+		// has finished, only that it will not start again.
+		st.mu.Lock()
+		st.done = true
+		st.err = err
+		st.closed = true
 		close(st.progressCh)
+		st.mu.Unlock()
 
 		// Evict after a grace period so a late or reconnecting viewer can still
 		// observe the terminal state; the durable record is the chat history.
@@ -190,10 +309,40 @@ func chatTurnFailureMessage(err error) string {
 		return "The coder could not authenticate with the provider. Check the API key in coder settings."
 	case errors.Is(err, codersvc.ErrTimeout):
 		return "The coder took too long and the turn was stopped. Try a smaller question, or raise the coder timeout."
+	case errors.Is(err, codersvc.ErrCoderRejected):
+		// The provider's own sentence, because it names the actual problem —
+		// "invalid model name" — where anything we invented would not.
+		return codersvc.RejectedDetail(err) +
+			". Check the model name in coder settings."
+	case errors.Is(err, codersvc.ErrCoderUnreachable):
+		// The detail is generated at the failure site and names the model and
+		// endpoint, or the missing binary. Included verbatim because that is the
+		// entire remedy: without it this reads as "something went wrong", which
+		// is what it did before the sentinel existed.
+		return "The coder could not be reached — " + codersvc.UnreachableDetail(err) +
+			". Check that it is running and that the coder settings point at the right place."
+	case errors.Is(err, codersvc.ErrProviderEmpty):
+		return "The provider returned nothing on every retry — a temporary problem at their end. Nothing was lost; try again."
 	default:
-		return "The chat turn failed. See the server log for details."
+		return chatTurnGenericFailure
 	}
 }
+
+// chatTurnGenericFailure is the fallback for an error nothing classified. A
+// constant so the parity test can assert "this surface did NOT fall through"
+// against the real string rather than a copy of it that would drift.
+const chatTurnGenericFailure = "The chat turn failed. See the server log for details."
+
+// chatSlowTurnAfter is how long a turn may stay quiet before it says so.
+//
+// A var rather than a const so a test can shorten it: the behaviour under test
+// is "a quiet turn eventually explains itself", and waiting twenty real seconds
+// to assert that would be twenty seconds on every CI run.
+//
+// Twenty seconds is chosen to sit above a normal hosted round-trip (so an
+// ordinary turn never sees it) and below the point where a person concludes the
+// thing is broken.
+var chatSlowTurnAfter = 20 * time.Second
 
 // chatTurn returns the tracked turn for a chat, or nil.
 func (s *Server) chatTurn(chatID string) *chatTurnState {
@@ -247,7 +396,7 @@ func (s *Server) handleChatTurnProgress(c echo.Context) error {
 	// attaching to a turn already in progress would otherwise watch an empty
 	// card until the next tool call, which on a slow turn is indistinguishable
 	// from nothing happening at all.
-	backlog, done, turnErr := st.snapshot()
+	backlog, done, turnErr := st.attach()
 	for _, line := range backlog {
 		writeSSELines(w, line)
 	}
@@ -273,8 +422,28 @@ func (s *Server) handleChatTurnProgress(c echo.Context) error {
 			return nil
 		case msg, ok := <-st.progressCh:
 			if !ok {
+				// A CLOSED channel means the turn ended — it says nothing about
+				// whether it SUCCEEDED, and this branch used to assume it did.
+				//
+				// That is the common path, not an edge case: the browser opens
+				// this stream immediately after the 202, so it is attached for
+				// essentially every turn and never reaches the attach-after-done
+				// branch above. A failing turn therefore reported `done`, the
+				// client ran its success path, and no banner was set — the
+				// activity card simply vanished and nothing said why. The two
+				// branches must agree, which is why both now ask the same
+				// question.
+				//
+				// st.err is readable here because it is assigned in the same
+				// lock hold as the close, so a closed channel implies the
+				// outcome is already recorded.
+				_, _, turnErr := st.snapshot()
 				// data must be non-empty or the browser won't dispatch the event.
-				fmt.Fprint(w, "event: done\ndata: 1\n\n")
+				if turnErr != nil {
+					fmt.Fprint(w, "event: error\ndata: 1\n\n")
+				} else {
+					fmt.Fprint(w, "event: done\ndata: 1\n\n")
+				}
 				w.Flush()
 				return nil
 			}

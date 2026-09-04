@@ -235,3 +235,26 @@ test("turnFailureMessage unwraps the warning marker and falls back", () => {
   );
   expect(turnFailureMessage([])).toBe("The chat turn failed.");
 });
+
+// The banner must show the FAILURE line, not merely the last line.
+//
+// Reading the last line assumed the warning is always final, which holds only
+// when it arrives at all — a stream can close on a transport drop, or a client
+// can attach as the turn ends. Then the last line is ordinary progress, and the
+// banner presented it as the reason: once a turn opens with "💭 Contacting
+// <model>…", the owner is told their chat failed because it was contacting the
+// model.
+test("turnFailureMessage picks the failure line, not the last line", () => {
+  expect(
+    turnFailureMessage(["💭 Contacting ollama/qwen3:8b…", "⚠️ the real reason", "🔧 glob(*.md)"]),
+  ).toBe("the real reason");
+
+  // No warning at all: the fallback, never a progress line dressed as an error.
+  expect(turnFailureMessage(["💭 Contacting ollama/qwen3:8b…"])).toBe("The chat turn failed.");
+  expect(turnFailureMessage(["🔧 read_file(a.md)", "⏳ Still waiting for the first response"])).toBe(
+    "The chat turn failed.",
+  );
+
+  // The last warning wins when a turn emitted more than one.
+  expect(turnFailureMessage(["⚠️ first", "⚠️ second"])).toBe("second");
+});

@@ -156,7 +156,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				req.Tools = nil
 				continue
 			}
-			return nil, mapProviderErr(err)
+			return nil, c.mapProviderErr(err)
 		}
 		total = addUsage(total, resp.Usage)
 
@@ -515,7 +515,7 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 		MaxTokens: 0,
 	})
 	if err != nil {
-		return nil, mapProviderErr(err)
+		return nil, c.mapProviderErr(err)
 	}
 	return &Result{Text: resp.Content, Duration: time.Since(start), Usage: resp.Usage}, nil
 }
@@ -594,7 +594,7 @@ func (c *Coder) pingAPI(ctx context.Context, workspaceID string) (string, error)
 		MaxTokens: 16,
 	})
 	if err != nil {
-		return "", mapProviderErr(err)
+		return "", c.mapProviderErr(err)
 	}
 	return c.api.provider + "/" + c.api.model + " (" + resp.Content + ")", nil
 }
@@ -676,7 +676,38 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 // ErrUsageLimit — "out of credits, retries next scheduled run". Keeping these
 // distinct stops a transient throttle from being misreported as "you're out of
 // quota" (which is exactly why a user whose chat still works gets confused).
-func mapProviderErr(err error) error {
+// effectiveBaseURL is the URL the request actually went to: the workspace's
+// override when it set one, otherwise the provider's registry default.
+//
+// Reporting the raw c.api.baseURL would print an empty string for every
+// workspace that never overrode it — which is most of them, and which would
+// make the one message that exists to name the endpoint name nothing.
+func (c *Coder) effectiveBaseURL() string {
+	if c.api.baseURL != "" {
+		return c.api.baseURL
+	}
+	if def := llm.DefaultBaseURL(c.api.provider); def != "" {
+		return def
+	}
+	return "its default endpoint"
+}
+
+func (c *Coder) mapProviderErr(err error) error {
+	// Checked FIRST so the endpoint detail is attached while the configuration
+	// is still in scope. It cannot collide with the arms below: a request that
+	// never reached a server cannot also have been rate-limited, refused for
+	// payment or rejected for auth by one.
+	if errors.Is(err, llm.ErrUnreachable) {
+		return fmt.Errorf("%w: could not reach the model %q at %s (provider %q)",
+			ErrCoderUnreachable, c.api.model, c.effectiveBaseURL(), c.api.provider)
+	}
+	if errors.Is(err, llm.ErrRequestRejected) {
+		// The provider answered and refused. Name the model, because the refusal
+		// is nearly always about it and the owner needs to know WHICH setting to
+		// change, then quote the provider's own sentence.
+		return fmt.Errorf("%w: the provider rejected model %q — %s",
+			ErrCoderRejected, c.api.model, detailAfter(err, llm.ErrRequestRejected))
+	}
 	if errors.Is(err, llm.ErrRateLimit) {
 		return ErrRateLimited
 	}

@@ -11,11 +11,14 @@ package llm
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,7 +51,102 @@ var (
 	// minutes nothing they can act on, when the true advice is simply to run it
 	// again.
 	ErrEmptyResponse = errors.New("llm: provider returned an empty response")
+	// ErrUnreachable is a TERMINAL transport failure: the request never reached
+	// a server that could answer it, and waiting will not change that. A refused
+	// dial (nothing listening — a local Ollama that is not running), a hostname
+	// that does not resolve, or a certificate that does not verify.
+	//
+	// Typed because it used to be the loudest silent failure in the product.
+	// doJSON treated EVERY network error as transient, so a dead local provider
+	// spent the whole seven-attempt ladder — about 68 seconds of backoff — and
+	// then returned a raw *url.Error that no downstream classifier recognised,
+	// which every surface rendered as its generic "see the server log" arm. From
+	// the outside that is a chat window that hangs for over a minute and then
+	// says nothing. Nothing about a refused dial improves after a 30-second
+	// wait, so these three fail on the first attempt with a message that names
+	// the endpoint.
+	ErrUnreachable = errors.New("llm: provider unreachable")
+	// ErrRequestRejected is a provider that ANSWERED and refused the request:
+	// most often a model name it does not have. Not transient, not auth, and
+	// emphatically not unreachable — the server is there and talking.
+	//
+	// Typed because it was the largest unclassified case left, and the one with
+	// the most actionable content. A local Ollama answering `400 {"error":
+	// {"message":"invalid model name"}}` reached the user as "The chat turn
+	// failed. See the server log for details.", when the provider had already
+	// said exactly what was wrong and exactly which setting to change.
+	ErrRequestRejected = errors.New("llm: provider rejected the request")
 )
+
+// ProviderMessage extracts the human-readable sentence from a provider's error
+// envelope, so a caller can show the provider's OWN words instead of a status
+// code.
+//
+// Every OpenAI-compatible endpoint uses {"error":{"message":…}}; Anthropic uses
+// the same shape. A body that does not parse falls back to a short snippet
+// rather than nothing, because a truncated real message still beats a generic
+// sentence.
+func ProviderMessage(body []byte) string {
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &env); err == nil {
+		if m := strings.TrimSpace(env.Error.Message); m != "" {
+			return m
+		}
+		if m := strings.TrimSpace(env.Message); m != "" {
+			return m
+		}
+	}
+	return snippet(body)
+}
+
+// terminalTransportErr reports whether a transport failure is one that waiting
+// cannot fix, so doJSON should give up immediately rather than spend the retry
+// ladder on it.
+//
+// It deliberately fails OPEN: anything not recognised here keeps the existing
+// retry behaviour. A false negative therefore costs latency (the pre-existing
+// behaviour) while a false positive would cost a turn that might have succeeded,
+// so the list stays narrow and only holds failures that are terminal by
+// construction.
+//
+// The accepted cost, recorded rather than engineered around: a hosted provider
+// behind a load balancer that refuses a single dial now fails that request
+// instead of recovering on the next attempt. That is rare, and it fails in a
+// second with an explanation rather than after a silent minute without one.
+func terminalTransportErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Nothing is listening on the port. The single most common cause on a
+	// self-hosted install: a local model server that is not running. The check
+	// is per-platform (connrefused_unix.go / connrefused_windows.go) because the
+	// portable-looking spelling silently never matches on Windows.
+	if isConnRefused(err) {
+		return true
+	}
+	// The hostname does not exist. A typo in a base URL, not an outage —
+	// IsNotFound is NXDOMAIN specifically, so a temporary resolver failure
+	// (IsTemporary) still falls through to the retry ladder.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return true
+	}
+	// The TLS handshake produced a certificate the client will not accept.
+	// Retrying re-runs an identical handshake and gets an identical answer.
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostnameErr x509.HostnameError
+	var certInvalid x509.CertificateInvalidError
+	var verifyErr *tls.CertificateVerificationError
+	return errors.As(err, &unknownAuthority) ||
+		errors.As(err, &hostnameErr) ||
+		errors.As(err, &certInvalid) ||
+		errors.As(err, &verifyErr)
+}
 
 // Config is the per-coder provider configuration resolved at run time.
 type Config struct {
@@ -339,6 +437,14 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 		}
 		code, respBody, retryAfterHdr, err := doOnce(ctx, client, method, url, headers, body)
 		if err != nil {
+			// A terminal transport failure returns NOW. The ladder below exists
+			// to wait out a throttle or an upstream blip; there is no wait that
+			// makes a refused dial or an unresolvable host succeed, and spending
+			// it is what turned "the model server is off" into a minute of
+			// silence. Anything unrecognised still falls through and retries.
+			if terminalTransportErr(err) {
+				return nil, 0, fmt.Errorf("%w: %v", ErrUnreachable, err)
+			}
 			lastErr = err
 			continue // network error → retry
 		}

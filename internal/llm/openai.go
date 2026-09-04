@@ -87,6 +87,15 @@ func (p *openaiProvider) Complete(ctx context.Context, req Request) (*Response, 
 				return nil, ErrToolsUnsupported
 			}
 		}
+		// A rejected request that is NOT about tools is a configuration error —
+		// overwhelmingly a model name the provider does not have, which is the
+		// case the comment above already names. Carry the provider's own
+		// sentence: it says what is wrong far better than a status code, and it
+		// is the difference between "the chat turn failed" and "invalid model
+		// name".
+		if code == 400 || code == 404 || code == 422 {
+			return nil, fmt.Errorf("%w: %s", ErrRequestRejected, ProviderMessage(respBody))
+		}
 		return nil, err
 	}
 	return parseOpenAIResponse(respBody)
