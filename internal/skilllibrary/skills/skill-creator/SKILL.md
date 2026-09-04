@@ -110,6 +110,35 @@ seen run must not ship. Never print, log, or return a secret value.
 Pick the simplest tier that solves the task. A reasoning-only skill (no scripts)
 is ideal when the LLM + a few inline snippets suffice.
 
+## Reach for the least code that does the job
+
+Rank the three ways to do anything, and take the first that works:
+
+1. **A native tool**, if one exists. `kb_file_map` and `kb_table_query` for
+   files and tables; `rookery kb convert` to turn a document into markdown;
+   `search_files` and `glob` to find things; `web_fetch`, `web_search` and the
+   `browser_*` tools for the web; `get_state`/`set_state` for memory between
+   runs.
+2. **A CLI invocation**, if a tool can do it. One command with flags is far
+   easier to get right than a program.
+3. **Python**, only when neither will — a reshape, a join, a file format nobody
+   has a tool for.
+
+**Never write a skill that competes with a tool for the same job.** A skill and
+a tool offering the same capability is worse than either alone: the model has to
+choose, the skill is the more specific instruction so it usually wins, and it
+wins with the weaker implementation — no sandbox, no address guard, no secret
+redaction, no error handling.
+
+This is not hypothetical. A browser-automation skill was deleted for exactly this
+once the native browser tools existed, and five document skills went on teaching
+library code long after `kb convert` and `kb_table_query` did those jobs
+properly.
+
+The models this platform runs are often small. They invoke a command with flags
+far more reliably than they write a correct library program — and a wrong
+program usually produces a plausible *number* rather than an error.
+
 ## Platform conventions (non-negotiable)
 
 - Agents run **sandboxed** (Linux Landlock, filesystem-only). Network is

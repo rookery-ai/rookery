@@ -1,74 +1,83 @@
 ---
 name: xlsx
-description: Use this skill whenever the user wants to read, create, edit, or analyze Excel .xlsx files — extracting sheets, formulas, or data, or generating a new spreadsheet. Triggers include "read this excel", "extract xlsx data", "create a spreadsheet", "edit xlsx formulas".
-version: 1.0.0
+description: Use this skill whenever the user wants to read, create, edit, or analyze Excel .xlsx files — extracting sheets or data, summarising figures, or generating a new spreadsheet. Triggers include "read this excel", "extract xlsx data", "create a spreadsheet", "totals from this workbook", "edit xlsx formulas".
+version: 2.0.0
 license: MIT-0
 category: File Processing
 metadata:
   install:
     - kind: pip
       package: openpyxl
-    - kind: pip
-      package: pandas
 ---
 
 # XLSX
 
-Read, create, edit, and analyze Excel `.xlsx` workbooks via `openpyxl` (formulas,
-styling, multi-sheet) or `pandas` (tabular analysis). Use LibreOffice (`soffice`)
-only when you must recalculate a sheet's stored formulas (openpyxl does not
-evaluate them).
+Three different jobs, three different answers. Only the last one needs a library.
 
-## Requirements
-
-- `openpyxl` (Python) — `python3 -m pip install --user openpyxl`.
-- `pandas` (Python) — `python3 -m pip install --user pandas openpyxl`.
-- Optional `soffice` (LibreOffice) — for recalculation/headless conversion. Heavy;
-  not required. Surface it as a dependency rather than failing silently.
-
-The runtime environment block gives you the absolute path of any installed CLI
-tool. Invoke Python via `python3`.
-
-## Read a sheet
-
-```python
-import openpyxl, json, sys
-wb = openpyxl.load_workbook(sys.argv[1], data_only=True)
-out = []
-for ws in wb.worksheets:
-    rows = [[("" if c is None else str(c)) for c in row] for row in ws.iter_rows(values_only=True)]
-    out.append({"sheet": ws.title, "rows": rows})
-print(json.dumps(out))
-```
-
-`data_only=True` returns cached computed values (the last value LibreOffice/Excel
-stored). If the file was never opened, formula cells return `None` — recalc via
-`soffice` (see below).
-
-## Create a workbook
-
-```python
-from openpyxl import Workbook
-wb = Workbook()
-ws = wb.active
-ws.title = "Summary"
-ws.append(["Month", "Revenue", "Cost"])
-ws.append(["Jan", 1000, 600])
-ws["B5"] = "=SUM(B2:B4)"
-wb.save("output.xlsx")
-```
-
-## Recalculate stored formulas (LibreOffice)
+## Reading and analysing — platform tools
 
 ```bash
-soffice --headless --calc --convert-to xlsx:"Calc MS Excel 2007 XML" --outdir "$TMPDIR" input.xlsx
+rookery kb convert book.xlsx --dest notes
 ```
 
-## Best practices
+Each sheet becomes a markdown table with its header. Then:
 
-- **Formulas over hardcodes** — store `=SUM(...)` / `=VLOOKUP(...)` rather than
-  writing computed numbers, so the sheet stays live and auditable.
-- Avoid `.xls` (legacy binary); if given one, convert with `soffice` first.
-- Write outputs into the vault or `$TMPDIR`, never `/tmp`.
-- For large tabular analysis prefer `pandas.read_excel`; for cell/styling control
-  prefer `openpyxl`.
+```
+kb_file_map(path="notes/book.md")
+kb_table_query(path="notes/book.md", op="sum", column="amount", group_by="region")
+```
+
+`kb_file_map` first, always, on a workbook of any size: a converted sheet is
+often dominated by one wide column, and the map tells you that before you spend
+the turn budget reading it.
+
+**Totals and group-bys go through `kb_table_query`, not through code.** The host
+computes them, so they are right or they error. The same arithmetic written by
+hand is right or it is quietly wrong, and a wrong total looks exactly like a
+correct one.
+
+**Do not install pandas.** It was previously recommended here for this job and
+the platform now does it properly.
+
+## Producing a simple sheet
+
+If the user wants data they can open in Excel and the content is a plain table,
+write a CSV. Excel opens it, it is diffable, and it needs nothing installed:
+
+```python
+import csv
+with open("out.csv", "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["region", "amount"])
+    w.writerows(rows)
+```
+
+Say that you produced a CSV. Do not silently give someone a `.csv` when they
+asked for a `.xlsx` — ask, or produce the real thing below.
+
+## Authoring a real workbook — openpyxl
+
+This is the case that genuinely needs a library, and the only reason one is
+declared here: formulas, multiple sheets, number formats, styling.
+
+```python
+import openpyxl
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Summary"
+ws.append(["region", "amount"])
+for r in rows:
+    ws.append(r)
+ws["C2"] = "=SUM(B2:B100)"
+wb.save("summary.xlsx")
+```
+
+Two things that will surprise you:
+
+- **openpyxl does not evaluate formulas.** `load_workbook(path, data_only=True)`
+  returns the value Excel last *cached*, which is empty for a file no
+  spreadsheet application has ever opened. If you need a computed value, compute
+  it yourself and write it as a literal.
+- **A `.xlsx` you wrote has no cached values at all**, so an agent reading back
+  its own output with `data_only=True` sees blanks. Read your own data from the
+  source you wrote it from, not from the file you just produced.

@@ -1,64 +1,63 @@
 ---
 name: pptx
 description: Use this skill any time a .pptx file is involved — reading slides, extracting text, or creating a new presentation/deck. Triggers include "read this powerpoint", "extract slides", "create a deck", "make a presentation".
-version: 1.0.0
+version: 2.0.0
 license: MIT-0
 category: File Processing
 metadata:
+  requires:
+    bins: [pandoc]
   install:
-    - kind: pip
-      package: markitdown
-    - kind: node
-      package: pptxgenjs
-      bins: [pptxgenjs]
+    - kind: binary
+      bin: pandoc
+      url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
+      strip: 1
 ---
 
 # PPTX
 
-Read PowerPoint `.pptx` slides (via `markitdown`) or create decks from scratch
-(via `pptxgenjs` on Node). Mixed runtime: Python for reading, Node for creating.
-
-## Requirements
-
-- Read: `markitdown` (Python) — `python3 -m pip install --user markitdown`.
-- Create: `pptxgenjs` (Node) — `npm install -g --prefix "$HOME/.local" pptxgenjs`.
-  The runtime env block tells you the node module path; invoke via `node`.
-
-## Read a presentation
+## Reading a deck
 
 ```bash
-# markitdown dumps slide text as Markdown
-python3 -m markitdown input.pptx
+rookery kb convert deck.pptx --dest notes
 ```
 
-```python
-# Slide-by-slide structure
-from pptx import Presentation
-import json, sys
-prs = Presentation(sys.argv[1])
-out = []
-for i, slide in enumerate(prs.slides):
-    texts = [p.text for s in slide.shapes if s.has_text_frame for p in s.text_frame.paragraphs if p.text.strip()]
-    notes = slide.notes_slide.notes_text_frame.text if slide.has_notes_slide else ""
-    out.append({"slide": i+1, "texts": texts, "notes": notes})
-print(json.dumps(out))
-```
-(`python-pptx` is a fallback reader: `pip install --user python-pptx`.)
+The platform's converter reads the slide XML directly and extracts embedded
+images into the knowledge base. **Do not install markitdown for this** — it was
+previously recommended here and the platform now does the same job with the
+image extraction and the lossy-conversion warning it lacks.
 
-## Create a deck (pptxgenjs, Node)
+Slides become headings, so `kb_file_map(path=…)` gives you the deck's outline
+and `read_file(path=…, section="…")` fetches one slide without reading all of
+them.
 
-```javascript
-const pptxgen = require("pptxgenjs");
-const p = new pptxgen();
-const s = p.addSlide();
-s.addText("Hello World", { x:1, y:1, w:8, h:1, fontSize:32, bold:true });
-p.writeFile({ fileName: "output.pptx" });
+## Creating a deck
+
+Write the content as markdown with one `##` heading per slide, then let pandoc
+build it:
+
+```bash
+"$HOME/.local/bin/pandoc" notes/deck.md -o deck.pptx
 ```
 
-## Best practices
+Invoke by absolute path — the runtime environment block gives you the resolved
+path of every declared tool.
 
-- Reading is reliable; creating from scratch needs design care (palette, fonts).
-  Prefer editing an existing template deck when the user has one.
-- Always output into the vault.
-- For PDF export of a deck, LibreOffice (`soffice`) is needed — surface that
-  dependency rather than failing silently.
+A reference deck carries your template's theme, master slides and fonts:
+
+```bash
+"$HOME/.local/bin/pandoc" notes/deck.md \
+  --reference-doc="$HOME/templates/house.pptx" -o deck.pptx
+```
+
+**Do not install a JavaScript deck builder.** `pptxgenjs` was previously
+recommended here; it means generating a program that positions boxes by
+coordinate, which is a far harder job to get right than writing the words and
+letting pandoc lay them out — and the result is much harder for the user to
+edit afterwards.
+
+## What a deck is for
+
+Slides are a summary medium. If the content only makes sense as continuous
+prose, say so and produce a document instead: a deck of dense paragraphs is
+worse than the note it came from.

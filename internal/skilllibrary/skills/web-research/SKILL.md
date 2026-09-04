@@ -44,6 +44,35 @@ a table's rows, every link, a repeated card — parse the HTML.
 - Extract what was asked for and stop. Dumping the whole page into your reasoning wastes
   the run and truncates the real answer.
 
+## Acting on a page, not just reading it
+
+`browser_read` renders a page. When a task needs you to *drive* one — sign in,
+fill a form, click through — the acting tools do it: `browser_click`,
+`browser_fill`, `browser_press`, `browser_wait`. Address elements by the `ref=`
+handles the page snapshot gives you; never compose a CSS selector.
+
+Four things worth knowing before you try:
+
+- **Never type a credential.** Write `${SECRET_NAME}` into `browser_fill` and
+  the host substitutes the real value. You never see it, and it is redacted out
+  of the page text, the field value, the final URL and any error you get back.
+  A secret that does not exist fails the call rather than typing its own name
+  into the field.
+- **Irreversible actions need the owner's permission** — paying, ordering,
+  deleting, publishing. If you are refused one, that is a settled answer, not a
+  transient error: report what you were about to do and stop. Do not look for
+  another route to the same click.
+- **A wall is a finding, not an obstacle.** A captcha or bot check cannot be
+  worked around; say so. A login wall is different and worth reporting
+  separately — the owner can fix that one by storing credentials.
+- **Waiting for a human step** — a bank push, a code — uses `browser_wait` with
+  a `notify` message. The message reaches the owner immediately, which a `[CHAT]`
+  block would not: that is only delivered when the run ENDS, which is after the
+  thing you are waiting for.
+
+Reading a page is cheap; driving one is slow and stateful. Fetch first, render
+second, act only when the task genuinely requires it.
+
 ## Reporting
 
 Give the answer first, then the sources as links. State what you could not confirm.

@@ -1,7 +1,7 @@
 ---
 name: docx
 description: Use this skill whenever the user wants to read, create, edit, or convert Word documents (.docx). Triggers include "read this word doc", "convert docx to markdown", "create a docx", "edit the word file", "docx to pdf".
-version: 1.0.0
+version: 2.0.0
 license: MIT-0
 category: File Processing
 metadata:
@@ -12,84 +12,62 @@ metadata:
       bin: pandoc
       url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
       strip: 1
-    - kind: pip
-      package: python-docx
 ---
 
 # DOCX
 
-Read, create, edit, and convert Word `.docx` files. Uses `pandoc` for
-reading/conversion and `python-docx` for creation/editing.
+Reading and writing are different problems here. Reading is a platform tool;
+writing is pandoc. Neither is a Python library.
 
-## Requirements
-
-- `pandoc` (CLI) — read DOCX, convert DOCX↔Markdown/HTML/PDF.
-- Python `python-docx` — create/edit: `python3 -m pip install --user python-docx`.
-- For `.doc`→`.docx` or DOCX→PDF via LibreOffice: optional `soffice` (heavy; not
-  required). Use pandoc for most conversions.
-
-The runtime environment block gives you pandoc's absolute path. Invoke it by
-that path.
-
-## Read / convert (pandoc)
+## Reading — use the platform, not a library
 
 ```bash
-# DOCX -> Markdown (clean)
-pandoc input.docx -t gfm --wrap=none -o output.md
-
-# DOCX -> plain text
-pandoc input.docx -t plain -o output.txt
-
-# Markdown -> DOCX
-pandoc input.md -o output.docx
-
-# DOCX -> HTML
-pandoc input.docx -s -o output.html
+rookery kb convert report.docx --dest notes
 ```
 
-## Create a new document (python-docx)
+This runs the platform's own converter, which you will not beat by hand: it
+pulls the text, recovers tables, extracts embedded images into the knowledge
+base, and **warns in the note's frontmatter when the conversion looked lossy**,
+so a document that converted badly says so instead of silently giving you less
+than it had.
 
-```python
-from docx import Document
-doc = Document()
-doc.add_heading("Report Title", 0)
-doc.add_paragraph("Body text here.")
-doc.add_heading("Section", 1)
-doc.add_paragraph("More text.")
-doc.save("output.docx")
-```
+Then read the markdown note like any other. For a long one, run
+`kb_file_map(path=…)` first to see its headings and size, and `read_file` with
+`section=` to fetch just the part you need.
 
-## Edit an existing document
+**Do not use python-docx to read.** It was previously recommended here and it is
+strictly worse: it sees no images, recovers tables poorly, and tells you nothing
+when it has missed content.
 
-```python
-from docx import Document
-import sys
-doc = Document(sys.argv[1])
-for para in doc.paragraphs:
-    if "OLD" in para.text:
-        para.text = para.text.replace("OLD", "NEW")
-doc.save(sys.argv[1])
-```
-
-## Converting a .docx
-
-`pandoc` handles every direction. Resolve it at `$HOME/.local/bin/pandoc` first (where the
-cli-tool-installer skill puts it — it is NOT on the sandboxed PATH), then fall back to
-`command -v pandoc`:
+## Writing — pandoc
 
 ```bash
-"$HOME/.local/bin/pandoc" notes.docx -t markdown          # .docx to markdown on stdout
-"$HOME/.local/bin/pandoc" notes.docx -o notes.md          # write the file directly
-"$HOME/.local/bin/pandoc" notes.md -o notes.docx          # and back again
+"$HOME/.local/bin/pandoc" notes/report.md -o report.docx
 ```
 
-If pandoc is missing, report that and point at the cli-tool-installer skill rather than
-attempting a partial conversion.
+Invoke by absolute path — the runtime environment block gives you the resolved
+path of every tool a declared skill requires.
 
-## Best practices
+For a reference style (fonts, headings matching a house template):
 
-- For tracked changes, comments, and fidelity beyond text, pandoc's `--track-changes=all`
-  preserves them in the Markdown output.
-- Set page size explicitly when creating (python-docx defaults to A4-ish).
-- Use the `markdown` skill for richer format conversion once text is in Markdown.
-- Write outputs into the vault, never `/tmp`.
+```bash
+"$HOME/.local/bin/pandoc" notes/report.md \
+  --reference-doc="$HOME/templates/house.docx" -o report.docx
+```
+
+## docx → PDF
+
+```bash
+"$HOME/.local/bin/pandoc" report.docx -o report.pdf
+```
+
+If that fails, pandoc has no PDF engine installed. Convert to markdown and let
+the knowledge base export the PDF instead of installing LaTeX — the platform
+already has a renderer.
+
+## Editing an existing document
+
+There is no in-place edit worth doing. Convert to markdown, edit the markdown
+(where every other tool you have works), and write a new `.docx`. A round trip
+loses styling the source had; say so to the user rather than presenting the
+result as an edit of their file.
