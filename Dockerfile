@@ -22,7 +22,7 @@ RUN npm run build
 # Pinned to BUILDPLATFORM and cross-compiled to TARGETARCH. Because the project
 # is CGo-free this needs no QEMU: a multi-arch build stays as fast as a native
 # one instead of emulating a foreign architecture.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETARCH
 ARG VERSION=0.0.0-dev
 ARG COMMIT=none
