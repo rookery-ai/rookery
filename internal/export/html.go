@@ -67,6 +67,19 @@ ul, ol { padding-left: 1.6rem; }
 li { margin: 0.25em 0; }
 hr { border: none; border-top: 1px solid #e5e5e5; margin: 1.8em 0; }
 img { max-width: 100%; }
+.kb-attachments { list-style: none; padding-left: 0; }
+.kb-attachments li { margin: 0.35em 0; }
+.kb-attachment-path {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em; color: #666; margin-left: 0.5em;
+}
+/* A grid split across a page boundary reads as two broken half-layouts, so it
+   is kept whole. Only relevant to the PDF path, where a headless renderer
+   paginates; harmless in a browser. */
+@media print {
+  .kb-columns { break-inside: avoid; page-break-inside: avoid; }
+  img { break-inside: avoid; page-break-inside: avoid; }
+}
 `
 
 // htmlDocTemplate wraps rendered body HTML in a minimal, valid, standalone HTML5
@@ -101,10 +114,33 @@ func ToHTML(md []byte, opts Options) ([]byte, error) {
 		fmt.Fprintf(&body, "<pre>%s</pre>\n", html.EscapeString(string(md)))
 	}
 
+	rendered := strings.TrimRight(body.String(), "\n") + "\n"
+	rendered += attachmentsHTML(opts.Attachments)
+
 	doc := fmt.Sprintf(htmlDocTemplate,
 		html.EscapeString(opts.docTitle()),
 		htmlCSS,
-		strings.TrimRight(body.String(), "\n")+"\n",
+		rendered,
 	)
 	return []byte(doc), nil
+}
+
+// attachmentsHTML renders the closing list of files the note links to.
+//
+// The links are kept relative, so they still resolve when the document travels
+// alongside its uploads folder, and the PATH is shown as well as the name — a
+// reader who received only the exported file cannot follow the link, and the
+// path is what lets them ask for the right thing.
+func attachmentsHTML(list []Attachment) string {
+	if len(list) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<hr>\n<h2>Attachments</h2>\n<ul class=\"kb-attachments\">\n")
+	for _, a := range list {
+		fmt.Fprintf(&sb, "<li><a href=\"%s\">%s</a> <span class=\"kb-attachment-path\">%s</span></li>\n",
+			html.EscapeString(a.Path), html.EscapeString(a.Name), html.EscapeString(a.Path))
+	}
+	sb.WriteString("</ul>\n")
+	return sb.String()
 }

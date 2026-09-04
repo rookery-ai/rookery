@@ -6,7 +6,9 @@ import (
 	"github.com/yuin/goldmark"
 	gast "github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // mdRenderer is the shared markdown→HTML renderer. It mirrors the config in
@@ -15,12 +17,28 @@ import (
 // note is dropped rather than rendered, so an exported note can never carry a
 // <script> into the reader's browser. The vault is the user's own content, but
 // defence-in-depth is cheap and export produces a file that may travel.
-var mdRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))
+var mdRenderer = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithParserOptions(layoutParserOption()),
+	goldmark.WithRendererOptions(layoutRendererOption()),
+)
+
+// layoutParserOption installs the transformer that turns the editor's two div
+// wrappers into real nodes. Registered on BOTH the renderer's parser and the
+// standalone mdParser below, because the HTML and DOCX paths must see the same
+// tree — a construct one understood and the other did not is precisely the
+// divergence this package exists to avoid.
+func layoutParserOption() parser.Option {
+	return parser.WithASTTransformers(util.Prioritized(layoutTransformer{}, 100))
+}
 
 // mdParser produces the AST the DOCX builder walks. It is the SAME parser the
 // renderer uses (GFM tables etc.) so HTML and DOCX see identical structure — a
 // table in one is a table in the other.
-var mdParser = goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
+var mdParser = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithParserOptions(layoutParserOption()),
+).Parser()
 
 // wikilinkRE matches an Obsidian-style [[Target]] or [[Target|Display]] link.
 // Target and Display are captured separately; the pipe form is optional.
