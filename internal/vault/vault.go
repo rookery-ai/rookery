@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,6 +44,16 @@ import (
 // excluded from search, the web file tree, and the agent write-guard's view of
 // "knowledge".
 const InternalDir = ".kb"
+
+// scaffoldMarker is written inside InternalDir once EnsureScaffold has run for
+// a workspace. It exists so the home note can be created for a new vault and
+// left alone once the user has deleted it — see EnsureScaffold.
+const scaffoldMarker = "scaffolded"
+
+// scaffoldMarkerBody explains the file to anyone who finds it on disk. Its
+// contents are never parsed; only the file's presence is read.
+const scaffoldMarkerBody = "Written once, when this knowledge base was first set up.\n" +
+	"Its presence is how Rookery knows not to recreate a home note you deleted.\n"
 
 // ErrEscapes is returned by Resolve when a relative path would escape the vault.
 var ErrEscapes = errors.New("path escapes vault")
@@ -180,6 +191,19 @@ func (v *Vault) Rel(workspaceID, abs string) (string, error) {
 // a README home note if the vault does not yet exist. Idempotent.
 func (v *Vault) EnsureScaffold(workspaceID string) error {
 	root := v.Root(workspaceID)
+	// Whether this vault has been scaffolded BEFORE decides whether the README
+	// may be created below, so it is read before MkdirAll brings anything into
+	// being. It is an explicit marker rather than os.Stat on the root, because
+	// the root's existence answers a different question: memory.seedIdentity
+	// MkdirAlls <root>/memory during setup, and nothing calls EnsureScaffold at
+	// workspace creation — the two KB endpoints are its only callers outside
+	// migration. So the root routinely exists before the first KB visit, and
+	// reading it as "already scaffolded" would deny a brand-new workspace its
+	// home note. `.kb/` is no good either: the reflector MkdirAlls it to write
+	// db-export sidecars, so a chat can create it first.
+	marker := filepath.Join(root, InternalDir, scaffoldMarker)
+	_, markerErr := os.Stat(marker)
+	scaffolded := markerErr == nil
 	for _, sub := range []string{"notes", "memory", "skills", "agents", "chats", InternalDir} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o750); err != nil {
 			return fmt.Errorf("scaffold %s: %w", sub, err)
@@ -187,10 +211,17 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 	}
 	readme := filepath.Join(root, "README.md")
 	switch existing, err := os.ReadFile(readme); {
-	case errors.Is(err, os.ErrNotExist):
+	case errors.Is(err, os.ErrNotExist) && !scaffolded:
 		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
 			return err
 		}
+	case errors.Is(err, os.ErrNotExist):
+		// Absent from a vault we have already scaffolded means the user DELETED
+		// it. The home note is a starting point, not a system-managed file — it
+		// is not in protectedTopDirs and the KB API deletes it on request — but
+		// this function runs on every KB tree and folder load, so recreating it
+		// unconditionally wrote it back before the user had finished looking at
+		// the tree, and deleting it read as a no-op. Do nothing: it stays gone.
 	case err == nil && isPristineREADME(existing):
 		// An untouched home note from an older version: upgrade it, or a vault
 		// that already exists would keep the old four-line folder list forever
@@ -199,6 +230,19 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 		// cannot match, and is left exactly as it is.
 		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
 			return err
+		}
+	}
+
+	// Record that the first-run scaffold has happened, so a later call can tell
+	// "never scaffolded" from "scaffolded, and the user has since deleted the
+	// home note". Written last and best-effort: failing the whole scaffold over
+	// a marker would be worse than re-offering the README once. A vault
+	// scaffolded before this marker existed gets it on its next KB load — and
+	// if its README was already deleted by then, that one load recreates it a
+	// final time, after which the deletion sticks.
+	if !scaffolded {
+		if err := writeFileAtomic(marker, []byte(scaffoldMarkerBody), 0o640); err != nil {
+			slog.Warn("vault: could not record scaffold marker", "workspace_id", workspaceID, "err", err)
 		}
 	}
 
