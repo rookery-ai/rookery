@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/rookery-ai/rookery/compare/v0.16.1...v0.16.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* **web/kb:** stop the editor writing a note it only opened ([#319](https://github.com/rookery-ai/rookery/issues/319)) ([6a44347](https://github.com/rookery-ai/rookery/commit/6a44347a7efbbc40968d257b751173b487ba9f49))
+
 ## [0.16.1](https://github.com/rookery-ai/rookery/compare/v0.16.0...v0.16.1) (2026-09-14)
 
 
