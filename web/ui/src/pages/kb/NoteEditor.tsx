@@ -78,7 +78,7 @@ export function WysiwygEditor({
 }: {
   content: string;
   editable: boolean;
-  onDirty: () => void;
+  onDirty: (liveBody?: string) => void;
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
   path: string;
@@ -112,7 +112,13 @@ export function WysiwygEditor({
     // outlive across a setEditable(true) flip) reflects the LIVE state.
     onUpdate: ({ editor: liveEditor }) => {
       if (!liveEditor.isEditable) return;
-      onDirty();
+      // Hand over THIS editor's serialized body. markDirty compares against the
+      // last synced bytes to tell a real edit from TipTap's mount
+      // normalisation, and it cannot read that through getContentRef here: on a
+      // remount (adoptContent bumps editorKey) onUpdate fires before the effect
+      // that re-registers it, so getContentRef would still be the OLD
+      // instance's — stale by exactly the content being adopted.
+      onDirty(toMarkdown(liveEditor));
     },
     // Click-to-navigate for wikilink pills: handled here via editorProps
     // rather than inside the Wikilink node itself (see wikilinks.ts's top
@@ -587,7 +593,57 @@ export default function NoteEditor({
     );
   }, [path, saveNote, report, idleState]);
 
-  const markDirty = useCallback(() => {
+  const markDirty = useCallback((liveBody?: string) => {
+    // Mounting the rich text editor normalises the document, and TipTap reports
+    // that as an update — arriving here indistinguishable from a keystroke. It
+    // is not an edit: nobody typed. Treating it as one marked the note dirty and
+    // scheduled an autosave, so merely OPENING a note rewrote it on disk
+    // (measured: seeding "Hello world.\n" wrote back "Hello world."), and
+    // adoptContent — which bumps editorKey and therefore REMOUNTS the editor —
+    // did the same thing ~1s after adopting an external change. That write lands
+    // AFTER the change it is echoing, so anything that reached disk in between
+    // is silently overwritten.
+    //
+    // Keyed on CONTENT, never on a "skip the first update" flag. onUpdate fires
+    // on mount even when normalisation changes nothing at all (measured: a
+    // canonical note still wrote back byte-identical content), so a per-mount
+    // counter would swallow a genuine FIRST keystroke on any note that needed no
+    // normalising — and flushForHandoff checks dirtyRef, so a one-character edit
+    // followed by navigating away would be lost outright. That is precisely the
+    // data-loss class the dirty/saving contract below already documents.
+    const current =
+      liveBody !== undefined
+        ? joinFrontmatter(frontmatterRef.current, liveBody)
+        : getContentRef.current();
+    const synced = lastSyncedRef.current;
+    if (synced !== null) {
+      // Back to exactly what is on disk — a normalisation echo, or a user edit
+      // that undid itself.
+      if (current === synced) {
+        // Returning early is not enough: an EARLIER keystroke may already have
+        // armed the debounce, and that timer would then write. There is nothing
+        // to write, so stand the save down. Guarded on savingRef because an
+        // in-flight PUT owns dirtyRef's clearing (see the contract below).
+        if (!savingRef.current) {
+          if (timerRef.current !== undefined) {
+            window.clearTimeout(timerRef.current);
+            timerRef.current = undefined;
+          }
+          dirtyRef.current = false;
+          report("saved");
+        }
+        return;
+      }
+      // Trailing whitespace only: TipTap does not re-emit a document's trailing
+      // newline, so a note stored with one always round-trips shorter. Adopt the
+      // normalised form as the baseline — a LATER real edit then saves from here
+      // — but do not write it back now. Anything beyond trailing whitespace is a
+      // real edit and falls through.
+      if (current.replace(/\s+$/, "") === synced.replace(/\s+$/, "")) {
+        lastSyncedRef.current = current;
+        return;
+      }
+    }
     dirtyRef.current = true;
     setErrorMessage(null);
     // A stale rename-abort banner (see handleRename) must not linger once
