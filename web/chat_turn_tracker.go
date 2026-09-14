@@ -194,7 +194,7 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			}
 		})
 
-		reply, err := s.runChatCoder(ctx, workspaceID, chatID, history, text, onProgress)
+		res, err := s.runChatCoder(ctx, workspaceID, chatID, history, text, onProgress)
 		slowNotice.Stop()
 
 		// `done` is set BELOW, after every line is recorded and every side
@@ -233,13 +233,29 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		default:
 			// CleanReply never returns "" (a genuinely empty model reply gets its
 			// own placeholder), so a blank bubble cannot be persisted here.
-			cleaned := chat.CleanReply(reply)
+			cleaned := chat.CleanReply(res.Text)
 			// Chat turns logged NOTHING on the happy path, so a turn that
 			// produced no text left no trace anywhere — which is why the server
 			// log was silent about two turns the owner reported as broken, and
 			// the whole diagnosis had to come out of the database.
 			// agentrunner gained its "run finished" line for exactly this
 			// reason. `empty` is the field worth grepping for.
+			//
+			// `tools` and `stop_reason` exist because `milestones` is a COUNT
+			// and a count cannot say what happened. A chat turn that answers
+			// "Done! Updated your note" having called no write tool is
+			// indistinguishable, in this line, from one that wrote the file —
+			// and that is a real reported failure, intermittent, on the
+			// weak-model tier this platform ships. The three shapes it can take
+			// need three different fixes: no tool calls at all (the model
+			// answered from nothing), a read with no write (it never followed
+			// through), or a write that came back with the engine's "error:"
+			// prefix (it tried, the tool refused, and it claimed success
+			// anyway). SummarizeToolTrace renders exactly that distinction —
+			// per-tool call counts, bytes and an error count — and the engine
+			// already computes it for every API turn. It was reaching the
+			// agent-run log and being discarded here, which is why chat was the
+			// one coder surface with no tool-level observability at all.
 			// chatID reaches here from a path parameter. It has been validated
 			// against the database by now, so nothing arbitrary should get
 			// this far — but the log line should not be the thing depending on
@@ -255,7 +271,9 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 				"chat", logsafe.Value(chatID), "turn", st.id,
 				"milestones", milestones,
 				"reply_bytes", len(cleaned),
-				"empty", strings.TrimSpace(reply) == "")
+				"empty", strings.TrimSpace(res.Text) == "",
+				"tools", codersvc.SummarizeToolTrace(res.ToolTrace),
+				"stop_reason", res.StopReason)
 			if err := s.db.AddChatMessage(chatID, "assistant", cleaned); err != nil {
 				slog.Error("chat: persist assistant message", "chat", logsafe.Value(chatID), "error", err)
 			}

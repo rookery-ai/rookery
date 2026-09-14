@@ -775,6 +775,16 @@ per-file. Four things close it:
 - **An empty completion is no longer a finished answer** (`api_engine.go`). It used to return
   `Text:""` with `StopReason:""`, so a dead turn was recorded as a success and logged nowhere;
   chat now also logs a `chat: turn finished` line with an `empty` field.
+  That line also carries **`tools`** (`coder.SummarizeToolTrace` — each tool by
+  name with its call count, bytes and error count) and **`stop_reason`**,
+  because `milestones` is a COUNT and a count cannot say what happened: a turn
+  answering *"Done! Updated your note"* having called no write tool is otherwise
+  indistinguishable from one that wrote the file, which is a real intermittent
+  failure on the weak-model tier. The three shapes need three different fixes —
+  no tool calls at all, a read with no write, or a write returning the engine's
+  `error:` prefix — and the engine already computed the trace for every API turn.
+  `runChatCoder` was discarding it at `return result.Text`, which is why chat was
+  the one coder surface with no tool-level observability at all.
 - **A TRUNCATED completion is a different failure from an empty one, and conflating them cost
   four wrong diagnoses.** A reasoning model bills its thinking against the same completion
   budget as its answer, so on a hard synthesis it can spend the whole cap before emitting one
