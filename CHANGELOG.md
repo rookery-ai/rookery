@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/rookery-ai/rookery/compare/v0.16.0...v0.16.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **web/chat:** log which tools a chat turn actually ran ([#316](https://github.com/rookery-ai/rookery/issues/316)) ([db33965](https://github.com/rookery-ai/rookery/commit/db3396514a50aef62175360dfa2ee99465cdfd1d))
+
 ## [0.16.0](https://github.com/rookery-ai/rookery/compare/v0.15.0...v0.16.0) (2026-09-04)
 
 
