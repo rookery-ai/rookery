@@ -108,6 +108,14 @@ type Server struct {
 	// persisted before the turn reports done, or a client that refetches on
 	// seeing done gets a conversation missing the message it waited for.
 	testCoderReply string
+	// testCoderTrace / testCoderStop let a test put a tool trace and a stop
+	// reason on the fabricated Result, so the "chat: turn finished" log line's
+	// observability fields can be asserted without a configured coder. They
+	// exist because the field that matters most here — whether the turn called
+	// a WRITE tool — is exactly the one a future tidy-up would delete by
+	// narrowing runChatCoder back to returning a string.
+	testCoderTrace []coder.ToolCallStat
+	testCoderStop  string
 }
 
 // NewServer wires up all routes and middleware.
