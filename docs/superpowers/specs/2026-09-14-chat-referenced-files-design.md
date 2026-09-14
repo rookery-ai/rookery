@@ -117,6 +117,21 @@ resolve or does not exist is **skipped silently** — the model still has
 `search_files` and `glob`, and an error block would train it to distrust the
 context. Capped at **3 files** per turn.
 
+### System-managed paths are resolvable, deliberately
+
+`vault.Resolve` rejects escapes but knows nothing about the platform's own
+regions, so a message naming `chats/<id>.md`, `agents/<id>/state.md` or
+something under `.kb/` resolves and is inlined. That is consistent with existing
+policy rather than a hole: `BuildChatSystemPrompt` already tells the model it
+**may read** those and must not **write** there, and chat has always been able to
+`read_file` them. Nothing becomes reachable that was not reachable before — the
+owner has simply named it.
+
+No exclusion list is added, because one would have to be kept in step with the
+prompt's own boundaries and would silently drop a file the owner explicitly
+asked about. Revisit if a region appears that chat must not read at all; today
+there is none.
+
 ### Content vs. map
 
 - Under `maxInlinedNote` (8 KiB): the file's content verbatim.

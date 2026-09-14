@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -74,24 +73,29 @@ func ReferencedFiles(v *vault.Vault, workspaceID, message string) string {
 	sb.WriteString("which discards formatting you were not asked to touch. Describing the change in\n")
 	sb.WriteString("your reply is not making it: if you did not call a tool, the file is unchanged.\n")
 
-	for _, rel := range paths {
-		sb.WriteString("\n--- " + rel + " ---\n")
-		sb.WriteString(renderReference(v, workspaceID, rel))
+	for _, r := range paths {
+		sb.WriteString("\n--- " + r.rel + " ---\n")
+		sb.WriteString(renderReference(v, workspaceID, r))
 	}
 	return sb.String()
 }
 
+// reference is a resolved file and the bytes read while resolving it.
+//
+// The content travels WITH the path deliberately. Resolution used to prove a
+// file existed with os.Stat and then let renderReference read it, which meant
+// two vault.Resolve calls and a stat per file, and a window between the check
+// and the read that the render path had to apologise for. Reading once closes
+// both: a file that cannot be read is simply not a reference.
+type reference struct {
+	rel  string
+	data []byte
+}
+
 // renderReference returns a file's content, or its shape when it is too large
 // to inline.
-func renderReference(v *vault.Vault, workspaceID, rel string) string {
-	data, err := v.ReadNote(workspaceID, rel)
-	if err != nil {
-		// Resolution already stat'd the file, so this is a race or a
-		// permission fault. Say so plainly rather than dropping the entry:
-		// the heading is already written, and a bare heading reads as an
-		// empty file.
-		return fmt.Sprintf("(could not be read: %v)\n", err)
-	}
+func renderReference(v *vault.Vault, workspaceID string, r reference) string {
+	rel, data := r.rel, r.data
 	if len(data) <= maxInlinedNote {
 		out := string(data)
 		if !strings.HasSuffix(out, "\n") {
@@ -110,8 +114,8 @@ func renderReference(v *vault.Vault, workspaceID, rel string) string {
 
 // resolveReferences extracts candidate references and keeps the ones that
 // resolve to a real file inside the vault.
-func resolveReferences(v *vault.Vault, workspaceID, message string) []string {
-	var out []string
+func resolveReferences(v *vault.Vault, workspaceID, message string) []reference {
+	var out []reference
 	seen := map[string]bool{}
 
 	add := func(rel string) bool {
@@ -119,23 +123,29 @@ func resolveReferences(v *vault.Vault, workspaceID, message string) []string {
 		if rel == "" || seen[rel] {
 			return false
 		}
-		// vault.Resolve is the security primitive every read path uses: it
-		// rejects "..", absolute escapes and anything outside this
-		// workspace's vault. A message is untrusted text, so it is the only
-		// thing standing between a typed path and an arbitrary read.
-		abs, err := v.Resolve(workspaceID, rel)
+		// ReadNote goes through vault.Resolve, the security primitive every
+		// read path uses: it cleans the path, rejects ".." and absolute
+		// escapes, and confirms the result is still inside THIS workspace's
+		// vault. A chat message is untrusted text, so that is the only thing
+		// standing between a typed path and an arbitrary read.
+		//
+		// Deliberately NOT accompanied by a local prefix check against the
+		// vault root. That would be a second copy of a guarantee Resolve
+		// already makes — the drift-between-two-copies failure this codebase
+		// keeps recording — and it would exist to satisfy a scanner rather
+		// than a threat. TestReferencedFilesRefusesEscapes is what pins the
+		// property.
+		//
+		// The read IS the existence check. A missing path, a directory and an
+		// unreadable file all fail here, and all are skipped SILENTLY: the
+		// model still has search_files and glob, and an error block would
+		// teach it to distrust a context that is right the rest of the time.
+		data, err := v.ReadNote(workspaceID, rel)
 		if err != nil {
 			return false
 		}
-		// A path that does not exist is skipped SILENTLY. The model still has
-		// search_files and glob, and an error block here would teach it to
-		// distrust a context that is right the rest of the time.
-		fi, err := os.Stat(abs)
-		if err != nil || fi.IsDir() {
-			return false
-		}
 		seen[rel] = true
-		out = append(out, rel)
+		out = append(out, reference{rel: rel, data: data})
 		return len(out) >= maxReferencedFiles
 	}
 

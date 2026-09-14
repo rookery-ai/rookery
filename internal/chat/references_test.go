@@ -99,6 +99,17 @@ func TestReferencedFilesSkipsAMissingPath(t *testing.T) {
 	}
 }
 
+// The read IS the existence check now, so a directory has to fail through
+// ReadNote rather than through an IsDir() branch. Asserted rather than assumed:
+// dropping the explicit stat means this behaviour is inherited from the vault
+// API, and inherited behaviour is exactly what stops being true quietly.
+func TestReferencedFilesSkipsADirectory(t *testing.T) {
+	v, ws := refFixture(t, map[string]string{"notes/sub/inner.md": "x\n"})
+	if got := ReferencedFiles(v, ws, "look at notes/sub.md and notes/sub/"); got != "" {
+		t.Errorf("a directory reference produced a block:\n%s", got)
+	}
+}
+
 func TestReferencedFilesCapsTheCount(t *testing.T) {
 	files := map[string]string{}
 	var names []string
