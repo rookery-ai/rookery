@@ -161,3 +161,75 @@ test("the editor's own save round-trip is not mistaken for an external change", 
   );
   expect(screen.queryAllByText(/changed by chat/)).toHaveLength(0);
 });
+
+// Opening a note must not WRITE it. Mounting the rich text editor normalises
+// the document and TipTap reports that as an update, which markDirty could not
+// tell apart from a keystroke — so every note was rewritten on open, stripping
+// its trailing newline. Measured before the fix: seeding "Hello world.\n" put
+// back "Hello world.".
+test("opening a note writes nothing back", async () => {
+  const qc = newClient();
+  served = "Hello world.\n";
+  renderEditor(qc);
+  await waitFor(() => expect(document.querySelector(".ProseMirror")).toBeTruthy());
+  await new Promise((r) => setTimeout(r, 1400)); // past AUTOSAVE_MS
+  expect(puts).toEqual([]);
+  expect(served).toBe("Hello world.\n");
+});
+
+// The same defect on the adopt path, and the damaging one. adoptContent bumps
+// editorKey, which REMOUNTS the editor, so picking up an external change
+// scheduled a write of its own ~1s later — landing AFTER the change it was
+// echoing, and overwriting anything that reached disk in between.
+test("adopting an external change writes nothing back", async () => {
+  const qc = newClient();
+  renderEditor(qc);
+  await settle();
+  puts = [];
+
+  served = "Status: final";
+  await qc.invalidateQueries({ queryKey: ["kb-note"] });
+
+  // Still adopted — the clean-editor behaviour above must be preserved.
+  await waitFor(() =>
+    expect(document.querySelector(".ProseMirror")?.textContent).toContain("Status: final"),
+  );
+  await new Promise((r) => setTimeout(r, 1400));
+  expect(puts).toEqual([]);
+  expect(served).toBe("Status: final");
+});
+
+// The guard's safety property, and the reason it compares CONTENT rather than
+// counting updates. onUpdate fires on mount even when normalisation changes
+// nothing, so "skip the first update" would swallow a genuine first keystroke —
+// and flushForHandoff checks dirtyRef, so a one-character edit followed by
+// navigating away would be lost outright.
+test("a single typed character still marks dirty and still saves", async () => {
+  const qc = newClient();
+  renderEditor(qc);
+  const user = userEvent.setup();
+  const box = await enterRaw(user);
+  await settle();
+  puts = [];
+
+  await user.type(box, "x");
+  await user.keyboard("{Control>}s{/Control}");
+
+  await waitFor(() => expect(puts.length).toBeGreaterThan(0));
+  expect(puts[puts.length - 1]).toContain("x");
+});
+
+// An edit that restores exactly what is on disk is not a change worth writing.
+test("typing back to the synced text does not schedule a save", async () => {
+  const qc = newClient();
+  renderEditor(qc);
+  const user = userEvent.setup();
+  const box = await enterRaw(user);
+  await settle();
+  puts = [];
+
+  await user.type(box, "zz");
+  await user.keyboard("{Backspace}{Backspace}");
+  await new Promise((r) => setTimeout(r, 1400));
+  expect(puts).toEqual([]);
+});
