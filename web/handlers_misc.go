@@ -94,7 +94,7 @@ func (s *Server) runChatCoder(
 	history []db.ChatMessage,
 	text string,
 	onProgress func(string),
-) (string, error) {
+) (*codersvc.Result, error) {
 	// Test seams, checked before any coder construction so a unit test needs no
 	// configured coder. They sit here rather than deeper because the property
 	// under test is the ORDERING — that startChatTurn persisted the owner's
@@ -107,10 +107,10 @@ func (s *Server) runChatCoder(
 		<-s.testCoderBlock
 	}
 	if s.testCoderErr != "" {
-		return "", errors.New(s.testCoderErr)
+		return nil, errors.New(s.testCoderErr)
 	}
 	if s.testCoderReply != "" {
-		return s.testCoderReply, nil
+		return &codersvc.Result{Text: s.testCoderReply, ToolTrace: s.testCoderTrace, StopReason: s.testCoderStop}, nil
 	}
 
 	// System context: a read+write knowledge-base instruction (so the chat can retrieve
@@ -294,9 +294,9 @@ func (s *Server) runChatCoder(
 
 	result, err := coder.Chat(ctx, workspaceID, history, sysCtx, text)
 	if err != nil {
-		return "", fmt.Errorf("couldn't reach %s: %w", coder.Name(), err)
+		return nil, fmt.Errorf("couldn't reach %s: %w", coder.Name(), err)
 	}
-	return result.Text, nil
+	return result, nil
 }
 
 // ── Reminders ──────────────────────────────────────────────────────────────
