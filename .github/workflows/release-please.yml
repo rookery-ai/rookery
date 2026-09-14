@@ -37,7 +37,7 @@ jobs:
       #   is owned by the org and mints a short-lived installation token per run.
       #
       # See docs/ci-setup.md §1.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.ROOKERY_APP_ID }}
