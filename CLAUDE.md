@@ -1288,6 +1288,56 @@ your first agent"**. Four things are load-bearing:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
+**A file NAMED in a chat message is loaded host-side, and the reason is a measured
+difference rather than a hunch.** Two turns on one install, same model, same file,
+minutes apart: a cold turn asking *"Update notes/x.md — change Status: draft to
+Status: final"* answered **"Done!"** and wrote nothing, while the identical edit asked
+one turn AFTER the model had read the file landed correctly. The variable was whether
+the content was already in the conversation — which the KB's *Chat about this file* and
+*Edit with AI* buttons get for free from their opening message, and a message typed on
+the chat page does not. Notably this **rules out** the tidier explanation:
+`selectionEditPrompt` carries an explicit *"apply the change to the file directly"* and
+its comment records this failure being fixed once before by adding that sentence, but
+the working case used `chatPrompt`, which has no such instruction.
+
+`chat.ReferencedFiles(vault, workspaceID, message)` closes it. It lives in
+`internal/chat` beside `BuildUserContext` because BOTH turn-assembly sites already call
+that package (`web/handlers_misc.go`, `cmd/rookery/main.go`) — a helper in `web` would
+silently leave Telegram/Discord/Slack without it, the exact divergence the comment at
+the first site warns about, and `TestBothChatTurnSitesLoadReferencedFiles` fails if
+either drops the call. Five details are load-bearing:
+
+- **Detection requires BOTH a slash and an extension** (`notes/trip.md`), plus
+  `[[wikilinks]]`. A bare title is deliberately NOT matched: a wrong guess spends
+  context and points the model at the wrong file, which is worse than leaving the job
+  to `search_files`. The wikilink path builds a `LinkIndex`, which walks the whole
+  vault — so it is gated on the message actually containing `[[`.
+- **Every candidate goes through `vault.Resolve`**, the same primitive every read path
+  uses. A chat message is untrusted text, so it is the only thing between a typed path
+  and an arbitrary read. A path that does not exist is skipped **silently**: an error
+  block would teach the model to distrust a context that is right the rest of the time.
+- **Over `maxInlinedNote` (8 KiB) the block carries the file's SHAPE**
+  (`vault.MapFile`), not its content — anchored to what `read_file` returns in one
+  call, because inlining more than the tool would makes the block a worse version of
+  the tool. **Stated limitation:** a shape is not an exact `old_string`, so an edit to
+  a large file can still fail.
+- **It is appended to `sysCtx`, never prefixed to the user's message** — prefixing
+  pollutes what the model believes the owner said. The cacheability objection does not
+  apply: `BuildUserContext` already calls `time.Now()`, so `sysCtx` is rebuilt per turn.
+- **The block's wording steers toward `edit_file`, and that is the fix protecting
+  itself.** Handing the model a file's full text invites a `write_file` of the WHOLE
+  document — which would flatten exactly the rich-text constructs (callouts, toggles,
+  column grids, alignment) that a surgical `edit_file` leaves untouched. So it states
+  this is the current on-disk content, that a change requires `edit_file` with a unique
+  `old_string`, and that describing a change in the reply is not making one.
+  `TestReferencedFilesTellsTheModelToEditNotRewrite` pins it, because a reword that
+  drops the steer reintroduces the formatting loss the feature was meant to avoid.
+
+**What this does NOT establish.** The false-"Done!" is verifiable only empirically — one
+sample each side, a stochastic model. If `chat: turn finished`'s `tools` field later
+shows `edit_file×1(1 err)`, the model was already trying and the tool refused, and this
+change improves its odds without guaranteeing the call lands.
+
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
 
 **Chat must never show the output-protocol markers, and the prompt gate alone does not

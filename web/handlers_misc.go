@@ -267,7 +267,18 @@ func (s *Server) runChatCoder(
 	}
 	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(workspaceID), browserReady) +
 		prompts.MCPToolsBlock(mcpRefs, mcpTools, coder.BackendType(), mcpBin) +
-		chat.BuildUserContext(s.db, s.memory, workspaceID)
+		chat.BuildUserContext(s.db, s.memory, workspaceID) +
+		// Files the owner NAMED in this message, resolved host-side.
+		//
+		// A cold turn asking to change a note answered "Done!" and wrote
+		// nothing, while the same edit asked one turn AFTER the model had
+		// read the file landed correctly. The measured difference was
+		// whether the content was already in the conversation — which the
+		// KB's "Chat about this file" and "Edit with AI" buttons get for
+		// free from their opening message, and a message typed on the chat
+		// page does not. Per TURN, not in the cached prefix, because it
+		// depends on what was just said.
+		chat.ReferencedFiles(s.vault, workspaceID, text)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
 	if ch, err := s.db.GetChat(chatID); err == nil && !ch.Active {

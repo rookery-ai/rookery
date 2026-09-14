@@ -615,7 +615,12 @@ func serveCmd() *cli.Command {
 				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin,
 					chatAppsForWorkspace(database, workspaceID), browserReady) +
 					prompts.MCPToolsBlock(mcpRefs, mcpTools, cd.BackendType(), mcpBin) +
-					chat.BuildUserContext(database, memStore, workspaceID)
+					chat.BuildUserContext(database, memStore, workspaceID) +
+					// Same per-turn referenced-file context the SPA gets. Kept in
+					// step deliberately: chat.TestBothChatTurnSitesLoadReferencedFiles
+					// fails if either site drops it, because the divergence is
+					// invisible in either file alone.
+					chat.ReferencedFiles(vlt, workspaceID, text)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
