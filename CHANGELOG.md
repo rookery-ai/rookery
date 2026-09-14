@@ -7,6 +7,32 @@
 
 * **web/chat:** log which tools a chat turn actually ran ([#316](https://github.com/rookery-ai/rookery/issues/316)) ([db33965](https://github.com/rookery-ai/rookery/commit/db3396514a50aef62175360dfa2ee99465cdfd1d))
 
+
+### Security
+
+Clears every open Dependabot advisory (13 alerts across 8 packages). One is
+runtime-scope and reached shipped code; the rest are build/test tooling.
+
+* **@tiptap/core** 3.29.2 → 3.31.3 — quadratic ReDoS in block and inline
+  Markdown parsing ([GHSA-j95f-988m-3j2f](https://github.com/advisories/GHSA-j95f-988m-3j2f), HIGH,
+  **runtime**) plus [GHSA-cp6q-959q-f8rh](https://github.com/advisories/GHSA-cp6q-959q-f8rh) (moderate)
+  ([#310](https://github.com/rookery-ai/rookery/issues/310))
+* **fast-uri** 3.1.5 → 3.1.7 — four HIGH advisories ([#297](https://github.com/rookery-ai/rookery/issues/297))
+* **js-yaml** 4.3.1 → 4.3.2 — [GHSA-2883-xcg3-v3hh](https://github.com/advisories/GHSA-2883-xcg3-v3hh) (HIGH) ([#314](https://github.com/rookery-ai/rookery/issues/314))
+* **browserslist** 4.28.6 → 4.28.9 — [GHSA-73wf-gq98-2v4g](https://github.com/advisories/GHSA-73wf-gq98-2v4g) (HIGH) ([#308](https://github.com/rookery-ai/rookery/issues/308))
+* **hono** 4.13.1 → 4.13.7 — two moderate advisories ([#311](https://github.com/rookery-ai/rookery/issues/311))
+* **vitest** / **@vitest/mocker** 4.1.10 → 4.1.11 — [GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9) (moderate) ([#312](https://github.com/rookery-ai/rookery/issues/312))
+* **baseline-browser-mapping** → 2.11.23 — [GHSA-w5vr-8v7q-w6rv](https://github.com/advisories/GHSA-w5vr-8v7q-w6rv) (moderate)
+
+### Dependencies
+
+* Go modules: `golang.org/x/crypto` 0.55.0 → 0.57.0, `golang.org/x/net` 0.58.0 →
+  0.59.0, `modelcontextprotocol/go-sdk` 1.7.0 → 1.8.0, `modernc.org/sqlite`
+  1.57.0 → 1.58.0, `yuin/goldmark` 1.8.5 → 1.8.6 ([#315](https://github.com/rookery-ai/rookery/issues/315))
+* npm minor/patch group, 24 packages incl. TipTap 3.31.3, `@tanstack/react-query`
+  5.102.8, `lucide-react` 1.41.0, `vite` 8.2.2 ([#310](https://github.com/rookery-ai/rookery/issues/310))
+* CI: `actions/create-github-app-token` v2 → v3 ([#230](https://github.com/rookery-ai/rookery/issues/230))
+
 ## [0.16.0](https://github.com/rookery-ai/rookery/compare/v0.15.0...v0.16.0) (2026-09-04)
 
 
