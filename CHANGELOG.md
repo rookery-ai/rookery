@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.16.3](https://github.com/rookery-ai/rookery/compare/v0.16.2...v0.16.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* **deps:** bump source-map-js to 1.2.2 (CVE-2026-93749) ([#331](https://github.com/rookery-ai/rookery/issues/331)) ([fafe70f](https://github.com/rookery-ai/rookery/commit/fafe70f58183a3c7933d6effc59d2f1c296c324d))
+
+### Security
+
+Clears every open Dependabot advisory (21 alerts across 7 npm packages) plus a
+Trivy finding no alert covered, and takes Echo's security release for the Go
+server.
+
+* **labstack/echo** 4.15.4 → 4.16.0 — **runtime** (the HTTP server): request
+  scheme spoofing via `X-Forwarded-Proto` from untrusted clients
+  ([GHSA-2ffq-g2xg-c22p](https://github.com/advisories/GHSA-2ffq-g2xg-c22p)), plus JSONP, MethodOverride,
+  redirect and static-file fixes that do not reach Rookery's routes. `X-Forwarded-Proto` from a
+  reverse proxy on loopback or a private network is still honoured ([#339](https://github.com/rookery-ai/rookery/issues/339))
+* **markdown-it** 14.3.0 → 14.3.2 — quadratic linkify paths
+  ([GHSA-253c-mchw-3w2r](https://github.com/advisories/GHSA-253c-mchw-3w2r), moderate, **runtime**) ([#337](https://github.com/rookery-ai/rookery/issues/337))
+* **source-map-js** 1.2.1 → 1.2.2 — CVE-2026-93749, DoS via malformed indexed
+  source maps (HIGH) ([#331](https://github.com/rookery-ai/rookery/issues/331))
+* **proxy-addr** 2.0.7 → 2.0.8 — IP spoofing via IPv4-mapped IPv6 trust subnet
+  ([GHSA-jqcg-44mw-7w3h](https://github.com/advisories/GHSA-jqcg-44mw-7w3h), CRITICAL) ([#333](https://github.com/rookery-ai/rookery/issues/333))
+* **undici** 8.10.0 → 8.11.2 and 7.29.0 → 7.30.0 — ten advisories, three HIGH
+  (TLS validation bypass [GHSA-w293-vg96-wgc3](https://github.com/advisories/GHSA-w293-vg96-wgc3), cross-origin cache
+  poisoning [GHSA-vp8m-p9jh-q5pm](https://github.com/advisories/GHSA-vp8m-p9jh-q5pm), WebSocket DoS
+  [GHSA-rfgv-xxqx-mfg5](https://github.com/advisories/GHSA-rfgv-xxqx-mfg5)) ([#328](https://github.com/rookery-ai/rookery/issues/328))
+* **@modelcontextprotocol/sdk** 1.30.0 → 1.32.1 — OAuth credentials sent to an
+  attacker-chosen authorization server ([GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h), HIGH) ([#335](https://github.com/rookery-ai/rookery/issues/335))
+* **brace-expansion** 5.0.9 → 5.0.12 — three DoS advisories, two HIGH ([#334](https://github.com/rookery-ai/rookery/issues/334))
+* **ip-address** 10.5.0 → 10.7.3 — four moderate SSRF/classification advisories ([#327](https://github.com/rookery-ai/rookery/issues/327))
+* **postcss-selector-parser** 7.1.4 → 7.1.6 — [GHSA-rj75-hqrm-r3gf](https://github.com/advisories/GHSA-rj75-hqrm-r3gf) (moderate) ([#336](https://github.com/rookery-ai/rookery/issues/336))
+
+### Dependencies
+
+* Go modules: `labstack/echo/v4` 4.16.0, `landlock-lsm/go-landlock` 0.10.1,
+  `slack-go/slack` 0.30.1, `urfave/cli/v3` 3.14.0, `modernc.org/sqlite` 1.60.1 ([#339](https://github.com/rookery-ai/rookery/issues/339))
+* npm minor/patch group, 27 packages incl. React 19.3, TipTap 3.31.4,
+  `react-router` 8.4, `vite` 8.3 ([#338](https://github.com/rookery-ai/rookery/issues/338))
+* `@testing-library/jest-dom` 6 → 7 ([#323](https://github.com/rookery-ai/rookery/issues/323)) and `@types/node` 24 → 26 ([#324](https://github.com/rookery-ai/rookery/issues/324)), test/dev only
+
 ## [0.16.2](https://github.com/rookery-ai/rookery/compare/v0.16.1...v0.16.2) (2026-09-14)
 
 
