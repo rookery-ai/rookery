@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/rookery-ai/rookery/compare/v0.16.2...v0.16.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* **deps:** bump source-map-js to 1.2.2 (CVE-2026-93749) ([#331](https://github.com/rookery-ai/rookery/issues/331)) ([fafe70f](https://github.com/rookery-ai/rookery/commit/fafe70f58183a3c7933d6effc59d2f1c296c324d))
+
 ## [0.16.2](https://github.com/rookery-ai/rookery/compare/v0.16.1...v0.16.2) (2026-09-14)
 
 
