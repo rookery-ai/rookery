@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/rookery-ai/rookery/compare/v0.16.3...v0.17.0) (2026-10-09)
+
+
+### Features
+
+* **connectors:** anchor-based Google Docs edits that verify themselves ([#340](https://github.com/rookery-ai/rookery/issues/340)) ([bb4fb17](https://github.com/rookery-ai/rookery/commit/bb4fb17a2db58c39f01d038e5b535ccc4be513ad))
+* **connectors:** Deel ([#341](https://github.com/rookery-ai/rookery/issues/341)) ([07607a8](https://github.com/rookery-ai/rookery/commit/07607a85ba76195bde7ad81c63cdf49477e1af64))
+
+
+### Bug Fixes
+
+* **deps:** Go 1.26.9 and golang.org/x/net v0.60.0 for HTTP/2 advisories ([#342](https://github.com/rookery-ai/rookery/issues/342)) ([f8974b1](https://github.com/rookery-ai/rookery/commit/f8974b11db661f37850ecc0307763d0d21d64f64))
+
 ## [0.16.3](https://github.com/rookery-ai/rookery/compare/v0.16.2...v0.16.3) (2026-10-08)
 
 
