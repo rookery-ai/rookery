@@ -112,6 +112,9 @@ actions:
               containsText: {text: "{{find}}", matchCase: "{{match_case}}"}
               replaceText: "{{replacement}}"
     response_extract: "$.replies"
+    # A replace that matched nothing still answers 200, with the count omitted —
+    # without this the model reports a template it never filled.
+    expect_change: "$.replies.0.replaceAllText.occurrencesChanged"
   - name: slides_insert_image
     description: "Place an image on a slide. The image must already be at a PUBLICLY reachable https URL — Google fetches it itself, so a local file or a private link fails."
     mutating: true

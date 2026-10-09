@@ -123,15 +123,10 @@ func TestGoogleDocsInsertText(t *testing.T) {
 	if !ok {
 		t.Fatal("docs_insert_text missing")
 	}
-	_, _, body, _, err := renderRequest(a, map[string]any{"document_id": "D1", "text": "hello", "index": float64(1)}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got map[string]any
-	json.Unmarshal(body, &got)
-	reqs, ok := got["requests"].([]any)
-	if !ok || len(reqs) != 1 {
-		t.Fatalf("requests[] not built: %s", body)
+	// It is a Go handler now (anchor resolution + verification); its behaviour is
+	// exercised end to end against a fake document in gdocs_handlers_test.go.
+	if a.Handler != "docs_insert_text" {
+		t.Fatalf("docs_insert_text handler = %q", a.Handler)
 	}
 }
 

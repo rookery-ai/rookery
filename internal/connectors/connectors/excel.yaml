@@ -51,7 +51,7 @@ actions:
         $select: "address,values,text"
     response_extract: "$"
   - name: excel_update_range
-    description: "Write values into a cell range. values is an array of ROWS, e.g. [[\"a\",1],[\"b\",2]], and its shape must match the address exactly or Excel rejects it. Overwrites whatever is there."
+    description: "Write values into an exact cell range. values is an array of ROWS and its shape must match the address exactly or Excel rejects it — prefer excel_write_cells, which takes just the top-left cell. Overwrites whatever is there."
     mutating: true
     scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
     params:
@@ -67,6 +67,23 @@ actions:
       url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/range(address='{{address}}')"
       body:
         values: "{{values}}"
+    response_extract: "$"
+  - name: excel_write_cells
+    description: "Write a block of values starting at ONE cell — the range is worked out from the shape of values, so no address arithmetic. values is an array of ROWS, e.g. [[\"Name\",\"Total\"],[\"EU\",1200]]; ragged rows are padded. Returns the address written and the values as stored. Overwrites whatever is there."
+    mutating: true
+    handler: excel_write_cells
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id:    {type: string, description: "the workbook's OneDrive item id"}
+        sheet:      {type: string, description: "worksheet name"}
+        start_cell: {type: string, description: "top-left cell, e.g. B3"}
+        values:     {type: array, items: {type: array}, description: "array of rows"}
+      required: [item_id, sheet, start_cell, values]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/range(address='{{start_cell}}')"
     response_extract: "$"
   - name: excel_clear_range
     description: "Clear a cell range. apply_to is Contents (values only, keeping formatting), Formats, or All. Mutating — there is no undo through the API."

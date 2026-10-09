@@ -1629,7 +1629,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **136 providers (~934 actions):** the Google family (Gmail/Drive/Sheets/Docs/Calendar/Tasks
+  **136 providers (~940 actions):** the Google family (Gmail/Drive/Sheets/Docs/Calendar/Tasks
   **+ Slides/Forms/Chat/Contacts**, and AdSense/GA4/Search Console), **YouTube**,
   the Microsoft 365 family (Outlook mail **+ Outlook Calendar/Contacts, OneDrive,
   Excel, OneNote, Microsoft To Do**, Teams),
@@ -1995,6 +1995,66 @@ with no server-side filter: Home Assistant's `/api/states` returns every entity 
 house, so `ha_list_states`'s `entity_prefix` is honoured after extraction. A missing
 filter argument yields an empty prefix and no-ops — matching nothing would return `[]`,
 which reads to the model as "you have no sensors".
+
+**Google Docs is edited by QUOTING TEXT, never by index — and the reason is that a
+small model could not do it any other way.** DeepSeek-Flash-class models reported Docs
+edits that never happened, or made them in the wrong place, and three causes compounded
+with none of them the model's fault. `docs_get_document` returned the raw `documents.get`
+JSON, which carries every run's full style at ~500–800 bytes a paragraph, so a realistic
+document was cut at the 8 KiB tool-result cap after a dozen paragraphs and every later
+index was a guess. Every write took a **UTF-16** offset (an emoji is two units, Cyrillic
+one, so rune arithmetic passes every Macedonian test and still drifts). And a
+`batchUpdate` answers `[{}]` whether or not anything changed — `replaceAllText` matching
+nothing returns 200 with the count **omitted**, because proto3 JSON drops zeros.
+
+The fix is a **`handler:` field on `Action`** (`handlers.go`): an action implemented in
+Go rather than as one templated request, for operations needing read → write → re-read.
+It runs only after **every** `Execute` gate (validation, build guard, parker, scope
+check, token), and calls the provider through `sender.do` — the same request loop a
+template action uses, extracted rather than copied, so moving an action to a handler
+cannot change how it authenticates. The hygiene tests cannot see Go, so
+`TestHandlerParamsAreRead` asserts every offered parameter appears as a literal in the
+handler source (`ignoredLegacyParams` names the deliberate exceptions, e.g.
+`docs_append_text.end_index`), and `TestHandlerActionsAreRegistered` catches a handler
+name nobody registered at build time rather than inside a 03:00 run.
+
+`gdocs.go` flattens a document into numbered paragraphs (table cells included) with a
+per-rune UTF-16 index, and every Docs write is a handler that resolves an ANCHOR: exact
+match first, then a normalised one (case, whitespace runs, smart quotes and dashes
+folded). Four behaviours are load-bearing:
+
+- **An ambiguous anchor changes NOTHING** and lists each occurrence with its paragraph.
+  Taking the first hit silently is precisely "it modified the wrong location". A missing
+  anchor names the three paragraphs sharing the most words with it.
+- **Writes carry `writeControl.requiredRevisionId`** from the read they were planned
+  against. A concurrent edit makes Google refuse rather than land the write on shifted
+  text; the handler re-plans once from a fresh read (anchors are text, so the fresh plan
+  is still the asked-for edit). A caller-pinned `revision_id` is never retried.
+- **Every write re-reads the document and verifies** the text is where the plan put it,
+  returning the surrounding paragraphs. "Accepted but not visible" is an ERROR telling
+  the model not to report success — never a hopeful `applied`.
+- **Inserted paragraphs are restyled explicitly.** Docs gives a split paragraph the
+  style of the one it came from, so a line added after a heading became a heading.
+  Markdown in `text` (the default `format`) becomes real headings, bullets, bold and
+  links; a list line beside an existing list item joins that list rather than starting one.
+
+A section is deleted from its first BLOCK, not its first paragraph (`gpara.BlockStart`):
+a section opening with a table would otherwise cut the table in half, which Docs
+refuses. The index-based actions remain, marked ADVANCED, because built agents reference
+them by name; `docs_insert_text` still honours a bare `index`, and verifies it.
+
+**`expect_change` makes a silent zero a failure** for the template actions with the same
+shape (`slides_replace_all_text`, `sheets_find_replace`): a dotted path — numeric
+segments index arrays — to the provider's change count, absent or zero → an error saying
+nothing changed. It fails OPEN on a count it cannot parse. The same review fixed
+`sheets_find_replace` without `sheet_id` (the API requires `allSheets` in its place),
+Graph mail turning `"a@x, b@y"` into ONE malformed recipient, Gmail sending a raw UTF-8
+`Subject:` (now RFC 2047), and added CC/BCC, `excel_write_cells` (the range is computed
+from a start cell and the shape of `values`), `onenote_append_to_page`, and
+`includeValuesInResponse` on Sheets writes. `gdocs_fake_test.go` is an in-memory Docs
+that APPLIES batch requests, so the handler tests assert what the document ends up
+saying; it has never been checked against a live account from this host (every Google
+connection here was `NEEDS_REAUTH` when it was written).
 
 **Connectors deliberately do NOT use the private-address dial guard.**
 `connectors.Execute` falls back to a plain `&http.Client{Timeout: 30s}`, and every
