@@ -348,8 +348,21 @@ type Action struct {
 	// byte-identical and shows the model a cursor precisely when one is actionable.
 	ResponseCursor string `yaml:"response_cursor"`
 	// ResponseFilter optionally narrows an array response after ResponseExtract runs.
-	ResponseFilter ResponseFilter  `yaml:"response_filter"`
-	Params         json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
+	ResponseFilter ResponseFilter `yaml:"response_filter"`
+	// ExpectChange is a dotted path (numeric segments index arrays) to a count the
+	// provider returns of what a write actually changed. Absent or zero turns the
+	// call into an error. It exists because Google's find/replace endpoints answer
+	// 200 with the count OMITTED when nothing matched (proto3 JSON drops zeros), so
+	// a write that changed nothing is otherwise byte-identical to "done" — and a
+	// small model reports an edit that never happened.
+	ExpectChange string `yaml:"expect_change"`
+	// Handler names a Go function (see handlers.go) that implements this action
+	// instead of the request template, for operations needing more than one
+	// provider call — read, compute a position, write, re-read to verify. Every
+	// Execute gate (validation, build guard, approval parker, scope check) still
+	// runs first; the Request block stays as documentation of the primary endpoint.
+	Handler string          `yaml:"handler"`
+	Params  json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
 }
 
 type manifest struct {

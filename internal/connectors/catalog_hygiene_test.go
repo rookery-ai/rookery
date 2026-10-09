@@ -95,8 +95,9 @@ func TestRequiredParamsAreActuallyUsed(t *testing.T) {
 			if b, err := json.Marshal(a.Request.Body); err == nil {
 				blob += " " + string(b)
 			}
-			// A body_builder assembles the body in Go, so its params cannot be seen here.
-			if a.Request.BodyBuilder != "" {
+			// A body_builder or handler assembles the request in Go, so its params cannot
+			// be seen here — TestHandlerParamsAreRead covers handlers instead.
+			if a.Request.BodyBuilder != "" || a.Handler != "" {
 				continue
 			}
 			for _, req := range schema.Required {
@@ -196,7 +197,7 @@ func TestOptionalParamsAreActuallyUsed(t *testing.T) {
 	r, _ := LoadBundled()
 	for _, prov := range r.ProviderNames() {
 		for _, a := range r.Actions(prov) {
-			if a.Request.BodyBuilder != "" {
+			if a.Request.BodyBuilder != "" || a.Handler != "" {
 				continue // assembled in Go; not visible here
 			}
 			var schema struct {

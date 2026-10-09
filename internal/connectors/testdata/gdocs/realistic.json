@@ -1,0 +1,299 @@
+{
+ "documentId": "FIXTURE",
+ "title": "Q3",
+ "revisionId": "ALm37BV",
+ "body": {
+  "content": [
+   {
+    "endIndex": 1,
+    "sectionBreak": {
+     "sectionStyle": {
+      "columnSeparatorStyle": "NONE"
+     }
+    }
+   },
+   {
+    "startIndex": 1,
+    "endIndex": 18,
+    "paragraph": {
+     "elements": [
+      {
+       "startIndex": 1,
+       "endIndex": 18,
+       "textRun": {
+        "content": "Quarterly report\n",
+        "textStyle": {
+         "bold": true
+        }
+       }
+      }
+     ],
+     "paragraphStyle": {
+      "namedStyleType": "TITLE",
+      "direction": "LEFT_TO_RIGHT"
+     }
+    }
+   },
+   {
+    "startIndex": 18,
+    "endIndex": 26,
+    "paragraph": {
+     "elements": [
+      {
+       "startIndex": 18,
+       "endIndex": 26,
+       "textRun": {
+        "content": "Summary\n",
+        "textStyle": {}
+       }
+      }
+     ],
+     "paragraphStyle": {
+      "namedStyleType": "HEADING_1",
+      "direction": "LEFT_TO_RIGHT"
+     }
+    }
+   },
+   {
+    "startIndex": 26,
+    "endIndex": 60,
+    "paragraph": {
+     "elements": [
+      {
+       "startIndex": 26,
+       "endIndex": 47,
+       "textRun": {
+        "content": "Revenue grew 🚀 fast ",
+        "textStyle": {}
+       }
+      },
+      {
+       "startIndex": 47,
+       "endIndex": 48,
+       "inlineObjectElement": {
+        "inlineObjectId": "kix.img1",
+        "textStyle": {}
+       }
+      },
+      {
+       "startIndex": 48,
+       "endIndex": 60,
+       "textRun": {
+        "content": " see chart.\n",
+        "textStyle": {
+         "italic": true
+        }
+       }
+      }
+     ],
+     "paragraphStyle": {
+      "namedStyleType": "NORMAL_TEXT",
+      "direction": "LEFT_TO_RIGHT"
+     }
+    }
+   },
+   {
+    "startIndex": 60,
+    "endIndex": 72,
+    "paragraph": {
+     "elements": [
+      {
+       "startIndex": 60,
+       "endIndex": 72,
+       "textRun": {
+        "content": "First point\n",
+        "textStyle": {}
+       }
+      }
+     ],
+     "paragraphStyle": {
+      "namedStyleType": "NORMAL_TEXT",
+      "direction": "LEFT_TO_RIGHT"
+     },
+     "bullet": {
+      "listId": "kix.abc",
+      "textStyle": {}
+     }
+    }
+   },
+   {
+    "startIndex": 72,
+    "endIndex": 99,
+    "table": {
+     "rows": 2,
+     "columns": 2,
+     "tableRows": [
+      {
+       "startIndex": 73,
+       "endIndex": 88,
+       "tableCells": [
+        {
+         "startIndex": 74,
+         "endIndex": 81,
+         "content": [
+          {
+           "startIndex": 74,
+           "endIndex": 81,
+           "paragraph": {
+            "elements": [
+             {
+              "startIndex": 74,
+              "endIndex": 81,
+              "textRun": {
+               "content": "Region\n",
+               "textStyle": {
+                "bold": true
+               }
+              }
+             }
+            ],
+            "paragraphStyle": {
+             "namedStyleType": "NORMAL_TEXT",
+             "direction": "LEFT_TO_RIGHT"
+            }
+           }
+          }
+         ],
+         "tableCellStyle": {
+          "rowSpan": 1,
+          "columnSpan": 1
+         }
+        },
+        {
+         "startIndex": 81,
+         "endIndex": 88,
+         "content": [
+          {
+           "startIndex": 82,
+           "endIndex": 88,
+           "paragraph": {
+            "elements": [
+             {
+              "startIndex": 82,
+              "endIndex": 88,
+              "textRun": {
+               "content": "Total\n",
+               "textStyle": {}
+              }
+             }
+            ],
+            "paragraphStyle": {
+             "namedStyleType": "NORMAL_TEXT",
+             "direction": "LEFT_TO_RIGHT"
+            }
+           }
+          }
+         ],
+         "tableCellStyle": {
+          "rowSpan": 1,
+          "columnSpan": 1
+         }
+        }
+       ]
+      },
+      {
+       "startIndex": 88,
+       "endIndex": 99,
+       "tableCells": [
+        {
+         "startIndex": 89,
+         "endIndex": 92,
+         "content": [
+          {
+           "startIndex": 89,
+           "endIndex": 92,
+           "paragraph": {
+            "elements": [
+             {
+              "startIndex": 89,
+              "endIndex": 92,
+              "textRun": {
+               "content": "EU\n",
+               "textStyle": {}
+              }
+             }
+            ],
+            "paragraphStyle": {
+             "namedStyleType": "NORMAL_TEXT",
+             "direction": "LEFT_TO_RIGHT"
+            }
+           }
+          }
+         ],
+         "tableCellStyle": {
+          "rowSpan": 1,
+          "columnSpan": 1
+         }
+        },
+        {
+         "startIndex": 92,
+         "endIndex": 99,
+         "content": [
+          {
+           "startIndex": 93,
+           "endIndex": 99,
+           "paragraph": {
+            "elements": [
+             {
+              "startIndex": 93,
+              "endIndex": 99,
+              "textRun": {
+               "content": "1,200\n",
+               "textStyle": {}
+              }
+             }
+            ],
+            "paragraphStyle": {
+             "namedStyleType": "NORMAL_TEXT",
+             "direction": "LEFT_TO_RIGHT"
+            }
+           }
+          }
+         ],
+         "tableCellStyle": {
+          "rowSpan": 1,
+          "columnSpan": 1
+         }
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "startIndex": 99,
+    "endIndex": 100,
+    "paragraph": {
+     "elements": [
+      {
+       "startIndex": 99,
+       "endIndex": 100,
+       "textRun": {
+        "content": "\n",
+        "textStyle": {}
+       }
+      }
+     ],
+     "paragraphStyle": {
+      "namedStyleType": "NORMAL_TEXT",
+      "direction": "LEFT_TO_RIGHT"
+     }
+    }
+   }
+  ]
+ },
+ "documentStyle": {
+  "pageSize": {
+   "height": {
+    "magnitude": 792,
+    "unit": "PT"
+   }
+  }
+ },
+ "namedStyles": {
+  "styles": []
+ },
+ "inlineObjects": {
+  "kix.img1": {}
+ }
+}

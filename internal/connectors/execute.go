@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -158,10 +159,6 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err != nil {
 		return Result{}, err // TokenStore returns a typed ConnectorError
 	}
-	method, u, body, contentType, err := renderRequest(a, args, conn.Extra)
-	if err != nil {
-		return Result{}, &ConnectorError{KindOther, err.Error()}
-	}
 	prov, _ := reg.OAuthProvider(conn.Provider) // auth config; resolves auth_parent for aliased providers
 	// Static headers merge parent-then-child: an aliased child inherits the parent's
 	// (Notion-Version, GitHub Accept) AND may add its own. Reading only the parent's
@@ -178,65 +175,28 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
+	snd := &sender{client: client, prov: prov, token: token, conn: conn,
+		staticHeaders: staticHeaders, actionHeaders: a.Request.Headers, args: args}
 
-	var raw []byte
-	var status int
-	for attempt := 0; attempt < 2; attempt++ {
-		req, e := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
-		if e != nil {
-			return Result{}, &ConnectorError{KindOther, e.Error()}
+	if a.Handler != "" {
+		h, ok := handlers[a.Handler]
+		if !ok {
+			return Result{}, &ConnectorError{KindOther, fmt.Sprintf("action %q names unknown handler %q", actionName, a.Handler)}
 		}
-		if contentType != "" {
-			req.Header.Set("Content-Type", contentType)
-		}
-		for hk, hv := range staticHeaders {
-			// Header values are TEMPLATED, not literal: Google Ads carries its
-			// developer token and manager id as headers sourced from the connection.
-			// Copying verbatim would send the literal "{{conn.developer_token}}" and
-			// 401 on every call.
-			v := subst(hv, nil, conn.Extra)
-			// Drop empties, mirroring the query renderer: an optional header sent as
-			// "" is not the same as absent — Google Ads rejects a blank
-			// login-customer-id, which most accounts do not have.
-			if v == "" {
-				continue
-			}
-			req.Header.Set(hk, v)
-		}
-		// Per-action headers, applied after the provider-wide ones so an action
-		// can override its provider. Same templating and same drop-if-empty rule.
-		for hk, hv := range a.Request.Headers {
-			v := subst(hv, args, conn.Extra)
-			if v == "" {
-				continue
-			}
-			req.Header.Set(hk, v)
-		}
-		// Auth goes on LAST, after Content-Type and every static header. It used
-		// to run first, which is fine for a scheme that only adds a header or a
-		// query parameter — but SigV4 signs the request it is given, and a
-		// Content-Type or x-amz-* header added afterwards would be either
-		// unsigned or signed-but-absent. No provider sets Authorization through
-		// static_headers, so nothing is clobbered by the reorder.
-		if err := applyAuth(req, prov, token, conn.Extra, body); err != nil {
+		data, err := h(ctx, &handlerCall{snd: snd}, args)
+		if err != nil {
 			return Result{}, err
 		}
-		resp, e := client.Do(req)
-		if e != nil {
-			if attempt == 0 {
-				time.Sleep(300 * time.Millisecond)
-				continue
-			}
-			return Result{}, &ConnectorError{KindNetwork, e.Error()}
-		}
-		raw, _ = io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		resp.Body.Close()
-		status = resp.StatusCode
-		if (status == 429 || status >= 500) && attempt == 0 {
-			time.Sleep(400 * time.Millisecond)
-			continue
-		}
-		break
+		return Result{Data: data}, nil
+	}
+
+	method, u, body, contentType, err := renderRequest(a, args, conn.Extra)
+	if err != nil {
+		return Result{}, &ConnectorError{KindOther, err.Error()}
+	}
+	raw, status, err := snd.do(ctx, method, u, body, contentType, 4<<20)
+	if err != nil {
+		return Result{}, err
 	}
 
 	if status >= 400 {
@@ -262,6 +222,12 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 			"%s returned a non-JSON response, which this connector layer cannot carry: %s",
 			conn.Provider, truncate(strings.TrimSpace(string(raw)), 200))}
 	}
+	if a.ExpectChange != "" && !changedSomething(a.ExpectChange, raw) {
+		return Result{}, &ConnectorError{KindOther, fmt.Sprintf(
+			"nothing changed: %s matched no text, so the document was NOT modified. "+
+				"Read it again and use the exact text as it appears (spacing, punctuation and case matter).",
+			actionName)}
+	}
 	data := extract(a.ResponseExtract, raw)
 	if a.ResponseFilter.Field != "" {
 		data = applyResponseFilter(data, a.ResponseFilter, asString(args[a.ResponseFilter.PrefixArg]))
@@ -277,6 +243,103 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		return Result{Data: wrapped}, nil
 	}
 	return Result{Data: data}, nil
+}
+
+// sender performs one provider request with the connection's auth, the provider's
+// static headers and the action's own headers, with one transient retry. It is the
+// request loop Execute always had, extracted so a handler's several calls go out
+// exactly as a template action's one call would.
+type sender struct {
+	client        *http.Client
+	prov          Provider
+	token         string
+	conn          ConnRef
+	staticHeaders map[string]string
+	actionHeaders map[string]string
+	args          map[string]any
+}
+
+// do sends the request and returns the body (read up to limit bytes) and status. A
+// transport failure after the retry is a KindNetwork error; an HTTP error status is
+// returned as-is for the caller to map, because Execute and handlers treat a 4xx
+// differently (a handler may expect one, e.g. a revision conflict).
+func (s *sender) do(ctx context.Context, method, u string, body []byte, contentType string, limit int64) ([]byte, int, error) {
+	var raw []byte
+	var status int
+	for attempt := 0; attempt < 2; attempt++ {
+		req, e := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
+		if e != nil {
+			return nil, 0, &ConnectorError{KindOther, e.Error()}
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		for hk, hv := range s.staticHeaders {
+			// Header values are TEMPLATED, not literal: Google Ads carries its
+			// developer token and manager id as headers sourced from the connection.
+			// Copying verbatim would send the literal "{{conn.developer_token}}" and
+			// 401 on every call.
+			v := subst(hv, nil, s.conn.Extra)
+			// Drop empties, mirroring the query renderer: an optional header sent as
+			// "" is not the same as absent — Google Ads rejects a blank
+			// login-customer-id, which most accounts do not have.
+			if v == "" {
+				continue
+			}
+			req.Header.Set(hk, v)
+		}
+		// Per-action headers, applied after the provider-wide ones so an action
+		// can override its provider. Same templating and same drop-if-empty rule.
+		for hk, hv := range s.actionHeaders {
+			v := subst(hv, s.args, s.conn.Extra)
+			if v == "" {
+				continue
+			}
+			req.Header.Set(hk, v)
+		}
+		// Auth goes on LAST, after Content-Type and every static header. It used
+		// to run first, which is fine for a scheme that only adds a header or a
+		// query parameter — but SigV4 signs the request it is given, and a
+		// Content-Type or x-amz-* header added afterwards would be either
+		// unsigned or signed-but-absent. No provider sets Authorization through
+		// static_headers, so nothing is clobbered by the reorder.
+		if err := applyAuth(req, s.prov, s.token, s.conn.Extra, body); err != nil {
+			return nil, 0, err
+		}
+		resp, e := s.client.Do(req)
+		if e != nil {
+			if attempt == 0 {
+				time.Sleep(300 * time.Millisecond)
+				continue
+			}
+			return nil, 0, &ConnectorError{KindNetwork, e.Error()}
+		}
+		raw, _ = io.ReadAll(io.LimitReader(resp.Body, limit))
+		resp.Body.Close()
+		status = resp.StatusCode
+		if (status == 429 || status >= 500) && attempt == 0 {
+			time.Sleep(400 * time.Millisecond)
+			continue
+		}
+		break
+	}
+	return raw, status, nil
+}
+
+// changedSomething reports whether the count at path is a positive number. An absent
+// path counts as zero — that is how the provider spells it, not a parse failure.
+func changedSomething(path string, raw []byte) bool {
+	v, ok := extractOK(path, raw)
+	if !ok {
+		return false
+	}
+	var n float64
+	if json.Unmarshal(v, &n) != nil {
+		// A count we cannot read is not evidence of nothing; fail open rather than
+		// report a real write as a no-op.
+		return true
+	}
+	return n > 0
 }
 
 // paginatedResult is the envelope an action carrying a live next-page cursor returns.
@@ -411,6 +474,19 @@ func extractOK(path string, raw []byte) (json.RawMessage, bool) {
 	for _, seg := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
 		if seg == "" {
 			return raw, false
+		}
+		// A numeric segment indexes an array — "$.replies.0.x". Tried only when
+		// the current value IS an array, so an object with a key named "0" still
+		// resolves as a key.
+		if n, err := strconv.Atoi(seg); err == nil {
+			var arr []json.RawMessage
+			if json.Unmarshal(cur, &arr) == nil {
+				if n < 0 || n >= len(arr) {
+					return raw, false
+				}
+				cur = arr[n]
+				continue
+			}
 		}
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal(cur, &m); err != nil {

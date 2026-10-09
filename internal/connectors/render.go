@@ -124,18 +124,39 @@ func renderBody(node any, args map[string]any, connVars map[string]string) (any,
 type bodyBuilder func(args map[string]any) (body []byte, contentType string, err error)
 
 var bodyBuilders = map[string]bodyBuilder{
-	"gmail_rfc822":     gmailRFC822,
-	"gmail_draft":      gmailDraft,
-	"gmail_reply":      gmailReply,
-	"notion_page":      notionPage,
-	"msgraph_sendmail": msgraphSendMail,
-	"msgraph_draft":    msgraphDraft,
-	"onenote_page":     onenotePage,
-	"jira_issue":       jiraIssue,
-	"jira_comment":     jiraComment,
-	"drive_folder":     driveFolder,
-	"ga4_report":       ga4Report,
-	"ga4_realtime":     ga4Realtime,
+	"gmail_rfc822":        gmailRFC822,
+	"gmail_draft":         gmailDraft,
+	"gmail_reply":         gmailReply,
+	"notion_page":         notionPage,
+	"msgraph_sendmail":    msgraphSendMail,
+	"msgraph_draft":       msgraphDraft,
+	"onenote_page":        onenotePage,
+	"jira_issue":          jiraIssue,
+	"jira_comment":        jiraComment,
+	"drive_folder":        driveFolder,
+	"ga4_report":          ga4Report,
+	"ga4_realtime":        ga4Realtime,
+	"sheets_find_replace": sheetsFindReplace,
+}
+
+// sheetsFindReplace builds a findReplace request scoped to one sheet when sheet_id is
+// given and to every sheet otherwise. The API demands exactly one of the two; a body
+// template can drop an absent sheetId but cannot add allSheets in its place.
+func sheetsFindReplace(args map[string]any) ([]byte, string, error) {
+	fr := map[string]any{
+		"find":        asString(args["find"]),
+		"replacement": asString(args["replacement"]),
+	}
+	if mc, ok := args["match_case"].(bool); ok {
+		fr["matchCase"] = mc
+	}
+	if id, ok := args["sheet_id"]; ok && id != nil {
+		fr["sheetId"] = id
+	} else {
+		fr["allSheets"] = true
+	}
+	b, err := json.Marshal(map[string]any{"requests": []any{map[string]any{"findReplace": fr}}})
+	return b, "application/json", err
 }
 
 // ga4Names turns a comma-separated metric/dimension list into GA4's [{"name": "..."}]

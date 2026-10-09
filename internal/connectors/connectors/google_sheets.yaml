@@ -323,14 +323,12 @@ actions:
     request:
       method: POST
       url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
-      body:
-        requests:
-          - findReplace:
-              find: "{{find}}"
-              replacement: "{{replacement}}"
-              matchCase: "{{match_case}}"
-              sheetId: "{{sheet_id}}"
+      # A builder, not a template: the API requires exactly one of sheetId or
+      # allSheets, and a template can omit sheetId but cannot then add allSheets —
+      # so "omit to search every sheet" was a request Google rejected.
+      body_builder: sheets_find_replace
     response_extract: "$.replies"
+    expect_change: "$.replies.0.findReplace.occurrencesChanged"
   - name: sheets_auto_resize_columns
     description: "Resize columns to fit their contents, so a generated sheet is readable without manual widening. start_index is 0-based (A=0), end_index EXCLUSIVE."
     mutating: false
