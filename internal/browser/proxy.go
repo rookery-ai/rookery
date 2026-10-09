@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/logsafe"
 	"github.com/rookery-ai/rookery/internal/nethttp"
 )
 
@@ -96,7 +97,10 @@ func (p *guardedProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	upstream, err := p.dial(addr)
 	if err != nil {
 		p.note(addr)
-		slog.Debug("browser proxy refused CONNECT", "addr", addr, "err", err)
+		// addr comes from the page's request and a dial error quotes it, so
+		// both are sanitised.
+		slog.Debug("browser proxy refused CONNECT",
+			"addr", logsafe.Value(addr), "err", logsafe.Value(err.Error()))
 		http.Error(w, "blocked", http.StatusForbidden)
 		return
 	}
@@ -136,7 +140,8 @@ func (p *guardedProxy) handlePlain(w http.ResponseWriter, r *http.Request) {
 	conn, err := p.dial(addr)
 	if err != nil {
 		p.note(addr)
-		slog.Debug("browser proxy refused request", "addr", addr, "err", err)
+		slog.Debug("browser proxy refused request",
+			"addr", logsafe.Value(addr), "err", logsafe.Value(err.Error()))
 		http.Error(w, "blocked", http.StatusForbidden)
 		return
 	}
