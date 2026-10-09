@@ -1,0 +1,209 @@
+provider: deel
+# Deel's REST API answers {"data": …, "page": …}; every action extracts $.data so the
+# model gets the records rather than the envelope. Write bodies are wrapped in a
+# {"data": {…}} object the same way.
+#
+# Two writes move a real person's PAY — an invoice adjustment adds a bonus,
+# commission or deduction to a contractor's invoice, and approving a timesheet makes
+# its hours payable. Both are public_write, not merely mutating, for the reason
+# wise.yaml records: an agent that can change what someone is paid is a different
+# risk class from one that reads, and belongs behind the approval gate.
+#
+# The production base URL is below; Deel's sandbox is api-staging.letsdeel.com/rest
+# with a sandbox token, should a test install ever need it.
+actions:
+  - name: deel_list_contracts
+    description: "List the organization's contracts (contractors, EOR and direct employees), newest first. search matches the contract or worker name. Paged — pass next_cursor back as after_cursor. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search:       {type: string, description: "contract title or worker name contains this"}
+        limit:        {type: integer, description: "page size (default 50)"}
+        after_cursor: {type: string, description: "next_cursor from the previous page"}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/contracts"
+      query:
+        search: "{{search}}"
+        limit: "{{limit}}"
+        after_cursor: "{{after_cursor}}"
+    response_extract: "$.data"
+    response_cursor: "$.page.cursor"
+  - name: deel_get_contract
+    description: "Fetch one contract by id: worker, type, status, compensation and dates. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        contract_id: {type: string, description: "contract id from deel_list_contracts, e.g. 37nex2x"}
+      required: [contract_id]
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/contracts/{{contract_id|escape}}"
+    response_extract: "$.data"
+  - name: deel_list_people
+    description: "List people in the organization (the HR directory: name, email, job title, department, hiring status). search matches names. Page with offset. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search: {type: string, description: "name contains this"}
+        limit:  {type: integer, description: "page size"}
+        offset: {type: integer, description: "how many to skip — raise it to page"}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/people"
+      query:
+        search: "{{search}}"
+        limit: "{{limit}}"
+        offset: "{{offset}}"
+    response_extract: "$.data"
+  - name: deel_get_person
+    description: "Fetch one person's full profile by their id (from deel_list_people). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        person_id: {type: string, description: "the person's id (hris_profile_id) from deel_list_people"}
+      required: [person_id]
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/people/{{person_id|escape}}"
+    response_extract: "$.data"
+  - name: deel_list_timesheets
+    description: "List submitted timesheet entries, optionally for one contract and a date window (date_to is exclusive). Each entry carries its status (pending, approved, declined…) and id. Page with offset. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        contract_id: {type: string}
+        date_from:   {type: string, description: "YYYY-MM-DD, inclusive"}
+        date_to:     {type: string, description: "YYYY-MM-DD, exclusive"}
+        limit:       {type: integer}
+        offset:      {type: integer}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/timesheets"
+      query:
+        contract_id: "{{contract_id}}"
+        date_from: "{{date_from}}"
+        date_to: "{{date_to}}"
+        limit: "{{limit}}"
+        offset: "{{offset}}"
+    response_extract: "$.data"
+  - name: deel_list_invoice_adjustments
+    description: "List invoice adjustments (bonuses, commissions, deductions, expenses, overtime…), optionally for one contract and a date window (date_to is exclusive). Page with offset. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        contract_id: {type: string}
+        date_from:   {type: string, description: "YYYY-MM-DD, inclusive"}
+        date_to:     {type: string, description: "YYYY-MM-DD, exclusive"}
+        limit:       {type: integer}
+        offset:      {type: integer}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/invoice-adjustments"
+      query:
+        contract_id: "{{contract_id}}"
+        date_from: "{{date_from}}"
+        date_to: "{{date_to}}"
+        limit: "{{limit}}"
+        offset: "{{offset}}"
+    response_extract: "$.data"
+  - name: deel_list_legal_entities
+    description: "List the organization's legal entities (the companies contracts are issued under). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/legal-entities"
+    response_extract: "$.data"
+  - name: deel_list_countries
+    description: "List the countries Deel supports, with their codes. Use to resolve a country name to the code other calls expect. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/lookups/countries"
+    response_extract: "$.data"
+  - name: deel_list_currencies
+    description: "List the currencies Deel supports, with their codes. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.letsdeel.com/rest/lookups/currencies"
+    response_extract: "$.data"
+  - name: deel_create_timesheet
+    description: "Log work on a contract: quantity (usually hours) on a date, with a description that appears on the invoice. The entry is created PENDING approval. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        contract_id:    {type: string}
+        quantity:       {type: number, description: "work units, usually hours, e.g. 7.5"}
+        description:    {type: string, description: "what was done — shown on the invoice"}
+        date_submitted: {type: string, description: "the day the work was done, YYYY-MM-DD"}
+      required: [contract_id, quantity, description, date_submitted]
+    request:
+      method: POST
+      url: "https://api.letsdeel.com/rest/timesheets"
+      body:
+        data:
+          contract_id: "{{contract_id}}"
+          quantity: "{{quantity}}"
+          description: "{{description}}"
+          date_submitted: "{{date_submitted}}"
+    response_extract: "$.data"
+  - name: deel_review_timesheet
+    description: "Approve or decline a pending timesheet entry. Approving makes the hours PAYABLE to the worker, so confirm with the owner first. status is approved or declined; give a reason when declining."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        timesheet_id: {type: string, description: "id from deel_list_timesheets"}
+        status:       {type: string, enum: [approved, declined]}
+        reason:       {type: string, description: "why — expected when declining"}
+      required: [timesheet_id, status]
+    request:
+      method: POST
+      url: "https://api.letsdeel.com/rest/timesheets/{{timesheet_id|escape}}/reviews"
+      body:
+        data:
+          status: "{{status}}"
+          reason: "{{reason}}"
+    response_extract: "$.data"
+  - name: deel_create_invoice_adjustment
+    description: "Add a bonus, commission, deduction, expense, overtime or other line to a contract's next invoice — this changes what a real person is PAID, so confirm the amount and contract with the owner first. amount is in the contract's currency."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        contract_id:    {type: string}
+        type:           {type: string, enum: [bonus, commission, deduction, expense, other, overtime, time_off, vat]}
+        amount:         {type: number, description: "in the contract's currency, e.g. 500"}
+        description:    {type: string, description: "shown on the invoice"}
+        date_submitted: {type: string, description: "YYYY-MM-DD"}
+      required: [contract_id, type, amount, description, date_submitted]
+    request:
+      method: POST
+      url: "https://api.letsdeel.com/rest/invoice-adjustments"
+      body:
+        data:
+          contract_id: "{{contract_id}}"
+          type: "{{type}}"
+          amount: "{{amount}}"
+          description: "{{description}}"
+          date_submitted: "{{date_submitted}}"
+    response_extract: "$.data"

@@ -1,0 +1,24 @@
+name: deel
+label: Deel
+category: Finance
+# Not yet confirmed against the live API with cmd/livecheck — no Deel credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Deel organization API token"
+  key_hint: "from Deel → More → Developer → Access Tokens"
+  setup_url: https://app.deel.com/developer-center
+# Deel versions its API by header. Pinned so a later Deel default cannot change a
+# response shape under an agent that already parses it; an omitted header routes to
+# whatever Deel currently calls stable.
+static_headers:
+  X-Version: "2026-01-01"
+setup_steps:
+  - "In Deel open More → Developer, then the Access Tokens tab."
+  - "Generate an ORGANIZATION token (a personal token only sees your own records)."
+  - "Grant the scopes for what agents should do: contracts, people, timesheets and invoice adjustments (read, plus write if they will log hours or add bonuses)."
+  - "Copy the token immediately — Deel shows it once — and paste it below."
