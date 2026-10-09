@@ -32,6 +32,15 @@ const maxLoggedValue = 256
 // value, rather than silently losing the evidence that something odd was
 // passed.
 func Value(s string) string {
+	// Behaviourally redundant — the loop below maps both to a space anyway —
+	// and load-bearing all the same. CodeQL's go/log-injection query models
+	// strings.ReplaceAll of a literal "\n"/"\r" as a sanitiser and does not
+	// model the loop, so without these two lines it tracks taint straight
+	// through Value and flags every caller. TestValueUsesASanitiserCodeQLRecognises
+	// pins them.
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {

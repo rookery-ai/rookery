@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rookery-ai/rookery/internal/logsafe"
 )
 
 // urlPattern finds http(s) URLs the user has typed into the design conversation.
@@ -106,7 +108,11 @@ func probeSite(ctx context.Context, r Renderer, rawURL string) string {
 
 	res, err := r.Render(pctx, Request{URL: rawURL, WaitFor: "networkidle", Limit: 400})
 	if err != nil {
-		slog.Debug("designer feasibility probe failed", "url", rawURL, "err", err)
+		// rawURL is whatever the user typed into the design conversation, and a
+		// render error routinely quotes the URL it failed on — so both go
+		// through logsafe, not just the field that obviously carries it.
+		slog.Debug("designer feasibility probe failed",
+			"url", logsafe.Value(rawURL), "err", logsafe.Value(err.Error()))
 		return fmt.Sprintf("- %s — could not be opened (%s). It may be down, or unreachable from this server.\n",
 			rawURL, shortErr(err))
 	}

@@ -1,9 +1,32 @@
 package logsafe
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+// CodeQL's go/log-injection query recognises exactly one sanitiser shape that
+// fits here: strings.ReplaceAll (or Replace with n<0) of a literal "\n" or "\r".
+// It does NOT model Value's rune loop, so without these two calls it tracked
+// taint straight through Value and flagged every call site that used it
+// (alerts #69–#73). The calls are behaviourally redundant beside the loop,
+// which is exactly why a tidy-up would delete them — and nothing but this test
+// would notice.
+func TestValueUsesASanitiserCodeQLRecognises(t *testing.T) {
+	src, err := os.ReadFile("logsafe.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`strings.ReplaceAll(s, "\r", " ")`,
+		`strings.ReplaceAll(s, "\n", " ")`,
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("logsafe.go no longer contains %s — CodeQL will stop treating Value as a log-injection sanitiser", want)
+		}
+	}
+}
 
 // The whole point: a value carrying a newline must not be able to fabricate a
 // log entry that reads like the server's own.
