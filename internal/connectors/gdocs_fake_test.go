@@ -176,13 +176,13 @@ func (f *fakeDocs) apply(reqs []map[string]json.RawMessage) error {
 		for kind, raw := range r {
 			var v struct {
 				Location struct{ Index int } `json:"location"`
-				Text     string             `json:"text"`
+				Text     string              `json:"text"`
 				Range    struct {
 					StartIndex, EndIndex int
 				} `json:"range"`
 				ParagraphStyle struct{ NamedStyleType string } `json:"paragraphStyle"`
-				TextStyle      map[string]json.RawMessage   `json:"textStyle"`
-				Fields         string                       `json:"fields"`
+				TextStyle      map[string]json.RawMessage      `json:"textStyle"`
+				Fields         string                          `json:"fields"`
 				ContainsText   struct {
 					Text      string
 					MatchCase bool

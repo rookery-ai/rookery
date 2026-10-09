@@ -26,7 +26,9 @@ actions:
     request:
       method: POST
       url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}:append"
-      query: {valueInputOption: "USER_ENTERED"}
+      # includeValuesInResponse echoes the cells as written, so the result shows what
+      # landed where instead of a bare count the model cannot check against its intent.
+      query: {valueInputOption: "USER_ENTERED", includeValuesInResponse: "true"}
       body:
         values: "{{values}}"
     response_extract: "$"
@@ -43,7 +45,9 @@ actions:
     request:
       method: PUT
       url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}"
-      query: {valueInputOption: "USER_ENTERED"}
+      # includeValuesInResponse echoes the cells as written, so the result shows what
+      # landed where instead of a bare count the model cannot check against its intent.
+      query: {valueInputOption: "USER_ENTERED", includeValuesInResponse: "true"}
       body:
         values: "{{values}}"
     response_extract: "$"

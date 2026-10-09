@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"mime"
 	"net/url"
 	"regexp"
 	"strings"
@@ -262,8 +263,14 @@ func msgraphMessage(args map[string]any) map[string]any {
 		"subject": asString(args["subject"]),
 		"body":    map[string]string{"contentType": "Text", "content": asString(args["body"])},
 	}
-	if to := asString(args["to"]); to != "" {
-		msg["toRecipients"] = []any{map[string]any{"emailAddress": map[string]string{"address": to}}}
+	for _, f := range []struct{ field, arg string }{{"toRecipients", "to"}, {"ccRecipients", "cc"}, {"bccRecipients", "bcc"}} {
+		if rs := splitRecipients(args[f.arg]); len(rs) > 0 {
+			list := make([]any, 0, len(rs))
+			for _, a := range rs {
+				list = append(list, map[string]any{"emailAddress": map[string]string{"address": a}})
+			}
+			msg[f.field] = list
+		}
 	}
 	return msg
 }
@@ -297,6 +304,18 @@ func onenotePage(args map[string]any) ([]byte, string, error) {
 	doc := "<!DOCTYPE html><html><head><title>" + html.EscapeString(title) +
 		"</title></head><body>" + content + "</body></html>"
 	return []byte(doc), "text/html", nil
+}
+
+// onenoteAppend builds the PATCH a OneNote page update takes: a JSON ARRAY of change
+// commands, here one append to the page body. Content follows onenotePage's rule —
+// text without markup is escaped into a paragraph. Args: content.
+func onenoteAppend(args map[string]any) ([]byte, string, error) {
+	content := asString(args["content"])
+	if !strings.Contains(content, "<") {
+		content = "<p>" + html.EscapeString(content) + "</p>"
+	}
+	b, err := json.Marshal([]map[string]string{{"target": "body", "action": "append", "content": content}})
+	return b, "application/json", err
 }
 
 // notionPage builds a minimal valid Notion "create page" payload under a page parent:
@@ -395,13 +414,50 @@ func renderRequest(a Action, args map[string]any, connVars map[string]string) (m
 	return method, u, body, contentType, err
 }
 
+// splitRecipients turns what a model passes as "to" — one address, a comma- or
+// semicolon-separated list, or a JSON array — into individual addresses. Graph needs
+// one emailAddress object per recipient; handing it "a@x.com, b@y.com" as a single
+// address is rejected or misdelivered.
+func splitRecipients(v any) []string {
+	var parts []string
+	switch t := v.(type) {
+	case []any:
+		for _, e := range t {
+			parts = append(parts, asString(e))
+		}
+	default:
+		parts = strings.FieldsFunc(asString(v), func(r rune) bool { return r == ',' || r == ';' || r == '\n' })
+	}
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// headerSafe strips CR/LF so an argument cannot inject an extra header (a Bcc the
+// owner never asked for) into the message.
+func headerSafe(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
 func rfc822(args map[string]any) string {
 	var b strings.Builder
-	b.WriteString("To: " + asString(args["to"]) + "\r\n")
-	if s := asString(args["subject"]); s != "" {
-		b.WriteString("Subject: " + s + "\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	for _, h := range []struct{ name, arg string }{{"To", "to"}, {"Cc", "cc"}, {"Bcc", "bcc"}} {
+		if rs := splitRecipients(args[h.arg]); len(rs) > 0 {
+			b.WriteString(h.name + ": " + headerSafe(strings.Join(rs, ", ")) + "\r\n")
+		}
 	}
-	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+	if s := asString(args["subject"]); s != "" {
+		// RFC 5322 headers are ASCII; a Cyrillic or accented subject must travel as
+		// an RFC 2047 encoded-word. QEncoding leaves a plain-ASCII subject untouched.
+		b.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", headerSafe(s)) + "\r\n")
+	}
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
 	b.WriteString(asString(args["body"]))
 	return b.String()
 }

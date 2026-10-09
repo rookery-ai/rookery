@@ -48,7 +48,9 @@ actions:
     params:
       type: object
       properties:
-        to:      {type: string}
+        to:      {type: string, description: "one or more addresses, comma-separated"}
+        cc:      {type: string, description: "optional, comma-separated"}
+        bcc:     {type: string, description: "optional, comma-separated"}
         subject: {type: string}
         body:    {type: string}
       required: [to, body]
@@ -63,7 +65,9 @@ actions:
     params:
       type: object
       properties:
-        to:      {type: string}
+        to:      {type: string, description: "one or more addresses, comma-separated"}
+        cc:      {type: string, description: "optional, comma-separated"}
+        bcc:     {type: string, description: "optional, comma-separated"}
         subject: {type: string}
         body:    {type: string}
       required: [to, body]

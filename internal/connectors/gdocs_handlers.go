@@ -380,9 +380,11 @@ func docsInsertText(ctx context.Context, hc *handlerCall, args map[string]any) (
 			}
 			ls := []mdLine{{text: text}}
 			if f := strings.ToLower(argString(args, "format")); f == "" || f == "markdown" || f == "md" {
-				if parsed := parseMarkdown(text); len(parsed) == 1 {
-					ls = parsed
-					ls[0].style, ls[0].list = "", ""
+				// Inline text gets **bold** and links only. A leading "- " or "# "
+				// inside a sentence is literal, not a list or a heading.
+				if !strings.Contains(text, "\n") {
+					t, bold, links := parseInline(text)
+					ls = []mdLine{{text: t, bold: bold, links: links}}
 				}
 			}
 			at := m.End

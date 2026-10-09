@@ -410,3 +410,12 @@ func TestNormStyle(t *testing.T) {
 		}
 	}
 }
+
+func TestInlineInsertKeepsLeadingMarkersLiteral(t *testing.T) {
+	f := newFakeDocs("Score:")
+	_, err := runDocs(t, f, "docs_insert_text", map[string]any{"anchor_text": "Score:", "text": " - 3 **points**", "position": "after_text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustParas(t, f, "Score: - 3 points")
+}

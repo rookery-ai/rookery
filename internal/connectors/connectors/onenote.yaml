@@ -89,6 +89,21 @@ actions:
       url: "https://graph.microsoft.com/v1.0/me/onenote/sections/{{section_id}}/pages"
       body_builder: onenote_page
     response_extract: "$"
+  - name: onenote_append_to_page
+    description: "Add content to the END of an existing OneNote page. content is HTML (plain text is wrapped in a paragraph). Use onenote_list_section_pages to find the page id. Mutating — it edits the page."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        page_id: {type: string, description: "the page to add to"}
+        content: {type: string, description: "HTML or plain text to append, e.g. '<p>Follow-up: call Sam</p>'"}
+      required: [page_id, content]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/onenote/pages/{{page_id}}/content"
+      body_builder: onenote_append
+    response_extract: "$"
   - name: onenote_create_section
     description: "Create a new section inside a OneNote notebook. Safe write — it starts empty."
     mutating: false

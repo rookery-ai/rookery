@@ -607,26 +607,7 @@ func parseMarkdown(text string) []mdLine {
 			l.list = "number"
 			body = m[1]
 		}
-		var b strings.Builder
-		last := 0
-		for _, loc := range mdInlineRE.FindAllStringSubmatchIndex(body, -1) {
-			b.WriteString(body[last:loc[0]])
-			start := utf16LenString(b.String())
-			switch {
-			case loc[2] >= 0:
-				b.WriteString(body[loc[2]:loc[3]])
-				l.bold = append(l.bold, [2]int{start, utf16LenString(b.String())})
-			case loc[4] >= 0:
-				b.WriteString(body[loc[4]:loc[5]])
-				l.bold = append(l.bold, [2]int{start, utf16LenString(b.String())})
-			default:
-				b.WriteString(body[loc[6]:loc[7]])
-				l.links = append(l.links, mdLink{start, utf16LenString(b.String()), body[loc[8]:loc[9]]})
-			}
-			last = loc[1]
-		}
-		b.WriteString(body[last:])
-		l.text = b.String()
+		l.text, l.bold, l.links = parseInline(body)
 		out = append(out, l)
 		off += utf16LenString(l.text) + 1
 	}
@@ -635,6 +616,33 @@ func parseMarkdown(text string) []mdLine {
 		out = out[:len(out)-1]
 	}
 	return out
+}
+
+// parseInline applies the inline subset — **bold**, __bold__ and [text](https://…) —
+// to one line, returning the plain text and the styled spans in UTF-16 offsets.
+func parseInline(body string) (string, [][2]int, []mdLink) {
+	var bold [][2]int
+	var links []mdLink
+	var b strings.Builder
+	last := 0
+	for _, loc := range mdInlineRE.FindAllStringSubmatchIndex(body, -1) {
+		b.WriteString(body[last:loc[0]])
+		start := utf16LenString(b.String())
+		switch {
+		case loc[2] >= 0:
+			b.WriteString(body[loc[2]:loc[3]])
+			bold = append(bold, [2]int{start, utf16LenString(b.String())})
+		case loc[4] >= 0:
+			b.WriteString(body[loc[4]:loc[5]])
+			bold = append(bold, [2]int{start, utf16LenString(b.String())})
+		default:
+			b.WriteString(body[loc[6]:loc[7]])
+			links = append(links, mdLink{start, utf16LenString(b.String()), body[loc[8]:loc[9]]})
+		}
+		last = loc[1]
+	}
+	b.WriteString(body[last:])
+	return b.String(), bold, links
 }
 
 func plainLines(text string, style string) []mdLine {
