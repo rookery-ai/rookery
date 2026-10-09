@@ -465,6 +465,10 @@ oura|https://ouraring.com/assets/icons/apple-touch-icon.png
 open_meteo|https://open-meteo.com/apple-touch-icon.png
 linkwarden|https://linkwarden.app/apple-touch-icon.png
 openfoodfacts|https://world.openfoodfacts.org/images/favicon/off/apple-touch-icon.png
+# Deel: worldvectorlogo carries only the wide "deel." wordmark, which shrinks to an
+# unreadable sliver on a square tile; their own apple-touch-icon is the square "d." mark.
+# The cache-buster query is part of the URL their page links.
+deel|https://www.deel.com/apple-icon.png?d2b410d8d6714d15
 # Readwise: readwise.io/favicon.ico and every /static/ path 403 behind their CDN
 # challenge, which is why this was exempted rather than vendored. Their home page
 # serves 200 to a browser UA and links this apple-touch-icon on a CDN host that
