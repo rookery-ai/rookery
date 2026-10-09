@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/rookery-ai/rookery/compare/v0.17.0...v0.17.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **logging:** make logsafe.Value a sanitiser CodeQL recognises ([#344](https://github.com/rookery-ai/rookery/issues/344)) ([245139e](https://github.com/rookery-ai/rookery/commit/245139e27d7e7b772bac6f6b81201ba05024d8be))
+
 ## [0.17.0](https://github.com/rookery-ai/rookery/compare/v0.16.3...v0.17.0) (2026-10-09)
 
 
