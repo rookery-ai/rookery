@@ -17,7 +17,7 @@ require (
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	gopkg.in/telebot.v4 v4.0.0-beta.9
 	gopkg.in/yaml.v3 v3.0.1
