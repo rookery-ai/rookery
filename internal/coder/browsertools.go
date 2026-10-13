@@ -144,6 +144,7 @@ func (h *hostToolSet) execBrowserAct(ctx context.Context, req browser.ActRequest
 	if err != nil {
 		return browserErrorResult(err)
 	}
+	h.rememberRefs(res.Elements)
 	return renderBrowserResult(res, true)
 }
 
@@ -222,6 +223,7 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 		if err != nil {
 			return browserErrorResult(err)
 		}
+		h.rememberRefs(res.Elements)
 		return renderBrowserResult(res, true)
 
 	case "browser_page":
