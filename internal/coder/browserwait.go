@@ -57,6 +57,7 @@ func (h *hostToolSet) execBrowserWait(ctx context.Context, session string, a bro
 			"\nThe page has not changed. Do not simply wait again — tell the user what did not happen, " +
 			"or read the page to see where it actually got to."
 	}
+	h.rememberRefs(res.Elements)
 	return renderBrowserResult(res, true) + notified
 }
 

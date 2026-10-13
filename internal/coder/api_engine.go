@@ -290,7 +290,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		productiveBefore := tools.callStats().Productive
 		for _, tc := range resp.ToolCalls {
 			if c.progress != nil {
-				c.progress(toolMilestone(tc, tools.vaultRootPath(), tools.homeDirPath()))
+				m := tools.browserMilestone(tc)
+				if m == "" {
+					m = toolMilestone(tc, tools.vaultRootPath(), tools.homeDirPath())
+				}
+				c.progress(m)
 			}
 			result := tools.executeOrNudge(ctx, tc)
 			// Record the call and the SIZE it fed back. This is the trace that

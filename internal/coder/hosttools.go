@@ -46,6 +46,11 @@ const noStdoutSentinel = "(no stdout; stderr)"
 // paths are relative to the agent working directory, matching the CLI coder's CWD
 // convention so existing AGENT.md instructions work unchanged.
 type hostToolSet struct {
+	// refNames maps the element refs of the most recent browser listing to their
+	// accessible names, so a run's step list can name what was clicked or filled
+	// (browserMilestone). Replaced wholesale on each listing: refs are per-page.
+	refNames map[string]string
+
 	workspaceID   string
 	vlt           *vault.Vault
 	workDir       string            // agent dir (runs) or vault root (chat); CWD for run_script
