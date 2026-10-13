@@ -156,6 +156,16 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				req.Tools = nil
 				continue
 			}
+			// The deadline usually expires DURING this call — it is where the time
+			// goes — so the top-of-loop check never sees it, and the provider's
+			// "context deadline exceeded" used to escape as a generic API error: the
+			// designer told the user the provider had dropped the connection and the
+			// timeout retry never ran. Judged on the loop's own context, not on the
+			// error's text, so a caller's Cancel (context.Canceled) stays a cancel and
+			// a provider-side HTTP timeout is not reported as ours.
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
+			}
 			return nil, c.mapProviderErr(err)
 		}
 		total = addUsage(total, resp.Usage)
