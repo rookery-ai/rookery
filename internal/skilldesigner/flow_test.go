@@ -1,6 +1,7 @@
 package skilldesigner
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
@@ -55,5 +56,29 @@ func TestFrontmatterNameExtraction(t *testing.T) {
 	got := skillFrontmatterName(skillMD)
 	if got != "csv-summary" {
 		t.Errorf("got %q, want csv-summary", got)
+	}
+}
+
+// The vetting report is line-oriented; rendered as markdown prose its lines ran
+// together into one bullet ("Red flags: - None Permissions needed: … Verdict: …").
+// It must reach the review card as a preformatted block with every line intact,
+// and a fence the model wrote itself must not close that block early.
+func TestVettingReportIsPresentedAsAPreformattedBlock(t *testing.T) {
+	report := "```\nSKILL VETTING REPORT\nName: pt-expense-rules\nRisk level: 🟢 LOW\nRed flags:\n  - None\nVerdict: ✅ safe to save\n```"
+	got := vettingReportBlock(report)
+	if !strings.HasPrefix(got, "```text\n") || !strings.HasSuffix(got, "\n```") {
+		t.Fatalf("report not fenced: %q", got)
+	}
+	if strings.Count(got, "```") != 2 {
+		t.Fatalf("a model-written fence survived inside the block: %q", got)
+	}
+	for _, line := range []string{"Name: pt-expense-rules\n", "Red flags:\n  - None\n", "Verdict: ✅ safe to save"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("line structure lost, missing %q in %q", line, got)
+		}
+	}
+	// The save gate still reads the same verdict from the raw report.
+	if vettingBlocksSave(report) {
+		t.Error("a safe verdict blocks save")
 	}
 }

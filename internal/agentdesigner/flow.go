@@ -244,6 +244,26 @@ func (f *Flow) buildBoundMCP(ctx context.Context, workspaceID string) []mcp.Boun
 	return f.mcpBoundFor(ctx, workspaceID)
 }
 
+// secretNames lists the workspace's stored secret NAMES for the design prompt.
+// Best-effort: a lookup failure leaves the designer exactly as it was before it
+// knew about stored secrets, which is never worse than refusing the turn.
+func (f *Flow) secretNames(workspaceID string) []string {
+	// An optional capability rather than a dbDesignStore method, so the test
+	// fakes that stand in for the store need not grow one; the real *db.DB has it.
+	lister, ok := f.db.(interface {
+		ListSecretNames(workspaceID string) ([]string, error)
+	})
+	if !ok {
+		return nil
+	}
+	names, err := lister.ListSecretNames(workspaceID)
+	if err != nil {
+		slog.Warn("agentdesigner: list secret names", "workspace_id", workspaceID, "err", err)
+		return nil
+	}
+	return names
+}
+
 // mcpRefs names the workspace's enabled MCP servers for the design prompt, so the
 // designer can declare which ones a plan needs. Without it the designer had never
 // been shown a server name, which made the [TECHNICAL SPEC]'s "MCP servers:" line
@@ -1547,6 +1567,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		Skills:             sess.Skills,
 		Connections:        f.loadConnectionRefs(ctx, workspaceID),
 		MCPServers:         f.mcpRefs(ctx, workspaceID),
+		SecretNames:        f.secretNames(workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
