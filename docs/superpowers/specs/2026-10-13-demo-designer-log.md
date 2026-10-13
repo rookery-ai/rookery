@@ -225,3 +225,42 @@ weak model's habit of falling back to `bash`+`curl`. The demoblaze agent was
 deleted. Kept: Toolshop's refused run (`52738130…`) — logged in via
 placeholders, verified the cart, refused at "Proceed to checkout", nothing
 placed — though its timeline also contains `curl` calls against the shop API.
+
+## Day 1, afternoon — fixes and the hero retry
+
+The owner asked for every finding to be fixed before retrying. Fix PRs:
+
+| Defect | PR | Root cause (verified) |
+|---|---|---|
+| D2 `set_state` empty patch | #346 | An OpenRouter upstream compiles `{"type":"object"}` with no properties as CLOSED, so the decoder could only emit `{}`. Found by capturing a real run through a logging proxy and replaying the request; a standalone probe routed elsewhere and did not reproduce. |
+| D3 no `<select>` support | #347 | `Locator.Fill` rejects a select; `browser_fill` now chooses the matching option. |
+| D4 modal fields invisible | #348 | Not the modal: demoblaze's `<label for>` points at the wrong id, so the inputs had no accessible name and `FilterInteractive` dropped them. Unnamed fields now borrow the preceding visible text. |
+| D1 imported notes read-only | #349 | The provenance line ImportFile writes (`_…_`, unescaped destination) and PDF layout gaps were not editor fixed points; the fidelity corpus now includes real assembled import notes. |
+| Designer polish | #350 | Stale "Building…" title (and, caught in self-review, it must not say "Built" for a failed build), run-on vetting report, untraced skill builds, designer unaware of stored secret names. |
+| D5 timeout reported as "provider dropped the connection" | #356 | The API engine checked its deadline only at the top of a turn; a deadline expiring inside the provider call escaped as a generic API error, classified `canceled`, and skipped the timeout retry. |
+
+Issues filed for model-behaviour findings: #351 (bash+curl fallback, secrets readable via the bash env), #352 (dry-run narration), #353 (matching user skill skipped), #354 (92-call chat thrash, timed-out runs record zero usage, transcript lacks tool results).
+
+**Hero, on a local integration build (main + #346–#349):**
+
+- Toolshop resets its database **every hour on the hour** — the cause of the vanished accounts. Runs must start just after :00.
+- With D3 the agent chose "Portugal" from the country dropdown and filled the
+  billing address from its edited instructions; with D2 its `set_state` calls
+  carried keys.
+- One attempt failed on MY setup error (the `CARD_NUMBER` secret had been
+  overwritten without hyphens for demoblaze); the agent diagnosed the format
+  correctly and placed nothing.
+- One attempt reached "Payment was successful" but its Confirm click did not
+  land (no tool results are recorded anywhere, so the cause is unknown — #354).
+- **Run `27c29641`** placed **INV-2026000008, $39.78**, verified on the shop's
+  invoices page: login, cart, billing address, `${CARD_NUMBER}` / `${CARD_EXPIRY}` /
+  `${CVV}` / `${CARD_HOLDER}`, Check payment, Confirm — all in the browser. Its
+  `bash` calls were read-only product discovery against the shop's public API.
+
+**A5 · Issue to task** — first build ran exactly 30:00 and hit the coder timeout
+(D5 above); rebuilt by approving again.
+
+**Edit with AI** (Q4 goals) — the button auto-sends the selection with no
+instruction, so the model must first ask "what's the edit?"; with the
+instruction it proposed a grouping, asked once more, then rewrote the note into
+three goals with outcomes and dates. Two extra round trips for one edit.
