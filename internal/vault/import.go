@@ -261,11 +261,18 @@ func renderImportedNote(title string, in ImportInput, res convert.Result, origin
 		}
 	}
 	sb.WriteString("---\n\n")
-	fmt.Fprintf(&sb, "# %s\n\n", title)
+	fmt.Fprintf(&sb, "# %s\n\n", convert.EscapeInline(strings.Join(strings.Fields(title), " ")))
 	if len(res.Warnings) > 0 {
-		sb.WriteString("> **Conversion notes:** " + strings.Join(res.Warnings, "; ") + "\n\n")
+		sb.WriteString("> **Conversion notes:** " + convert.EscapeInline(strings.Join(strings.Fields(strings.Join(res.Warnings, "; ")), " ")) + "\n\n")
 	}
-	fmt.Fprintf(&sb, "_Converted from [%s](%s)._\n\n", path.Base(originalRel), originalRel)
+	// The provenance line must be a FIXED POINT of the KB editor, or every imported
+	// note opens read-only (checkFidelity, editor.ts). Three details decide it:
+	// "*" emphasis, because the editor re-serializes "_…_" as "*…*"; an escaped
+	// label, because a filename may hold "[" or "*"; and an escaped destination,
+	// because a raw space ends a CommonMark link destination and turns the whole
+	// line into literal text. internal/vault's TestImportedNoteFidelityCorpus feeds
+	// real notes to the editor check so this cannot drift silently again.
+	fmt.Fprintf(&sb, "*Converted from [%s](%s).*\n\n", convert.EscapeInline(path.Base(originalRel)), convert.EscapeDestination(originalRel))
 	sb.WriteString(res.Markdown)
 	if !strings.HasSuffix(res.Markdown, "\n") {
 		sb.WriteString("\n")

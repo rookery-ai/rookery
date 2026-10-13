@@ -257,3 +257,43 @@ func TestFillChoosesAnOptionInASelect(t *testing.T) {
 		t.Fatalf("a missing option must fail and list the options; got %v", err)
 	}
 }
+
+// End to end: an input whose <label> points at the wrong id is offered under its
+// visible label and can be filled — the demoblaze.com login shape.
+func TestUnlabeledFieldIsOfferedAndFillable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body>
+<form>
+  <label for="log-name">Username:</label>
+  <input type="text" id="loginusername" oninput="document.getElementById('out').textContent='TYPED:'+this.value">
+</form>
+<div id="out">none</div>
+</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+	m := NewManager(buildRookery(t), true, false)
+	defer m.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	const key = "unlabeled-test"
+	res, err := m.Render(ctx, Request{URL: srv.URL, Session: key})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	defer m.CloseSession(ctx, key)
+	var ref string
+	for _, e := range res.Elements {
+		if e.Name == "Username" {
+			ref = e.Ref
+		}
+	}
+	if ref == "" {
+		t.Fatalf("unlabeled field not offered under its visible label: %+v", res.Elements)
+	}
+	res, err = m.Act(ctx, ActRequest{Session: key, Action: ActionFill, Ref: ref, Value: "alex"})
+	if err != nil || !strings.Contains(res.Text, "TYPED:alex") {
+		t.Fatalf("fill on the inferred field: %v / %q", err, res.Text)
+	}
+}

@@ -301,7 +301,11 @@ func paragraphize(text string) string {
 			out = append(out, tabularBlock(rows))
 			continue
 		}
-		out = append(out, escapeLeadingMarker(EscapeInline(strings.Join(kept, " "))))
+		// strings.Fields, not a plain join: -layout keeps the visual gap between
+		// words on a line, which markdown renders as one space and the editor
+		// re-serializes as one space — a note keeping the run is not a fixed point
+		// and opens read-only. Tables were handled above, before the gaps vanish.
+		out = append(out, escapeLeadingMarker(EscapeInline(strings.Join(strings.Fields(strings.Join(kept, " ")), " "))))
 	}
 	return strings.Join(out, "\n\n")
 }

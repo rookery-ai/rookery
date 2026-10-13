@@ -356,7 +356,7 @@ func (f *Flow) stepDescribing(ctx context.Context, workspaceID, description stri
 
 func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	if isApproval(input) {
-		return f.runGeneration(ctx, workspaceID)
+		return f.runGenerationLogged(ctx, workspaceID)
 	}
 	// The user is talking rather than rebuilding, so the failed state is over. Clear the
 	// flag that drives the UI's failure banner — it was previously cleared only inside
@@ -475,6 +475,34 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 }
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
+
+// runGenerationLogged brackets a skill build with the two log lines the agent
+// designer has always written. A skill build used to leave NO trace in the
+// server log — not its start, its duration or whether it reached review — so a
+// slow or failed build could only be diagnosed from the browser. Logged under
+// one build_id so `grep build_id=<id>` reconstructs it. Never the error text: a
+// provider error can echo back the request that produced it.
+func (f *Flow) runGenerationLogged(ctx context.Context, workspaceID string) (string, bool, string, error) {
+	buildID := fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+	f.mu.Lock()
+	skill := ""
+	if sess := f.sessions[workspaceID]; sess != nil {
+		skill = sess.SkillName
+	}
+	f.mu.Unlock()
+	slog.Info("skilldesigner: build start", "build_id", buildID, "workspace_id", workspaceID, "skill", skill)
+	started := time.Now()
+	msg, done, id, err := f.runGeneration(ctx, workspaceID)
+	state := ""
+	f.mu.Lock()
+	if sess := f.sessions[workspaceID]; sess != nil {
+		state = sess.State.String()
+	}
+	f.mu.Unlock()
+	slog.Info("skilldesigner: build finished", "build_id", buildID, "workspace_id", workspaceID,
+		"skill", skill, "dur_s", int(time.Since(started).Seconds()), "state", state, "failed", err != nil)
+	return msg, done, id, err
+}
 
 func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
@@ -702,8 +730,28 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// engine (Result.StopReason), never from the model remembering to emit a marker.
 	return caveatTruncatedBuild(fmt.Sprintf(
 		"Here's the generated skill and how it tested:\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
-		testOut, report,
+		testOut, vettingReportBlock(report),
 	), result.StopReason), false, "", nil
+}
+
+// vettingReportBlock presents the vetter's report as preformatted text.
+//
+// The skill-vetter writes a line-oriented report ("Name: …", "Risk level: …",
+// "Red flags:", "  - None", "Verdict: …") separated by single newlines, and
+// markdown joins consecutive lines into one paragraph — so the review card
+// rendered the whole report as a single run-on line, verdict included. A fence
+// keeps every line where the vetter put it. Fences the model wrote itself are
+// removed first, because a nested ``` would close ours early and spill the rest
+// of the report back into prose.
+func vettingReportBlock(report string) string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(report), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			continue
+		}
+		lines = append(lines, l)
+	}
+	return "```text\n" + strings.TrimSpace(strings.Join(lines, "\n")) + "\n```"
 }
 
 // truncatedBuildCaveat prefixes a skill review message when the engine reports the tool
