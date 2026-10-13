@@ -2,6 +2,7 @@ package coder
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/rookery-ai/rookery/internal/agentstate"
 )
@@ -49,6 +50,14 @@ func (h *hostToolSet) getState() (string, error) {
 // marker has always had, restated in the tool description so the model calling it
 // knows this is a patch, not a wholesale replacement.
 func (h *hostToolSet) setState(patch map[string]any) (string, error) {
+	// An empty patch is reported as a failure, not as "ok". It writes nothing, and
+	// answering "state updated" made it indistinguishable from a real write: one run
+	// called this 149 times because every call looked productive to the turn budget.
+	// Deleting a key is a non-empty patch ({"key": null}), so nothing legitimate is
+	// refused here.
+	if len(patch) == 0 {
+		return "", fmt.Errorf(`the patch was empty, so nothing was saved — pass the keys to store, e.g. {"patch": {"last_price": 159}}`)
+	}
 	if _, err := agentstate.Apply(h.stateFilePath(), h.agentName, patch); err != nil {
 		return "", err
 	}

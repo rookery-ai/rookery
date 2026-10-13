@@ -98,3 +98,27 @@ func TestGetStateReadsAgentStateFilePath(t *testing.T) {
 		t.Fatalf("expected state.md at the agent dir root: %v", err)
 	}
 }
+
+// TestSetStateRejectsAnEmptyPatch: a patch with no keys writes nothing, so reporting
+// "ok: state updated" was false — and it was what let one run call set_state 149
+// times. Every call looked like a success, so the unproductive-streak guard never
+// counted it, and the model kept retrying a write that could not land. The error
+// names the fix the model can actually make.
+func TestSetStateRejectsAnEmptyPatch(t *testing.T) {
+	dir := t.TempDir()
+	h := &hostToolSet{workDir: dir, includeExecTools: true, agentName: "a"}
+
+	for _, patch := range []string{`{}`, `null`} {
+		out := h.execute(context.Background(), setStateCall(patch))
+		if !strings.HasPrefix(out, "error:") {
+			t.Fatalf("empty patch %s reported success: %q", patch, out)
+		}
+		if !strings.Contains(out, "nothing was saved") {
+			t.Fatalf("error does not say nothing was written: %q", out)
+		}
+	}
+	// And the file was not created as a side effect.
+	if _, err := os.Stat(filepath.Join(dir, "state.md")); err == nil {
+		t.Fatalf("an empty patch created state.md")
+	}
+}
