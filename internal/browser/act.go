@@ -220,6 +220,9 @@ func (h *browserHost) perform(sess *hostSession, req actReq, timeout float64) er
 		if err != nil {
 			return err
 		}
+		if isSelect(loc, timeout) {
+			return selectByText(loc, req.Value, timeout)
+		}
 		return loc.Fill(req.Value, playwright.LocatorFillOptions{Timeout: playwright.Float(timeout)})
 	}
 	return fmt.Errorf("unknown action %q", req.Action)

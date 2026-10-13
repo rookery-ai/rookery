@@ -2804,6 +2804,8 @@ button it needs does not exist. The parser is tested against a **real captured
 page** (`testdata/github-login.snapshot`) — a fixture invented to match the
 parser would only prove it agrees with itself.
 
+**`browser_fill` on a `<select>` chooses an option, because nothing else could.** Playwright's `Fill` rejects a select, and pressing keys one tool call at a time cannot drive the browser's type-ahead — the calls are seconds apart — so a real checkout run pressed `ArrowDown` 105 times on a country field and gave up, while a weaker run abandoned the browser for the shop's API. The helper now detects a `<select>` and resolves the model's text with `matchOption` (exact label, exact value, case-insensitive label, then a UNIQUE substring), selecting by value so the page's `change` event fires as a user's choice does. An ambiguous or missing match is an error listing the options, bounded in size: silently picking "United States Minor Outlying Islands" for "United States" on a checkout form is worse than an error the model can correct. Not a new tool, deliberately — the model already writes "Portugal" into a field; a separate select tool is one more choice for a weak model to get wrong.
+
 **A ref is re-resolved against the LIVE page before any mutating call.** The
 irreversibility check is only as good as the name it judges, and a name from the
 model's previous listing may describe a control the page has since re-rendered —
