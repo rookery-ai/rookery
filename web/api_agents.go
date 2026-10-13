@@ -186,7 +186,16 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 	wsConns := make([]map[string]any, 0, len(d.WorkspaceConns))
 	attachedConnIDs := make([]string, 0, len(d.AttachedConns))
 	for _, cn := range d.WorkspaceConns {
-		wsConns = append(wsConns, toAPIConnection(cn))
+		m := toAPIConnection(cn)
+		// The registry's label ("Google Calendar"), not the slug the card used to
+		// capitalise ("Google_calendar"). An unknown provider keeps its slug.
+		m["provider_label"] = cn.Provider
+		if s.connectors != nil {
+			if p, ok := s.connectors.ProviderByName(cn.Provider); ok && p.Label != "" {
+				m["provider_label"] = p.Label
+			}
+		}
+		wsConns = append(wsConns, m)
 		if d.AttachedConns[cn.ID] {
 			attachedConnIDs = append(attachedConnIDs, cn.ID)
 		}
