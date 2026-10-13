@@ -22,6 +22,9 @@ import "strings"
 // navigate.
 func ParseAriaSnapshot(snap string) []Element {
 	var out []Element
+	// label is the last visible text seen since the previous interactive control
+	// — the candidate name for an unlabeled form field. See inferFieldName.
+	label := ""
 	for _, raw := range strings.Split(snap, "\n") {
 		line := strings.TrimSpace(raw)
 		if !strings.HasPrefix(line, "- ") {
@@ -33,13 +36,69 @@ func ParseAriaSnapshot(snap string) []Element {
 		if strings.HasPrefix(rest, "/") {
 			continue
 		}
+		if t, ok := strings.CutPrefix(rest, "text:"); ok {
+			label = cleanLabel(t)
+			continue
+		}
 		e, ok := parseElementLine(rest)
 		if !ok {
 			continue
 		}
+		if !interactiveRoles[strings.ToLower(e.Role)] {
+			// A wrapper (generic, group, document) between a label and its field
+			// is normal markup and must not break the association.
+			out = append(out, e)
+			continue
+		}
+		inferFieldName(&e, label)
+		label = "" // text is never carried past a control to a later field
 		out = append(out, e)
 	}
 	return out
+}
+
+// inferFieldName gives an unnamed FORM FIELD the visible text directly before it.
+//
+// FilterInteractive drops a control with no accessible name, because the model
+// chooses by name. That is right for a button and wrong for a field whose
+// <label> is simply not linked to it — a common markup mistake (demoblaze.com's
+// login: label for="log-name" on input id="loginusername"). The field then had
+// no name, was filtered out, and vanished from the agent's view while a human
+// sees "Username:" right beside it; a real run clicked "Log in" 24 times and
+// pressed Tab ~100 times looking for fields it was never shown.
+//
+// Deliberately narrow: only field roles borrow a name (an unnamed button still
+// offers nothing to choose by), only from text with no other control between,
+// and the note says the name was inferred so the model does not mistake it for
+// a real label.
+func inferFieldName(e *Element, label string) {
+	if strings.TrimSpace(e.Name) != "" || label == "" || !fieldRoles[strings.ToLower(e.Role)] {
+		return
+	}
+	e.Name = label
+	if e.Note == "" {
+		e.Note = "label inferred from nearby text"
+	} else {
+		e.Note = "label inferred from nearby text, " + e.Note
+	}
+}
+
+var fieldRoles = map[string]bool{
+	"textbox": true, "searchbox": true, "textarea": true, "combobox": true, "spinbutton": true,
+}
+
+// cleanLabel turns a snapshot text line into a field name: unquoted, without the
+// trailing colon or required-marker asterisk a form label usually carries.
+func cleanLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		s = s[1 : len(s)-1]
+	}
+	s = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(s), ":*"))
+	if len(s) > 80 {
+		return "" // a paragraph, not a label
+	}
+	return s
 }
 
 // parseElementLine parses one "- " line's body.

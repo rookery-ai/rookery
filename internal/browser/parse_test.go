@@ -147,3 +147,62 @@ func TestSortElementsStableOrdersRefsNumerically(t *testing.T) {
 		}
 	}
 }
+
+// A form field whose <label> is not linked to it has no accessible name, so the
+// filter used to drop it — and the field vanished from the agent's view while a
+// human sees "Username:" right beside it. demoblaze.com's login is exactly this
+// (label for="log-name" on an input with id="loginusername"); a real run clicked
+// "Log in" 24 times and pressed Tab ~100 times looking for fields it was never
+// shown. The visible label IS in the snapshot: the text line just before the field.
+func TestParseAriaSnapshotNamesUnlabeledFieldsFromTheTextBeforeThem(t *testing.T) {
+	snap := `- dialog "Log in" [ref=e150]:
+  - document [ref=e151]:
+    - heading "Log in" [level=5] [ref=e152]
+    - button "Close" [ref=e153]
+    - text: "Username:"
+    - textbox [ref=e155]
+    - text: "Password:"
+    - textbox [ref=e157]
+    - button "Close" [ref=e158]
+    - button "Log in" [ref=e159]`
+	els := FilterInteractive(ParseAriaSnapshot(snap))
+	byRef := map[string]Element{}
+	for _, e := range els {
+		byRef[e.Ref] = e
+	}
+	user, ok := byRef["e155"]
+	if !ok || user.Name != "Username" {
+		t.Fatalf("unlabeled username field not offered under its visible label: %+v", els)
+	}
+	if pw, ok := byRef["e157"]; !ok || pw.Name != "Password" {
+		t.Fatalf("unlabeled password field not offered: %+v", els)
+	}
+	if !strings.Contains(user.Note, "label inferred") {
+		t.Errorf("an inferred name must say so, or the model trusts it as a real label: %q", user.Note)
+	}
+}
+
+// The inference is narrow on purpose: only a FORM FIELD borrows a name, and only
+// from text directly before it. An unnamed button still has nothing a model
+// could choose by, and text that a named control sits between must not leak
+// past it onto a later field.
+func TestParseAriaSnapshotInfersNamesNarrowly(t *testing.T) {
+	snap := `- text: "Shipping"
+- button [ref=e1]
+- text: "Notes"
+- button "Help" [ref=e2]
+- textbox [ref=e3]
+- textbox "Email" [ref=e4]`
+	els := FilterInteractive(ParseAriaSnapshot(snap))
+	for _, e := range els {
+		if e.Ref == "e1" {
+			t.Errorf("an unnamed BUTTON borrowed a name: %+v", e)
+		}
+		if e.Ref == "e3" {
+			t.Errorf("text separated from the field by another control was used as its label: %+v", e)
+		}
+		if e.Ref == "e4" && e.Name != "Email" {
+			t.Errorf("a real accessible name was replaced: %+v", e)
+		}
+	}
+}
