@@ -264,3 +264,30 @@ Issues filed for model-behaviour findings: #351 (bash+curl fallback, secrets rea
 instruction, so the model must first ask "what's the edit?"; with the
 instruction it proposed a grouping, asked once more, then rewrote the note into
 three goals with outcomes and dates. Two extra round trips for one edit.
+
+## Day 1, evening
+
+- **More fixes:** #356 (deadline mid-request reported as "provider dropped the
+  connection", now `ErrTimeout`), #358 (run notes opened read-only: coder turns
+  written as prose, and tiptap-markdown hard-codes a three-backtick fence, so
+  any code block containing ``` broke on save), #359 (a click or fill step
+  names its element instead of an opaque ref), #360 (agent page showed raw
+  provider slugs like "Google_calendar").
+- **#350 self-review catch:** a failed build's progress stream also ends with
+  `done`, so the status-following title would have said "Built and tested"
+  above a failure; fixed before merge.
+- **Hero, final:** run `0eb815a7` placed **INV-2026000006** (verified on the
+  shop) in 7 minutes. Its steps now read `browser_fill "Credit Card Number" ←
+  ${CARD_NUMBER}` … `browser_click "Confirm"`, and the run note is editable.
+  One attempt before it got an empty provider response (`exit -1`,
+  `total_tokens=0` — usage lost on error, #354).
+- **A5 · Issue to task** filed five Todoist tasks (#351–#354, #357) and
+  remembers them; bindings had to be trimmed (auto-bind added Google Calendar
+  the build had merely probed — #357).
+- **Capture environment:** headless Chromium here needed an emoji font
+  (Noto Color Emoji) and a symbol fallback (DejaVu Sans, for "✓"); the browser
+  context runs in `Europe/Lisbon`; the Telegram user id and bot name on the
+  Connections page are blurred in captures.
+- **Blocked on the owner:** the Google Calendar API is disabled in the OAuth
+  project, so A4 (Morning brief) waits; a background orchestrator builds it as
+  soon as Calendar answers.
