@@ -104,3 +104,18 @@ func TestLooksTabularBounds(t *testing.T) {
 		}
 	})
 }
+
+// pdftotext -layout keeps the visual gap between words on one line. Inside a
+// paragraph that gap means nothing to markdown — it renders as one space — but
+// the editor re-serializes it as one space too, so a note keeping the run is not
+// a fixed point and opens READ-ONLY. Collapsing here makes the note editable
+// without changing what it shows.
+func TestParagraphizeCollapsesLayoutGapsInProse(t *testing.T) {
+	got := paragraphize("Rate is   95 EUR   per hour,\nbilled      monthly.\n")
+	if strings.Contains(got, "  ") {
+		t.Fatalf("prose kept a whitespace run the editor would collapse: %q", got)
+	}
+	if !strings.Contains(got, "Rate is 95 EUR per hour, billed monthly.") {
+		t.Fatalf("prose text changed beyond whitespace: %q", got)
+	}
+}

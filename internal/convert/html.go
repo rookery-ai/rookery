@@ -245,7 +245,7 @@ func (w *mdWriter) walk(n *html.Node) {
 		// The label is prose and takes the inline rules; the destination is a
 		// path and takes its own (see escapeDestination) — inline-escaping a URL
 		// would turn "&" into an entity and break the link.
-		w.emit(fmt.Sprintf("[%s](%s)", EscapeInline(text), escapeDestination(href)), leading)
+		w.emit(fmt.Sprintf("[%s](%s)", EscapeInline(text), EscapeDestination(href)), leading)
 		w.pendingSpace = trailing
 		return
 	case atom.Table:
@@ -272,7 +272,7 @@ func (w *mdWriter) walk(n *html.Node) {
 			}
 			return
 		}
-		w.emit(fmt.Sprintf("![%s](%s)", EscapeInline(alt), escapeDestination(src)), false)
+		w.emit(fmt.Sprintf("![%s](%s)", EscapeInline(alt), EscapeDestination(src)), false)
 		return
 	}
 	w.children(n)

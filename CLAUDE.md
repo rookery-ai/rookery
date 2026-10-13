@@ -1088,6 +1088,8 @@ a real docx bug within minutes of existing: a table written straight after a lis
 item was absorbed INTO that bullet and every row was lost, because markdown
 continues a list item across a single newline.
 
+**The corpus now covers the note ImportFile WRITES, not just converter output** — and the gap was total. `renderImportedNote` wraps the converter's markdown in a title heading, a conversion-notes line and a provenance line, and that wrapper made **every** imported note open read-only while both halves of the corpus stayed green: the provenance line used `_…_` emphasis (the editor re-serializes `*…*`), its link destination was never escaped (a filename with a space is not a CommonMark destination, so on save it degraded to literal `\[…\](…)` and the link to the original was lost), and `pdftotext -layout` prose kept multi-space gaps the editor collapses. `internal/vault`'s `TestImportedNoteFidelityCorpus` writes real assembled note bodies as `import-*.md` into `internal/convert/testdata/fidelity/`, where the vitest half checks them like every other file; `TestFidelityCorpus`'s orphan guard skips that prefix because the vault test owns it. `escapeDestination` is exported as `convert.EscapeDestination` for this.
+
 **Embedded images: `internal/convert` returns them, it does not store them.**
 The package is a pure function of its input, which is what makes it testable
 against golden fixtures — so it hands images back in `Result.Assets`, referenced
