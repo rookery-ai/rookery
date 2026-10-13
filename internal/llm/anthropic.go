@@ -158,6 +158,7 @@ func (p *anthropicProvider) buildBody(model string, req Request) []byte {
 			if len(schema) == 0 {
 				schema = json.RawMessage(`{"type":"object","properties":{}}`)
 			}
+			schema = OpenObjectSchemas(schema)
 			tools = append(tools, anthropicTool{Name: t.Name, Description: t.Description, InputSchema: schema})
 		}
 		payload["tools"] = tools
