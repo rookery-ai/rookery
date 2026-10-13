@@ -3,6 +3,8 @@ package vault
 import (
 	"fmt"
 	"strings"
+
+	"github.com/rookery-ai/rookery/internal/convert"
 )
 
 // usageBlock renders the run's cost and token accounting.
@@ -66,7 +68,18 @@ func FormatCostUSD(v float64) string {
 // and stays prose — fencing an English sentence would be worse, not better.
 func activityEntry(line string) string {
 	if strings.HasPrefix(line, "**") {
-		// A labelled non-tool entry (coder turn, summary).
+		// A labelled non-tool entry (coder turn, summary). A plain one-line
+		// sentence stays prose — fencing English makes it harder to read. But a
+		// coder turn is the model's raw text: several lines, often carrying
+		// [CHAT]/[STATE] markers. As prose the editor escaped those brackets and
+		// joined the lines into one paragraph, so the note was not a fixed point
+		// and EVERY run note with such a turn opened read-only. Those get the
+		// label as prose and the body fenced verbatim, like a tool call.
+		if label, body, ok := strings.Cut(line, ":** "); ok &&
+			(strings.Contains(body, "\n") || convert.EscapeInline(body) != body) {
+			fence := fenceFor(body)
+			return label + ":**\n\n" + fence + "text\n" + body + "\n" + fence + "\n\n"
+		}
 		return line + "\n\n"
 	}
 	fence := fenceFor(line)
