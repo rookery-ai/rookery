@@ -107,6 +107,10 @@ type DesignSystemParams struct {
 	// BackendType selects the wording of the browser block (native tools vs the
 	// CLI command form), matching how the other prompts describe it.
 	BackendType string
+	// SecretNames are the NAMES of the workspace's stored secrets — never their
+	// values. Without them the designer told a user to create secrets that
+	// already existed; with them it can name the right one in the plan.
+	SecretNames []string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -1097,7 +1101,14 @@ When the agent needs an API key or credential:
 - Tell the user to add it to the Secrets store (Settings → Secrets in the web dashboard) with a clear name like COINGECKO_API_KEY.
 - Explain in plain language what the credential is and exactly where to get it — for example: "You'll need a free CoinGecko API key. Go to coingecko.com/en/api, sign up for a free account, then click 'Developer Dashboard' → 'Add Key'."
 - Secrets are injected automatically as environment variables when the agent runs. You only need to agree on the name — never ask for or display the value itself.
-</secrets_guidance>
+`)
+	if names := agentSecretNames(p.SecretNames); len(names) > 0 {
+		sb.WriteString("- Already stored in this workspace (names only — you are never shown values): " + strings.Join(names, ", ") + ".\n")
+		sb.WriteString("  Before asking for a credential, check this list: if a stored secret fits, use that exact name in the plan and do not ask the user to add it again.\n")
+	} else {
+		sb.WriteString("- No secrets are stored yet.\n")
+	}
+	sb.WriteString(`</secrets_guidance>
 
 `)
 
@@ -2946,4 +2957,19 @@ func ChatTitleUserPrompt(userMsg, reply string) string {
 		return s
 	}
 	return "First message:\n" + trunc(userMsg) + "\n\nReply:\n" + trunc(reply)
+}
+
+// agentSecretNames drops the platform's own credentials from a secret-name list:
+// CODER_KEY_* authenticates the workspace's coder and SEARCH_KEY_* the web search
+// provider. Neither is something an agent should be designed around, and the
+// runner strips the provider key from an agent's environment anyway.
+func agentSecretNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if strings.HasPrefix(n, "CODER_KEY_") || strings.HasPrefix(n, "SEARCH_KEY_") {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }

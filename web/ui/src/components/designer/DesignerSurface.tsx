@@ -21,6 +21,7 @@ import {
   ActivityCard,
   type ActivityStatus,
 } from "@/components/chat/ActivityCard";
+import { activityTitle } from "./activityTitle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Stepper } from "./Stepper";
@@ -1048,11 +1049,7 @@ export function DesignerSurface({
           {sse && (sse.kind === "build" || sse.lines.length > 0) && (
             <div className="max-w-[78%] self-start">
               <ActivityCard
-                title={
-                  sse.kind === "turn"
-                    ? "Looking through your knowledge base…"
-                    : `Building your ${labels.entityName}…`
-                }
+                title={activityTitle(sse.kind, sse.status, labels.entityName)}
                 lines={sse.lines}
                 status={sse.status}
                 startedAt={sseStartedAtRef.current}
