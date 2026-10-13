@@ -188,7 +188,7 @@ export function ConnectionsCard({
         key: c.id,
         label: (
           <>
-            <span className="capitalize">{c.provider}</span>
+            <span>{c.provider_label ?? c.provider}</span>
             <span className="text-muted-2">— {c.account_label}</span>
           </>
         ),

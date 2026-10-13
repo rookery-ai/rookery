@@ -99,6 +99,8 @@ export type Skill = { id: string; name: string; description: string; installed_a
 export type Connection = {
   id: string;
   provider: string;
+  // Registry label ("Google Calendar"); present on agent-detail connections.
+  provider_label?: string;
   account_label: string;
   account_identity: string;
   status: string;
