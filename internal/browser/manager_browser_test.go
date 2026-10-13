@@ -204,3 +204,56 @@ func TestBrowserListsInteractiveElementsInASession(t *testing.T) {
 		t.Fatalf("Continue button not in element list: %+v", res.Elements)
 	}
 }
+
+// A native <select> must be operable through browser_fill. Before this, Fill
+// rejected it and the only remaining tool was one keypress per call — a real run
+// pressed ArrowDown 105 times on a checkout's country field and gave up.
+func TestFillChoosesAnOptionInASelect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body>
+<label for="country">Country</label>
+<select id="country" onchange="document.getElementById('out').textContent='CHOSEN:'+this.value">
+  <option value="">Your country *</option>
+  <option value="NL">Netherlands</option>
+  <option value="PT">Portugal</option>
+  <option value="US">United States of America (the)</option>
+</select>
+<div id="out">none</div>
+</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+	m := NewManager(buildRookery(t), true, false)
+	defer m.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	const key = "select-test"
+	res, err := m.Render(ctx, Request{URL: srv.URL, Session: key})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	defer m.CloseSession(ctx, key)
+
+	var ref string
+	for _, e := range res.Elements {
+		if e.Role == "combobox" {
+			ref = e.Ref
+		}
+	}
+	if ref == "" {
+		t.Fatalf("the <select> was not listed as a control: %+v", res.Elements)
+	}
+	res, err = m.Act(ctx, ActRequest{Session: key, Action: ActionFill, Ref: ref, Value: "portugal"})
+	if err != nil {
+		t.Fatalf("fill on a select: %v", err)
+	}
+	if !strings.Contains(res.Text, "CHOSEN:PT") {
+		t.Fatalf("option not chosen (the change event must fire, as a user's choice does); got %q", res.Text)
+	}
+
+	_, err = m.Act(ctx, ActRequest{Session: key, Action: ActionFill, Ref: ref, Value: "Atlantis"})
+	if err == nil || !strings.Contains(err.Error(), "Portugal") {
+		t.Fatalf("a missing option must fail and list the options; got %v", err)
+	}
+}
