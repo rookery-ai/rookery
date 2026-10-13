@@ -1049,9 +1049,11 @@ export function DesignerSurface({
           {sse && (sse.kind === "build" || sse.lines.length > 0) && (
             <div className="max-w-[78%] self-start">
               <ActivityCard
-                title={activityTitle(sse.kind, sse.status, labels.entityName)}
+                title={activityTitle(sse.kind, sse.status, labels.entityName, generationFailed)}
                 lines={sse.lines}
-                status={sse.status}
+                // A failed build's stream ends with the same `done` event as a
+                // successful one; show it as the failure it was.
+                status={sse.kind === "build" && generationFailed && sse.status === "done" ? "error" : sse.status}
                 startedAt={sseStartedAtRef.current}
                 collapsible
               />
