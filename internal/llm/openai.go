@@ -158,7 +158,7 @@ func (p *openaiProvider) buildBody(model string, req Request) []byte {
 			ft := fnTool{Type: "function"}
 			ft.Function.Name = t.Name
 			ft.Function.Description = t.Description
-			ft.Function.Parameters = t.Parameters
+			ft.Function.Parameters = OpenObjectSchemas(t.Parameters)
 			tools = append(tools, ft)
 		}
 		payload["tools"] = tools
