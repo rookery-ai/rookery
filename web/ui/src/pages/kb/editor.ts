@@ -8,6 +8,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
+import { FencedCodeBlock } from "./nodes/codeBlock";
 import { Wikilink } from "./wikilinks";
 import { PipeSafeTable } from "./pipeSafeTable";
 import { KBImage } from "./kbImage";
@@ -30,7 +31,10 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
   return [
     // TipTap 3's StarterKit bundles Link (and Underline) itself; disable its
     // copy so our own Link.configure() below doesn't collide with it.
-    StarterKit.configure({ link: false }),
+    // StarterKit's code block is replaced by FencedCodeBlock, whose serializer
+    // sizes the fence to the content (see nodes/codeBlock.ts).
+    StarterKit.configure({ link: false, codeBlock: false }),
+    FencedCodeBlock,
     // openOnClick stays false so TipTap's own handler doesn't fire — NoteEditor's
     // editorProps.handleClick owns link opening instead, so a plain click on a
     // link (external OR a vault-relative attachment path) opens it in a new tab.
