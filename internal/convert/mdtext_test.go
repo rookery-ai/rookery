@@ -108,8 +108,8 @@ func TestEscapeDestination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := escapeDestination(tc.in); got != tc.want {
-				t.Errorf("escapeDestination(%q) = %q, want %q", tc.in, got, tc.want)
+			if got := EscapeDestination(tc.in); got != tc.want {
+				t.Errorf("EscapeDestination(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
