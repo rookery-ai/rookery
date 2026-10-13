@@ -99,7 +99,7 @@ func escapeLeadingMarker(s string) string {
 	return s
 }
 
-// escapeDestination escapes the URL half of a link or image.
+// EscapeDestination escapes the URL half of a link or image.
 //
 // A destination is a path, not prose, so the inline rules are wrong for it —
 // "&lt;" inside a path is simply a broken path. It needs exactly what the
@@ -108,7 +108,7 @@ func escapeLeadingMarker(s string) string {
 // encoding: a raw space terminates the destination and collapses the whole
 // construct back into literal text, which is how "![pic](uploads/my file.png)"
 // stops being an image at all.
-func escapeDestination(s string) string {
+func EscapeDestination(s string) string {
 	r := strings.NewReplacer(
 		`\`, `\\`,
 		`(`, `\(`,

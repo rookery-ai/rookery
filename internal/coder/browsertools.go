@@ -65,6 +65,7 @@ func (h *hostToolSet) browserTools() []llm.Tool {
 		llm.Tool{
 			Name: "browser_fill",
 			Description: "Type into one field on the open page, by ref. " +
+				`For a dropdown (a combobox / <select>), pass the visible text of the option you want, e.g. value "Portugal" — it is chosen for you; do not press arrow keys. ` +
 				"To enter a password, card number or any other stored credential, pass the SECRET NAME in ${...} form — " +
 				`e.g. value "${ELECTRIC_BILL_PASSWORD}". The server substitutes the real value directly into the page; ` +
 				"you never see it and must never guess or invent one. If the secret does not exist, say so and stop.",
