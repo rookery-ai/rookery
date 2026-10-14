@@ -603,14 +603,22 @@ func (c *Coder) pingAPI(ctx context.Context, workspaceID string) (string, error)
 		return "", err
 	}
 	resp, err := prov.Complete(ctx, llm.Request{
-		Model:     c.api.model,
-		Messages:  []llm.Message{{Role: "user", Content: prompts.APIEnginePingMessage}},
-		MaxTokens: 16,
+		Model:    c.api.model,
+		Messages: []llm.Message{{Role: "user", Content: prompts.APIEnginePingMessage}},
+		// Not 16. A reasoning model bills its thinking against this budget and
+		// spent all of it before writing a word, so the test passed and showed
+		// "()" — a reply that reads as broken on exactly the models this platform
+		// recommends. 512 still costs a fraction of a cent.
+		MaxTokens: 512,
 	})
 	if err != nil {
 		return "", c.mapProviderErr(err)
 	}
-	return c.api.provider + "/" + c.api.model + " (" + resp.Content + ")", nil
+	reply := strings.TrimSpace(resp.Content)
+	if reply == "" && resp.Reasoning != "" {
+		reply = "reachable — reasoning model, no text within the test budget"
+	}
+	return c.api.provider + "/" + c.api.model + " (" + reply + ")", nil
 }
 
 // buildHostTools assembles the vault-scoped, sandboxed host tool set for this run.
