@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.18.0](https://github.com/rookery-ai/rookery/compare/v0.17.1...v0.18.0) (2026-10-14)
+
+
+### Features
+
+* **coder:** name the element in a browser click or fill step ([#359](https://github.com/rookery-ai/rookery/issues/359)) ([d43fdba](https://github.com/rookery-ai/rookery/commit/d43fdbaa9a611f0cb5d6575f308c0fa9d18891ce))
+
+
+### Bug Fixes
+
+* **browser:** let browser_fill choose an option in a native select ([#347](https://github.com/rookery-ai/rookery/issues/347)) ([e45652d](https://github.com/rookery-ai/rookery/commit/e45652dfecbbc7c6301f7ae06815df9997afef9c))
+* **browser:** offer unlabeled form fields under their visible label ([#348](https://github.com/rookery-ai/rookery/issues/348)) ([94a34ba](https://github.com/rookery-ai/rookery/commit/94a34ba064548d883bf17e5fec743bae681aa960))
+* **coder:** give the connection test room for a reasoning model to answer ([#361](https://github.com/rookery-ai/rookery/issues/361)) ([0f590c2](https://github.com/rookery-ai/rookery/commit/0f590c2305355fcfd82d8676918ce1f750025053))
+* **coder:** report a deadline that expires mid-request as a timeout ([#356](https://github.com/rookery-ai/rookery/issues/356)) ([087d855](https://github.com/rookery-ai/rookery/commit/087d855a7152d5dcfafc3de0438c057965f819b5))
+* **designer:** build card, vetting report, skill build logs and stored secret names ([#350](https://github.com/rookery-ai/rookery/issues/350)) ([a3ad533](https://github.com/rookery-ai/rookery/commit/a3ad533ad1aa8704409ba19f90d9af52a2fb54e2))
+* **kb:** agent run notes open editable — fence coder turns and size code fences to content ([#358](https://github.com/rookery-ai/rookery/issues/358)) ([3c637d2](https://github.com/rookery-ai/rookery/commit/3c637d224212767276db63ebc3ca70bfcbb59bb9))
+* **llm:** send free-form object schemas explicitly open so set_state can carry keys ([#346](https://github.com/rookery-ai/rookery/issues/346)) ([c9ac7c9](https://github.com/rookery-ai/rookery/commit/c9ac7c90ffe3ca4c93fa1efc6185f6e26279af9a))
+* **vault:** make imported notes editable — provenance line and PDF gaps were not editor fixed points ([#349](https://github.com/rookery-ai/rookery/issues/349)) ([d30873d](https://github.com/rookery-ai/rookery/commit/d30873d7dd3220a02a629baea9b7484196bedc10))
+* **web/agents:** show connection provider labels, not raw slugs, on the agent page ([#360](https://github.com/rookery-ai/rookery/issues/360)) ([bcb0a83](https://github.com/rookery-ai/rookery/commit/bcb0a837ec032f62017ab40569eac15cfa6a1ac0))
+
 ## [0.17.1](https://github.com/rookery-ai/rookery/compare/v0.17.0...v0.17.1) (2026-10-09)
 
 
