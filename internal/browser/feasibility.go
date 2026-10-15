@@ -106,7 +106,11 @@ func probeSite(ctx context.Context, r Renderer, rawURL string) string {
 	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	res, err := r.Render(pctx, Request{URL: rawURL, WaitFor: "networkidle", Limit: 400})
+	// "load", not "networkidle": a page that keeps a connection open (long-poll,
+	// chat widget, analytics beacon) never goes network-idle, so the probe timed
+	// out and the designer told the user a live site "could not be opened". A
+	// feasibility check only needs the page rendered.
+	res, err := r.Render(pctx, Request{URL: rawURL, WaitFor: "load", Limit: 400})
 	if err != nil {
 		// rawURL is whatever the user typed into the design conversation, and a
 		// render error routinely quotes the URL it failed on — so both go
