@@ -1167,6 +1167,47 @@ func adminCmd() *cli.Command {
 					return nil
 				},
 			},
+			{
+				Name:  "reset-workspace-password",
+				Usage: "Set a workspace's master password without the current one (keeps its secrets)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "workspace", Aliases: []string{"w"}, Required: true, Usage: "Workspace name"},
+					&cli.StringFlag{Name: "password", Aliases: []string{"p"}, Usage: "New master password (prompted when omitted)"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg, err := config.Load(cmd.Root().String("config"))
+					if err != nil {
+						return fmt.Errorf("load config: %w", err)
+					}
+					database, err := db.Open(cfg.Database.Path)
+					if err != nil {
+						return fmt.Errorf("open db: %w", err)
+					}
+					defer database.Close()
+
+					ws, err := database.GetWorkspaceByName(cmd.String("workspace"))
+					if err != nil {
+						return fmt.Errorf("no workspace named %q: %w", cmd.String("workspace"), err)
+					}
+					newPw := cmd.String("password")
+					if newPw == "" {
+						if newPw, err = promptNewPassword(); err != nil {
+							return err
+						}
+					}
+					// hasWorkspaces=true: never mint a fresh key here — a new key
+					// could not decrypt the stored password and the reset would fail.
+					sysKey, err := secrets.SystemKey(cfg.Data.Dir, true)
+					if err != nil {
+						return fmt.Errorf("load system key: %w", err)
+					}
+					if err := secrets.ResetMasterPassword(ctx, database, ws, newPw, sysKey); err != nil {
+						return err
+					}
+					fmt.Printf("Master password reset for workspace: %s\n", ws.Name)
+					return nil
+				},
+			},
 		},
 	}
 }

@@ -272,3 +272,32 @@ func backupCommand() *cli.Command {
 		},
 	}
 }
+
+// promptNewPassword reads a new password twice from the terminal with echo
+// off, the same way backup passphrases are read.
+func promptNewPassword() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	read := func(label string) (string, error) {
+		fmt.Fprint(os.Stderr, label)
+		restore := disableEcho()
+		line, err := reader.ReadString('\n')
+		restore()
+		fmt.Fprintln(os.Stderr)
+		if err != nil && err != io.EOF {
+			return "", fmt.Errorf("read password: %w", err)
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+	pw, err := read("New master password: ")
+	if err != nil {
+		return "", err
+	}
+	again, err := read("Repeat it: ")
+	if err != nil {
+		return "", err
+	}
+	if pw != again {
+		return "", fmt.Errorf("the two passwords do not match")
+	}
+	return pw, nil
+}
