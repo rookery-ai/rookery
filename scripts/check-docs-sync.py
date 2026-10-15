@@ -136,7 +136,8 @@ CLAIMS = [
     # README states them as "100+"/"900+", which is an approximate claim and
     # therefore check_inflated's job, not this table's. Skills stays exact —
     # 22 is a number a reader can act on, and it moves rarely.
-    ("product", "README.md", r"\*\*(\d+) skills\*\* built in", "skills"),
+    # README.md's skill count moved to INFLATABLE when it became "20+ core
+    # skills": an approximate claim is check_inflated's job, not this table's.
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     # The landing page states the provider count TWICE, in different words:
     # the section heading ("N services") and the line under the logo wall
@@ -200,7 +201,6 @@ def _claims_selftest() -> None:
     # must be exercised against a deliberately re-wrapped copy of text it is
     # supposed to match, through _flex_ws, the same way check_claims calls it.
     rewrapped_cases = [
-        (r"\*\*(\d+) skills\*\* built in", "**22 skills** built\nin", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
         (r"selection of the (\d+) supported", "A selection of\nthe 91 supported.", "91"),
         (r"— (\d+) built in", "—\n22 built\nin", "22"),
@@ -258,6 +258,7 @@ INFLATABLE = [
     ("web", "src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
     ("product", "README.md", r"(\d+)\+\s*(services)", "providers"),
     ("product", "README.md", r"(\d+)\+\s*(curated actions)", "actions"),
+    ("product", "README.md", r"(\d+)\+\s*(core skills)", "skills"),
 ]
 
 
@@ -326,16 +327,18 @@ def _inflated_selftest() -> None:
     # count and fail a true sentence — a gate that fires on honest prose.
     readme = [(p, k) for repo, rel, p, k in INFLATABLE
               if repo == "product" and rel == "README.md"]
-    assert len(readme) == 2, "README.md must contribute exactly two N+ entries"
+    assert len(readme) == 3, "README.md must contribute exactly three N+ entries"
     by_key = {k: p for p, k in readme}
-    assert set(by_key) == {"providers", "actions"}, \
-        "README.md's N+ claims cover providers and actions"
+    assert set(by_key) == {"providers", "actions", "skills"}, \
+        "README.md's N+ claims cover providers, actions and skills"
 
     line = "**100+ services** and **900+ curated actions**, over OAuth"
     prov = re.search(_flex_ws(by_key["providers"]), line)
     acts = re.search(_flex_ws(by_key["actions"]), line)
     assert prov and int(prov.group(1)) == 100, "providers entry must read 100, not 900"
     assert acts and int(acts.group(1)) == 900, "actions entry must read 900, not 100"
+    sk = re.search(_flex_ws(by_key["skills"]), "It comes with 20+ core skills")
+    assert sk and int(sk.group(1)) == 20, "skills entry must read the core-skills count"
 
     # And the providers pattern must NOT also swallow the actions clause —
     # if it did, the 900 would be compared against the provider count.
