@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.2](https://github.com/rookery-ai/rookery/compare/v0.18.1...v0.18.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **web/ui:** Pushover logo shipped as an empty image ([#370](https://github.com/rookery-ai/rookery/issues/370)) ([082de70](https://github.com/rookery-ai/rookery/commit/082de70f831e18bac160cb0a42a7dc7e3ed506c5))
+
+
+### Documentation
+
+* **readme:** lead with product screenshots from a demo workspace ([#371](https://github.com/rookery-ai/rookery/issues/371)) ([198785e](https://github.com/rookery-ai/rookery/commit/198785e83460d26f236db90f592eb9f937e1400e))
+
 ## [0.18.1](https://github.com/rookery-ai/rookery/compare/v0.18.0...v0.18.1) (2026-10-15)
 
 
