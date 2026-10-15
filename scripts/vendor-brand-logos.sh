@@ -479,7 +479,8 @@ readwise|https://d34adp677peecb.cloudfront.net/static/images/favicons/apple-touc
 # Wave 3 money connectors. Neither brand is in lobehub, simple-icons or
 # worldvectorlogo, so both take their own published raster.
 coingecko|https://www.coingecko.com/favicon-96x96.png
-pushover|https://pushover.net/apple-touch-icon.png
+# Pushover's apple-touch-icon answers 200 with an EMPTY body; this one is real.
+pushover|https://pushover.net/images/icon-256.png
 # Wave 5 homelab connectors. Sonarr and Radarr come from simple-icons, but
 # Prowlarr, Lidarr and Bazarr are in none of the three sets — each publishes a
 # square PNG in its own repository.
@@ -502,6 +503,8 @@ echo "$UPSTREAM_PNG" | while read -r pair; do
   case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%|*}"; url="${pair#*|}"
   curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.png" || { echo "  !! $ours failed"; continue; }
+  # curl -f accepts a 200 with no body; an empty raster wraps into a broken logo.
+  [ -s "$TMP/$ours.png" ] || { echo "  !! $ours returned an empty body"; continue; }
   python3 - "$TMP/$ours.png" "$OUT/$ours.svg" <<'PY'
 import base64, re, subprocess, sys
 src, dst = sys.argv[1], sys.argv[2]
@@ -535,6 +538,8 @@ echo "$UPSTREAM_PNG_LARGE" | while read -r pair; do
   case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%|*}"; url="${pair#*|}"
   curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.big.png" || { echo "  !! $ours failed"; continue; }
+  # curl -f accepts a 200 with no body; an empty raster wraps into a broken logo.
+  [ -s "$TMP/$ours.big.png" ] || { echo "  !! $ours returned an empty body"; continue; }
   python3 - "$TMP/$ours.big.png" "$OUT/$ours.svg" <<'PY'
 import base64, io, sys
 from PIL import Image
@@ -566,6 +571,8 @@ echo "$UPSTREAM_ICO" | while read -r pair; do
   case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%|*}"; url="${pair#*|}"
   curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.ico" || { echo "  !! $ours failed"; continue; }
+  # curl -f accepts a 200 with no body; an empty raster wraps into a broken logo.
+  [ -s "$TMP/$ours.ico" ] || { echo "  !! $ours returned an empty body"; continue; }
   python3 - "$TMP/$ours.ico" "$OUT/$ours.svg" <<'PY'
 import base64, io, sys
 from PIL import Image
