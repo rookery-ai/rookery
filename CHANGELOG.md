@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.1](https://github.com/rookery-ai/rookery/compare/v0.18.0...v0.18.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **agentdesigner:** agent descriptions end on a whole sentence ([#368](https://github.com/rookery-ai/rookery/issues/368)) ([ffaa394](https://github.com/rookery-ai/rookery/commit/ffaa39469f9f07e0cebc5ea8b7773dbbdaced319))
+* **browser:** designer site check waits for load, not network-idle ([#365](https://github.com/rookery-ai/rookery/issues/365)) ([8773580](https://github.com/rookery-ai/rookery/commit/8773580cabce056bd325b88e43feaff043c66c8d))
+* **prompts:** tell the designer how irreversible-action permission actually works ([#367](https://github.com/rookery-ai/rookery/issues/367)) ([40aa1fb](https://github.com/rookery-ai/rookery/commit/40aa1fbedbfdf7433e0517b485411b530ef7028c))
+
 ## [0.18.0](https://github.com/rookery-ai/rookery/compare/v0.17.1...v0.18.0) (2026-10-14)
 
 
