@@ -40,6 +40,9 @@ go test -v ./internal/agentdesigner/... -run TestFlow
 # Reset the owner password (single-owner model, no login required)
 ./bin/rookery owner reset-password -p <new-password>
 
+# Reset a workspace's forgotten master password (keeps its secrets)
+./bin/rookery owner reset-workspace-password -w <workspace> [-p <new-password>]
+
 # Migrations are applied automatically when the database is opened —
 # there is no separate migration command.
 
