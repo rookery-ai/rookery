@@ -296,6 +296,11 @@ func serveCmd() *cli.Command {
 				slog.Info("agent files migrated", "agents", n)
 			}
 
+			// Rewrite descriptions the old first-line byte cut produced mid-word.
+			if n := agentdesigner.BackfillAgentDescriptions(database, vaultsDir); n > 0 {
+				slog.Info("agent descriptions rewritten", "agents", n)
+			}
+
 			// Any run still flagged in-progress is a leftover from a crash/shutdown
 			// mid-run — close it out so it can't show a permanently stuck "Running…"
 			// badge (runs now execute on a detached context that outlives the request).
