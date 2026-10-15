@@ -89,3 +89,20 @@ func TestBackfillRewritesOnlyLegacyDescriptions(t *testing.T) {
 		t.Fatalf("not idempotent: %d", n)
 	}
 }
+
+func TestExtractDescriptionOnRealAgentShapes(t *testing.T) {
+	cases := map[string]string{
+		"# D\n\nYou are a morning digest agent. Every weekday you scan Hacker News for self-hosting stories.\n": "Every weekday you scan Hacker News for self-hosting stories.",
+		"# D\n\nEvery weekday at 8am (owner's local time) you scan Hacker News for stories about self-hosting (self-hosted apps, homelabs, local-first software, open-source services, privacy tools you run yourself, and so on), file a digest note, and message the owner only when something is worth it.\n": "Every weekday at 8am you scan Hacker News for stories about self-hosting, file a digest note, and message the owner only when something is worth it.",
+	}
+	for md, want := range cases {
+		if got := extractDescription(md, "x"); got != want {
+			t.Errorf("got  %q\nwant %q", got, want)
+		}
+	}
+	long := "# M\n\nEach month, summarise the owner's business spending: total last month by category, compare it with the month before, convert USD amounts to EUR at the current rate, save a summary note, and tell the owner the three biggest month-over-month changes.\n"
+	got := extractDescription(long, "x")
+	if !strings.HasSuffix(got, "note…") && !strings.HasSuffix(got, "rate…") {
+		t.Errorf("expected a clause-boundary cut, got %q", got)
+	}
+}

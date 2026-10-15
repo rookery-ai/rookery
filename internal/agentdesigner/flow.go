@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
@@ -3194,31 +3195,88 @@ func isOrderedItem(line string) bool {
 	return i > 0 && i+1 < len(line) && (line[i] == '.' || line[i] == ')') && line[i+1] == ' '
 }
 
-// summarizeSentences keeps as many whole sentences of s as fit in limit runes.
-// If even the first sentence does not fit, it is cut at the last word boundary
-// and ends with "…".
+// summarizeSentences keeps as many whole sentences of s as fit in limit runes,
+// skipping a leading role preamble ("You are a … agent.") that says nothing
+// about the task. A first sentence that does not fit first loses its
+// parenthetical asides; if it still does not fit it is cut at the last clause
+// boundary (comma, semicolon, colon), else at a word, and ends with "…".
 func summarizeSentences(s string, limit int) string {
-	r := []rune(s)
-	if len(r) <= limit {
-		return s
+	sentences := splitSentences(s)
+	if len(sentences) > 1 && isRolePreamble(sentences[0]) {
+		sentences = sentences[1:]
 	}
-	end := -1
-	for i := 0; i < len(r) && i < limit; i++ {
-		if (r[i] == '.' || r[i] == '!' || r[i] == '?') && (i+1 == len(r) || r[i+1] == ' ') {
-			end = i + 1
+	out := ""
+	for _, sent := range sentences {
+		next := strings.TrimSpace(out + " " + sent)
+		if utf8.RuneCountInString(next) > limit {
+			break
+		}
+		out = next
+	}
+	if out != "" {
+		return out
+	}
+	first := dropParentheticals(sentences[0])
+	if utf8.RuneCountInString(first) <= limit {
+		return first
+	}
+	r := []rune(first)
+	cut := 0
+	for i := limit - 1; i > limit/2; i-- {
+		if (r[i] == ',' || r[i] == ';' || r[i] == ':') && i+1 < len(r) && r[i+1] == ' ' {
+			cut = i
+			break
 		}
 	}
-	if end > 0 {
-		return string(r[:end])
-	}
-	cut := limit - 1 // leave room for the ellipsis
-	for cut > 0 && r[cut] != ' ' {
-		cut--
-	}
 	if cut == 0 {
-		cut = limit - 1
+		for cut = limit - 1; cut > 0 && r[cut] != ' '; cut-- {
+		}
+		if cut == 0 {
+			cut = limit - 1
+		}
 	}
 	return strings.TrimRight(string(r[:cut]), " ,;:(—-") + "…"
+}
+
+// splitSentences splits on ". ", "! " and "? " (keeping the punctuation).
+func splitSentences(s string) []string {
+	var out []string
+	r := []rune(s)
+	start := 0
+	for i := 0; i < len(r); i++ {
+		if (r[i] == '.' || r[i] == '!' || r[i] == '?') && (i+1 == len(r) || r[i+1] == ' ') {
+			out = append(out, strings.TrimSpace(string(r[start:i+1])))
+			start = i + 1
+		}
+	}
+	if rest := strings.TrimSpace(string(r[start:])); rest != "" {
+		out = append(out, rest)
+	}
+	return out
+}
+
+func isRolePreamble(sentence string) bool {
+	l := strings.ToLower(sentence)
+	return (strings.HasPrefix(l, "you are a ") || strings.HasPrefix(l, "you are an ")) &&
+		utf8.RuneCountInString(sentence) < 80
+}
+
+// dropParentheticals removes " (…)" asides, which are detail rather than gist.
+func dropParentheticals(s string) string {
+	var b strings.Builder
+	depth := 0
+	for _, c := range s {
+		switch {
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case depth == 0:
+			b.WriteRune(c)
+		}
+	}
+	out := strings.Join(strings.Fields(b.String()), " ")
+	return strings.NewReplacer(" ,", ",", " .", ".", " :", ":", " ;", ";").Replace(out)
 }
 
 // ─── Approval detection ───────────────────────────────────────────────────────

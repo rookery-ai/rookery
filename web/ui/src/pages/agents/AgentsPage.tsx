@@ -20,7 +20,7 @@ function AgentCard({ agent }: { agent: Agent }) {
         <h3 className="font-semibold leading-tight">{agent.name}</h3>
         <StatusChip agent={agent} />
       </div>
-      <p className="line-clamp-4 flex-1 text-sm leading-relaxed text-muted-2">
+      <p className="flex-1 text-sm leading-relaxed text-muted-2">
         {agent.description || (
           <em className="text-muted-2/70">No description</em>
         )}
