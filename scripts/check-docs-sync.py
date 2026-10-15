@@ -136,7 +136,9 @@ CLAIMS = [
     # README states them as "100+"/"900+", which is an approximate claim and
     # therefore check_inflated's job, not this table's. Skills stays exact —
     # 22 is a number a reader can act on, and it moves rarely.
-    ("product", "README.md", r"\*\*(\d+) skills\*\* built in", "skills"),
+    # Plain text, not bold: the README stopped decorating its numbers when it
+    # was rewritten around the screenshots.
+    ("product", "README.md", r"(\d+) skills built in", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     # The landing page states the provider count TWICE, in different words:
     # the section heading ("N services") and the line under the logo wall
