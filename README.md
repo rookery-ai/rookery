@@ -17,27 +17,17 @@ docs/superpowers/specs/2026-10-13-demo-designer-log.md.
   <a href="https://github.com/rookery-ai/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
-Rookery runs agents that do work for you on a machine you own. It is one
-program, and it gives you a knowledge base of plain markdown files on your own
-disk, agents you build by describing them in plain language, and connections
-to the services you already use, such as email, calendars, repositories and
-home automation.
+**Rookery is a platform for agents that work on your behalf, running on hardware
+you own.** You install one program. It gives you:
 
-Agents run on a schedule or when you ask, and they tell you what they did. Put
-Rookery on a machine that stays on and the work keeps going while you are away.
+- **A place to keep what you know** — as plain markdown on your own disk.
+- **A way to build agents by describing them in plain language.**
+- **A way for those agents to reach the services you already use** — email,
+  calendars, repositories, home automation, whatever you connect.
 
-An agent can sign in to a website and click through it for you, checkout
-included. Anything it cannot undo, like paying, needs your permission first,
-and you give it once, when you build the agent. Card numbers and passwords
-live in your secrets: the agent types `${CARD_NUMBER}` and Rookery fills in
-the real value, so the model never sees it.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/pair-dark.png">
-    <img src="docs/assets/screenshots/pair-light.png" alt="Two runs of the same shopping agent. Without permission it signs in, fills the cart and stops at checkout. With permission it fills the card fields with placeholders such as ${CARD_NUMBER} and confirms the order." width="100%">
-  </picture>
-</p>
+They run on a schedule, or when you ask, and they tell you what happened. The
+whole thing is designed to sit on a machine that stays on, so the work carries
+on while you are not watching.
 
 ## Quickstart
 
@@ -96,9 +86,9 @@ make build
 </picture>
 
 Rookery connects to 130+ services with 900+ curated actions, over OAuth or an
-API key you paste in, and no third-party service sits in between. It has 22
-skills built in, and you can write your own by describing them, the same way
-you build an agent.
+API key you paste in, and no third-party service sits in between. It comes
+with 20+ core skills, and you can write your own by describing them, the same
+way you build an agent.
 
 The documentation covers each part:
 [workspaces](https://rookery.cloud/docs/concepts/workspaces),
@@ -113,6 +103,23 @@ The documentation covers each part:
 [models](https://rookery.cloud/docs/concepts/models),
 [secrets](https://rookery.cloud/docs/concepts/secrets) and
 [scheduling](https://rookery.cloud/docs/concepts/scheduling).
+
+## Agents that use the web
+
+- Agents can sign in to a website and click through it for you, checkout
+  included.
+- Anything they cannot undo, like paying, needs your permission. You give it
+  once when you build the agent, and you can take it back on the agent's page.
+- Card numbers and passwords stay in your secrets. The agent types
+  `${CARD_NUMBER}` and Rookery fills in the real value, so the model never sees
+  it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/pair-dark.png">
+    <img src="docs/assets/screenshots/pair-light.png" alt="The same shopping agent run twice. Without permission it stops at checkout. With permission it pays, typing ${CARD_NUMBER} in place of the card number." width="100%">
+  </picture>
+</p>
 
 ## How it fits together
 
