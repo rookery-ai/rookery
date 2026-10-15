@@ -291,3 +291,25 @@ three goals with outcomes and dates. Two extra round trips for one edit.
 - **Blocked on the owner:** the Google Calendar API is disabled in the OAuth
   project, so A4 (Morning brief) waits; a background orchestrator builds it as
   soon as Calendar answers.
+
+## Day 3, screenshots
+
+- **More fixes:** #361 (the coder connection test gave a reasoning model too
+  small a budget to answer, so a working key read as broken), #365 (the
+  designer's site check waited for network idle and timed out on pages that
+  never go quiet; it now waits for load), #367 (the designer described the
+  irreversible-action permission as something it would ask for mid-run; it is
+  granted once at build and withdrawn on the agent page).
+- **Found while framing screenshots:** every agent card showed half a sentence,
+  because the description was AGENT.md's first line byte-cut at 200 (#368,
+  merged, with a startup backfill). The Pushover logo shipped as an empty image
+  because its icon URL answers 200 with no body (#370).
+- **Locked out of Demo:** a master-password change left the workspace
+  unenterable and nothing could reset it. #369 adds
+  `rookery owner reset-workspace-password`, which recovers the current password
+  from its system-key copy and re-encrypts every secret; it reset Demo here.
+- **The Home lab note** swapped its rack photo for a diagram of the setup, and
+  its Compute line now agrees with its table about where Home Assistant runs.
+- **README:** the banner and features card gave way to a build-conversation
+  hero, the refused/granted purchase pair and a ten-tile tour, all captured from
+  this workspace in both themes.
