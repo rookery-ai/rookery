@@ -7,7 +7,7 @@ docs/superpowers/specs/2026-10-13-demo-designer-log.md.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.png">
-    <img src="docs/assets/screenshots/hero-light.png" alt="Rookery's agent designer has planned an agent that buys a monitor and is asking for permission to place the order. The chat and home screens sit behind it." width="100%">
+    <img src="docs/assets/screenshots/hero-light.png" alt="Rookery's agent designer asks which monitor to reorder and when it should run, then lays out the plan, flags that paying cannot be undone, and offers Allow and build." width="100%">
   </picture>
 </p>
 
