@@ -232,13 +232,15 @@ export default function NoteHeader({
         </button>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-1.5">
+        {/* The title keeps a floor and the ancestors truncate first; the row clips
+            rather than overflowing onto ".md" and the save state beside it. */}
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
           {segments.slice(0, -1).map((seg, i) => {
             const target = segments.slice(0, i + 1).join("/");
             return (
               <span
                 key={target}
-                className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2"
+                className="flex min-w-[2ch] shrink-[4] items-center gap-1.5 text-xs text-muted-2"
               >
                 <button
                   type="button"
@@ -247,7 +249,7 @@ export default function NoteHeader({
                   // (review fix) so KBPage doesn't have to re-derive it from
                   // the path string.
                   onClick={() => setParams({ path: target, dir: "1" })}
-                  className="hover:text-foreground hover:underline"
+                  className="max-w-48 truncate hover:text-foreground hover:underline"
                 >
                   {seg}
                 </button>
@@ -266,7 +268,7 @@ export default function NoteHeader({
             onKeyDown={protectedNote ? undefined : handleKeyDown}
             onBlur={protectedNote ? undefined : () => commit()}
             className={cn(
-              "min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none",
+              "min-w-[6ch] flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none",
               protectedNote
                 ? "cursor-default"
                 : "hover:border-border focus:border-ring focus:ring-[3px] focus:ring-ring/50",

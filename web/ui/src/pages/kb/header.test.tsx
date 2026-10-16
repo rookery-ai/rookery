@@ -291,3 +291,19 @@ test("an open note's icon is the largest affordance on the page", async () => {
   expect(src).toContain("text-2xl");
   expect(src).not.toContain("size-7 shrink-0 items-center justify-center rounded text-lg");
 });
+
+// A long path used to collapse the TITLE to zero width: ancestors were
+// shrink-0 and the title input was the only thing allowed to shrink, so the
+// row overflowed onto ".md" and the save state ("logs Saved .md" drawn over
+// each other) while the note's own name vanished. jsdom has no layout, so this
+// pins the shrink rules that decide it: ancestors truncate, the title keeps a
+// floor, and the row clips instead of overflowing.
+test("a long path truncates the ancestors, never the title", () => {
+  renderHeader({ path: "agents/382e59c4-64cd-4673-b4b1-067bae21ddc1/logs/run_20261013_130254.md" });
+  const ancestor = screen.getByText("382e59c4-64cd-4673-b4b1-067bae21ddc1");
+  expect(ancestor.className).toContain("truncate");
+  expect(ancestor.closest("span")?.className).not.toContain("shrink-0");
+  const title = screen.getByDisplayValue("run_20261013_130254");
+  expect(title.className).toMatch(/min-w-\[/);
+  expect(title.parentElement?.className).toContain("overflow-hidden");
+});
