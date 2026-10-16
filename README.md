@@ -81,8 +81,8 @@ make build
 ## A look around
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/tour-dark.png">
-  <img src="docs/assets/screenshots/tour-light.png" alt="Rookery's screens: the home dashboard, a knowledge base note with the AI actions menu open, a chat, an agent with its last run, the workspace picker, connected services, secrets, the agent list, skills and the AI provider settings." width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/tour-dark.gif">
+  <img src="docs/assets/screenshots/tour-light.gif" alt="A tour of Rookery: the home dashboard, an agent and its last run, a knowledge base note with the AI actions menu, a chat, searching services, AI provider settings, secrets and skills." width="100%">
 </picture>
 
 Rookery connects to 130+ services with 900+ curated actions, over OAuth or an
