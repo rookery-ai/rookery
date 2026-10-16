@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.3](https://github.com/rookery-ai/rookery/compare/v0.18.2...v0.18.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **web/ui:** KB header truncates the path instead of overlapping it ([#373](https://github.com/rookery-ai/rookery/issues/373)) ([d0efd5a](https://github.com/rookery-ai/rookery/commit/d0efd5a478dc7e8391ea135cab654353072ce095))
+
+
+### Documentation
+
+* **readme:** sharper hero and an animated tour ([#374](https://github.com/rookery-ai/rookery/issues/374)) ([46a65c2](https://github.com/rookery-ai/rookery/commit/46a65c24b1ee9ae52fd8fdbf8163cfc528662c95))
+
 ## [0.18.2](https://github.com/rookery-ai/rookery/compare/v0.18.1...v0.18.2) (2026-10-15)
 
 
