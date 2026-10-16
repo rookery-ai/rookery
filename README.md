@@ -6,8 +6,8 @@ docs/superpowers/specs/2026-10-13-demo-designer-log.md.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.png">
-    <img src="docs/assets/screenshots/hero-light.png" alt="Rookery's agent designer has planned an agent that buys a monitor and is asking for permission to place the order. The chat and home screens sit behind it." width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.gif">
+    <img src="docs/assets/screenshots/hero-light.gif" alt="Building an agent in Rookery: a vague request to reorder a monitor, the designer asking which one and when it should run, the answer, then a plan that flags paying cannot be undone and offers Allow and build." width="100%">
   </picture>
 </p>
 
@@ -81,8 +81,8 @@ make build
 ## A look around
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/tour-dark.png">
-  <img src="docs/assets/screenshots/tour-light.png" alt="Rookery's screens: the home dashboard, a knowledge base note with the AI actions menu open, a chat, an agent with its last run, the workspace picker, connected services, secrets, the agent list, skills and the AI provider settings." width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/tour-dark.gif">
+  <img src="docs/assets/screenshots/tour-light.gif" alt="A tour of Rookery: the home dashboard, an agent and its last run, a knowledge base note with the AI actions menu, a chat, searching services, AI provider settings, secrets and skills." width="100%">
 </picture>
 
 Rookery connects to 130+ services with 900+ curated actions, over OAuth or an
