@@ -6,8 +6,8 @@ docs/superpowers/specs/2026-10-13-demo-designer-log.md.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.png">
-    <img src="docs/assets/screenshots/hero-light.png" alt="Rookery's agent designer asks which monitor to reorder and when it should run, then lays out the plan, flags that paying cannot be undone, and offers Allow and build." width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.gif">
+    <img src="docs/assets/screenshots/hero-light.gif" alt="Building an agent in Rookery: a vague request to reorder a monitor, the designer asking which one and when it should run, the answer, then a plan that flags paying cannot be undone and offers Allow and build." width="100%">
   </picture>
 </p>
 
