@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/sandbox"
 )
 
 // TestLiveCLIReadsAnOversizedPromptFromStdin drives the REAL coder binaries
@@ -51,6 +53,48 @@ func TestLiveCLIReadsAnOversizedPromptFromStdin(t *testing.T) {
 			t.Logf("live %s reply=%q", tc.name, res.Text)
 		})
 	}
+}
+
+// TestLiveSandboxedClaudeToolCallWithStdinPrompt is the shape every scheduled
+// run takes on Linux: `rookery __sandbox-exec` applies Landlock and then execs
+// claude, with the prompt on a stdin pipe and a write tool granted. The stdin
+// change has to survive that re-exec, and the model has to actually act.
+//
+// Needs ROOKERY_LIVE_CODER=1 plus ROOKERY_LIVE_SELF_EXE naming a built rookery
+// binary: the test binary has no sandbox helper, so it cannot stand in for one.
+func TestLiveSandboxedClaudeToolCallWithStdinPrompt(t *testing.T) {
+	if os.Getenv("ROOKERY_LIVE_CODER") != "1" {
+		t.Skip("set ROOKERY_LIVE_CODER=1 to run against the real coder CLIs")
+	}
+	self := os.Getenv("ROOKERY_LIVE_SELF_EXE")
+	if self == "" {
+		t.Skip("set ROOKERY_LIVE_SELF_EXE to a built rookery binary")
+	}
+	if !sandbox.Supported() {
+		t.Skip("Landlock unavailable; this test would prove nothing")
+	}
+	bin := lookBin("claude")
+	if bin == "" {
+		t.Skip("claude not installed")
+	}
+	dataDir, workDir := t.TempDir(), t.TempDir()
+	c := New(bin, 3*time.Minute, t.TempDir(), dataDir).WithSandbox(true).
+		WithDir(workDir).WithAllowedTools("Bash,Write,Read")
+	c.selfExe = self
+
+	prompt := "Create a file named proof.txt in the current directory containing exactly the text STDIN-OK and nothing else. Then reply DONE.\n\n" +
+		strings.Repeat(`Filler: "quoted words" and more words. `, 1200)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	res, err := c.Generate(ctx, "wsLive", prompt)
+	if err != nil {
+		t.Fatalf("sandboxed Generate: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(workDir, "proof.txt"))
+	if err != nil || strings.TrimSpace(string(got)) != "STDIN-OK" {
+		t.Fatalf("proof.txt = %q (err %v); reply %q", got, err, res.Text)
+	}
+	t.Logf("sandboxed claude wrote proof.txt; reply=%q", res.Text)
 }
 
 func lookBin(name string) string {

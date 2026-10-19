@@ -126,6 +126,25 @@ test("Local engine: a typed model is sent with the save payload", async () => {
   expect(putCall.body).toMatchObject({ kind: "local", model: "ollama-cloud/glm-5.2" });
 });
 
+// Claude Code now receives the model as --model, so an API model name carried
+// across an engine switch (the form shares one model field) would break every
+// Claude invocation instead of being silently ignored as it used to be.
+test("Switching from API to Local CLI does not carry the API model across", async () => {
+  const calls = mockFetch();
+  wrap({ ...LOCAL_CODER, kind: "api", provider: "openrouter", model: "~deepseek/deepseek-flash-latest" });
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: /local cli/i }));
+  expect(screen.getByLabelText(/model \(optional\)/i)).toHaveValue("");
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+
+  await waitFor(() => {
+    expect(calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")).toBeDefined();
+  });
+  const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")!;
+  expect(putCall.body).toMatchObject({ kind: "local", model: "" });
+});
+
 // OpenCode's requirement is surfaced as help text, never as a blocking
 // validation: a user relying on a host-level default must not be locked out.
 test("Local engine: selecting OpenCode explains why a model is needed, without blocking save", async () => {
