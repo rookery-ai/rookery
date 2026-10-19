@@ -508,9 +508,7 @@ func serveCmd() *cli.Command {
 				if browserReady {
 					cd = cd.WithBrowser(browserMgr, browser.Policy{})
 					if browserBridge != nil && browserBridge.Addr() != "" {
-						if p, err := os.Executable(); err == nil {
-							browserBin = p
-						}
+						browserBin = coder.BridgeBin()
 					}
 				}
 
@@ -554,9 +552,7 @@ func serveCmd() *cli.Command {
 					}
 					var kbBin string
 					if kbBridge != nil && kbBridge.URL() != "" {
-						if p, err := os.Executable(); err == nil {
-							kbBin = p
-						}
+						kbBin = coder.BridgeBin()
 						if kbBin != "" {
 							kbTok := kbBridge.Register(workspaceID, false)
 							defer kbBridge.Unregister(kbTok)
@@ -578,9 +574,7 @@ func serveCmd() *cli.Command {
 								for _, d := range connReg.ToolDefs(bound) {
 									connTools = append(connTools, d.Name)
 								}
-								if p, err := os.Executable(); err == nil {
-									connBin = p
-								}
+								connBin = coder.BridgeBin()
 							}
 						}
 					}
@@ -596,9 +590,7 @@ func serveCmd() *cli.Command {
 							for _, d := range mcp.ToolDefs(bound) {
 								mcpTools = append(mcpTools, d.Name)
 							}
-							if p, err := os.Executable(); err == nil {
-								mcpBin = p
-							}
+							mcpBin = coder.BridgeBin()
 						}
 					}
 					if browserBin != "" {

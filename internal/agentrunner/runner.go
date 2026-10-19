@@ -1598,12 +1598,10 @@ func backendTypeOf(c *coder.Coder) string {
 // per-field copying here; a new field would be dropped the same way.
 func addUsage(a, b coder.Usage) coder.Usage { return a.Add(b) }
 
-// connectorBinPath is the absolute path to the running rookery binary, which a CLI
-// coder invokes as `<bin> connector exec …`. Falls back to "" (bare name via PATH) if
+// connectorBinPath is how a CLI coder spells the running rookery binary when it
+// invokes `<bin> connector exec …` — the absolute path, or the bare name on
+// Windows (see coder.BridgeBin). Falls back to "" (bare name via PATH) if
 // os.Executable() fails.
 func connectorBinPath() string {
-	if p, err := os.Executable(); err == nil {
-		return p
-	}
-	return ""
+	return coder.BridgeBin()
 }

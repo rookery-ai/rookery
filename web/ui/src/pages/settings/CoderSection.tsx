@@ -31,7 +31,9 @@ function localModelPlaceholder(bin: string): string {
   if (b.includes("codex")) return "gpt-5.5-codex";
   if (b.includes("gemini")) return "gemini-2.5-pro";
   if (b.includes("cursor")) return "sonnet-4.5";
-  if (b.includes("claude")) return "inherits your login";
+  // Not "inherits your login": Rookery runs Claude Code with its own settings
+  // suppressed, so a default model picked inside Claude Code never applies.
+  if (b.includes("claude")) return "opus — empty uses Claude Code's built-in default";
   return "model name";
 }
 
@@ -235,7 +237,13 @@ export function CoderSection({
                 name="engine"
                 value={eng}
                 checked={engine === eng}
-                onChange={() => setEngine(eng)}
+                onChange={() => {
+                  // A model name means something only to the engine it was
+                  // typed for, and a CLI coder now RECEIVES it (Claude Code as
+                  // --model), so carrying an API model across would break it.
+                  if (eng !== engine) setModel("");
+                  setEngine(eng);
+                }}
                 className="sr-only"
               />
               {eng === "local" ? "Local CLI" : "API"}
@@ -254,7 +262,12 @@ export function CoderSection({
               <select
                 id="coder_bin"
                 value={bin}
-                onChange={(e) => setBin(e.target.value)}
+                onChange={(e) => {
+                  // Same reason as the engine toggle: OpenCode's
+                  // "provider/model" is not a model Claude Code accepts.
+                  if (e.target.value !== bin) setModel("");
+                  setBin(e.target.value);
+                }}
                 className="w-full rounded-md border border-border bg-background p-2 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               >
                 <option value="">Select a coder…</option>
