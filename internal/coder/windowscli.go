@@ -46,18 +46,24 @@ func windowsCommandLineLen(argv []string) int {
 		if i > 0 {
 			n++
 		}
-		n += len(utf16.Encode([]rune(windowsEscapeArg(a))))
+		n += windowsEscapedLen(a)
 	}
 	return n
 }
 
-// windowsEscapeArg mirrors syscall.EscapeArg (which exists only on Windows),
-// so the length above is the one CreateProcess will actually see — including
-// the backslash Go adds before every double quote, of which a prompt has many.
-func windowsEscapeArg(s string) string {
+// windowsEscapedLen is the UTF-16 length of syscall.EscapeArg(s) (which exists
+// only on Windows), so the total above is the one CreateProcess will actually
+// see — including the backslash Go adds before every double quote, of which a
+// prompt has many.
+//
+// It counts rather than builds the escaped string on purpose: only the length
+// is ever needed, and constructing a quoted copy of the prompt is exactly the
+// pattern code scanning flags as unsafe quoting.
+func windowsEscapedLen(s string) int {
 	if s == "" {
-		return `""`
+		return 2 // ""
 	}
+	n := len(utf16.Encode([]rune(s)))
 	needsBackslash, hasSpace := false, false
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -67,39 +73,33 @@ func windowsEscapeArg(s string) string {
 			hasSpace = true
 		}
 	}
-	if !needsBackslash && !hasSpace {
-		return s
+	if !hasSpace && !needsBackslash {
+		return n
+	}
+	if hasSpace {
+		n += 2 // surrounding quotes
 	}
 	if !needsBackslash {
-		return `"` + s + `"`
+		return n
 	}
-	var b strings.Builder
-	if hasSpace {
-		b.WriteByte('"')
-	}
+	// A run of backslashes is doubled when a quote follows it, and the quote
+	// itself gains one; with surrounding quotes, a trailing run is doubled too.
 	slashes := 0
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch c {
-		default:
-			slashes = 0
+		switch s[i] {
 		case '\\':
 			slashes++
 		case '"':
-			for ; slashes > 0; slashes-- {
-				b.WriteByte('\\')
-			}
-			b.WriteByte('\\')
+			n += slashes + 1
+			slashes = 0
+		default:
+			slashes = 0
 		}
-		b.WriteByte(c)
 	}
 	if hasSpace {
-		for ; slashes > 0; slashes-- {
-			b.WriteByte('\\')
-		}
-		b.WriteByte('"')
+		n += slashes
 	}
-	return b.String()
+	return n
 }
 
 // BridgeBin is how a CLI coder should spell the rookery binary when it runs

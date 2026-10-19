@@ -193,21 +193,24 @@ func TestCommandLineLengthGuard(t *testing.T) {
 	}
 }
 
-// windowsEscapeArg must agree with syscall.EscapeArg, or the guard misjudges how
-// close a prompt is to the limit. These are the documented CommandLineToArgvW
-// cases plus the empty argument Rookery passes for --setting-sources.
-func TestWindowsEscapeArgMatchesGo(t *testing.T) {
+// windowsEscapedLen must agree with syscall.EscapeArg, or the guard misjudges
+// how close a prompt is to the limit. These are the documented
+// CommandLineToArgvW cases plus the empty argument Rookery passes for
+// --setting-sources; each expected value is what EscapeArg produces.
+func TestWindowsEscapedLenMatchesGo(t *testing.T) {
 	for in, want := range map[string]string{
-		"":          `""`,
-		"plain":     `plain`,
-		"two words": `"two words"`,
-		`a"b`:       `a\"b`,
-		`a\b`:       `a\b`,
-		`a b\`:      `"a b\\"`,
-		`a\"b c`:    `"a\\\"b c"`,
+		"":            `""`,
+		"plain":       `plain`,
+		"two words":   `"two words"`,
+		`a"b`:         `a\"b`,
+		`a\b`:         `a\b`,
+		`a b\`:        `"a b\\"`,
+		`a\"b c`:      `"a\\\"b c"`,
+		`ab"\`:        `ab\"\`,
+		"héllo wörld": `"héllo wörld"`,
 	} {
-		if got := windowsEscapeArg(in); got != want {
-			t.Errorf("windowsEscapeArg(%q) = %q, want %q", in, got, want)
+		if got, wantN := windowsEscapedLen(in), len([]rune(want)); got != wantN {
+			t.Errorf("windowsEscapedLen(%q) = %d, want %d (len of %s)", in, got, wantN, want)
 		}
 	}
 	if got := windowsCommandLineLen([]string{"a", "b c"}); got != len(`a "b c"`) {
