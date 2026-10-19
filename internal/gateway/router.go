@@ -197,28 +197,35 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 // ─── Command handlers ──────────────────────────────────────────────────────────
 
 func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)) error {
-	// Link the Telegram user to the internal user (one-to-one: only owner's chat ID).
-	existing, _ := r.db.GetPlatformIdentity(msg.Platform, msg.PlatformUserID)
+	// Link this chat to the workspace that owns the bot it was sent to. Links
+	// held with OTHER workspaces' bots are irrelevant — one account may talk to
+	// a bot per workspace — so only this workspace is consulted.
+	existing, _ := r.db.GetPlatformIdentity(msg.WorkspaceID, msg.Platform, msg.PlatformUserID)
 	if existing != nil {
 		send("You're already linked! Send /help to see available commands.")
 		return nil
 	}
 
-	// Check if this owner already has an identity linked — personal bots are 1:1.
-	// We allow only one linked Telegram identity per user per platform.
-	// If a different chat ID is already linked, reject.
+	// A workspace's bot serves one chat (a DM, or one group). If a different
+	// chat already holds it, refuse.
+	alreadyLinked := "This bot is already linked to another chat. Unlink it in Rookery's connections page to link a different one."
 	rows, _ := r.db.ListPlatformIdentities(msg.WorkspaceID, msg.Platform)
 	if len(rows) > 0 {
-		send("This bot is already linked to another account. Contact your administrator to reset the link.")
+		send(alreadyLinked)
 		return nil
 	}
 
-	if err := r.db.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := r.db.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID:             uuid.New().String(),
 		WorkspaceID:    msg.WorkspaceID,
 		Platform:       msg.Platform,
 		PlatformUserID: msg.PlatformUserID,
 	}); err != nil {
+		// Another chat's /start won the race between the check above and here.
+		if errors.Is(err, db.ErrAlreadyLinked) {
+			send(alreadyLinked)
+			return nil
+		}
 		return fmt.Errorf("link identity: %w", err)
 	}
 

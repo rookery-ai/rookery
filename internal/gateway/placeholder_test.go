@@ -76,7 +76,7 @@ func newDispatchHarness(t *testing.T, run func(send, sendProgress func(string)))
 	if err := database.CreateWorkspace(&db.Workspace{ID: "ws1", Name: "w"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id-1", WorkspaceID: "ws1", Platform: "discord", PlatformUserID: "u1",
 	}); err != nil {
 		t.Fatal(err)

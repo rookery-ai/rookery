@@ -599,9 +599,9 @@ delegates subcommands via `github.com/urfave/cli/v3`. The `serve` subcommand:
 ### Inbound message pipeline
 
 ```
-Per-workspace chat adapter (Telegram, Discord)
-  → GatewayManager.route()
-    → IdentityResolver  (platform_user_id → internal workspace_id via platform_identities table)
+Per-workspace chat adapter (Telegram, Discord, Slack) — stamps msg.WorkspaceID with ITS OWN workspace
+  → GatewayManager.dispatch()
+    → is this chat linked to THIS workspace? (platform_identities, scoped by workspace_id)
     → Router.Handle()
       → /agent  → agentdesigner.Flow (conversational FSM)
       → /skill  → skilldesigner.Flow (conversational FSM; list/create/cancel)
@@ -613,6 +613,38 @@ Per-workspace chat adapter (Telegram, Discord)
       → plain text → one-off chat (coder.Coder with read+write KB tools + the workspace's connector tools; see "Chat knowledge-base access" + "Chat connector access")
 ```
 
+**A workspace is bound to its BOT, never to the person's chat account.** `dispatch`
+used to resolve the sender with a global `GetPlatformIdentity(platform, user)` and
+OVERWRITE the adapter's workspace with the result, while `platform_identities`
+carried `UNIQUE(platform, platform_user_id)`. So an owner linked to the Demo
+workspace who connected a second bot for Personal and sent it `/start` was routed
+into Demo and answered "You're already linked!" — out of **Demo's** bot, so the bot
+they had messaged appeared to do nothing at all. Migration 021 drops that
+constraint (keeping `UNIQUE(workspace_id, platform)`: a bot still serves one chat)
+and every lookup is now scoped by workspace. Four things are load-bearing:
+
+- **`LinkPlatformIdentity` is a plain insert, never an upsert on
+  `(workspace_id, platform)`.** An upsert would let a second chat's `/start`, racing
+  `handleStart`'s "already linked?" check, silently replace the linked chat and take
+  the workspace. A conflict with a different chat is `db.ErrAlreadyLinked`.
+- **Identity on Telegram is the CHAT id, so a group is a valid link target** —
+  `/start` sent inside a group lets every member drive the workspace, with full
+  access (there is no per-member control; that was a deliberate choice over
+  per-person links). `stripOwnMention` turns `/help@ThisBot` into `/help` — and only
+  THIS bot's suffix, because telebot already drops a command naming another bot, so
+  two workspace bots in one group never both answer. An unlinked group
+  (`Message.Group`) gets no "private bot" reply, or privacy-mode-off bots would answer
+  every message in any group they were added to.
+- **A basic group upgraded to a supergroup gets a NEW chat id** (promoting the bot to
+  admin can trigger it). `OnMigration` sends a control message
+  (`Message.MigrateFromID`) and `RekeyPlatformIdentity` moves the link, or it would
+  silently stop matching.
+- **Migration 021 is one-way in practice**: pre-021 code upserts with
+  `ON CONFLICT(platform, platform_user_id)`, which SQLite rejects against the new
+  schema. Roll back by restoring a database snapshot, not by running an older binary.
+  `ensureBotUnused` still refuses one bot across two workspaces — both would open a
+  session for the token and answer every message twice.
+
 ### Key packages
 
 | Package | Responsibility |
@@ -622,7 +654,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/auth` | `BootstrapOwner`, `Authenticate` (owner login), `ChangePassword` (owner), `CreateWorkspace(name, about)`, `GenerateSecretsSalt`, bcrypt |
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
-| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
+| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router` (identity is checked per workspace in `GatewayManager.dispatch` — see "A workspace is bound to its BOT"); adapters `TelegramGateway` (DMs and groups — chat-id identity) + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
 | `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one, recovers `-layout` column blocks as markdown tables, and **falls back to OCR** via `pdftoppm`+`tesseract` when there is no usable text layer), json, and images (OCR via tesseract when installed; an honest stub naming what is missing when not). Embedded images are extracted from docx/pptx and returned in `Result.Assets` — the package stays pure, so the CALLER stores them (see "KB import fidelity" below). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); the sanctioned reverse is `internal/export`. |
 | `internal/export` | Markdown note → HTML, DOCX or PDF, the sanctioned reverse of `internal/convert` and a separate package precisely so convert stays into-markdown-only. HTML and DOCX are pure Go and always available; PDF shells out to a headless renderer. **The renderer is looked for in Playwright's cache BEFORE PATH** (`browser.ChromiumExecutable`), because the platform installs its own Chromium via `rookery browser install` and probing PATH alone reported "PDF unavailable" on a host whose `/healthz` said `"browser": true`. `pandoc` is deliberately NOT a supported engine, and has now been rejected TWICE for different reasons: as a PDF engine it cannot render HTML→PDF without a LaTeX engine it does not bundle, so probing it turned an honest "unavailable" into a button that failed with an opaque 500; as a DOCX engine it is unverifiable here and would produce stacked cells where the grid should be (see "Export fidelity" below). A `layout.go` AST transformer gives both renderers columns, alignment and real image widths from one pass, so a `pandoc` route would add a host dependency to be strictly worse. Chromium's argv carries `--no-pdf-header-footer`, or every page is stamped with the print date and the source `file://` temp path. |
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |

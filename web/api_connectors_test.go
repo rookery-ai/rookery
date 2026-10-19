@@ -174,7 +174,7 @@ func TestAPIConnectors_GET_ReportsLinkState(t *testing.T) {
 		}
 	}
 
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id1", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "100000001",
 	}); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestAPIConnectors_Primary_RequiresALinkedPlatform(t *testing.T) {
 		t.Fatalf("expected 400 for an unlinked platform, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id1", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u1",
 	}); err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func TestAPIConnectors_Unlink_KeepsCredentialsAndClearsPrimary(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id1", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u1",
 	}); err != nil {
 		t.Fatal(err)
@@ -326,12 +326,12 @@ func TestAPIConnectors_GET_PrimaryFallback_PicksFirstLinked(t *testing.T) {
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id-discord", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u-discord",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: "id-telegram", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "u-telegram",
 	}); err != nil {
 		t.Fatal(err)

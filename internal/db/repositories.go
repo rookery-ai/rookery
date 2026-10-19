@@ -376,18 +376,44 @@ func scanPlatformConnection(s scanner) (*PlatformConnection, error) {
 
 // ── Platform identities ────────────────────────────────────────────────────
 
-func (d *DB) UpsertPlatformIdentity(i *PlatformIdentity) error {
-	_, err := d.Exec(`INSERT INTO platform_identities(id, workspace_id, platform, platform_user_id, linked_at)
+// ErrAlreadyLinked is returned by LinkPlatformIdentity when the workspace's bot
+// is already linked to a DIFFERENT chat on that platform.
+var ErrAlreadyLinked = errors.New("workspace already linked to another chat on this platform")
+
+// LinkPlatformIdentity links a chat to a workspace's bot. A workspace is bound
+// to its bot, not to the person: the same chat account may be linked to any
+// number of workspaces, one per bot.
+//
+// It is deliberately NOT an upsert on (workspace_id, platform). That would let a
+// second chat's /start, racing the caller's "already linked?" check, silently
+// replace the linked chat — handing someone else the workspace. Linking the
+// chat that is already linked is a no-op; any other conflict is ErrAlreadyLinked.
+func (d *DB) LinkPlatformIdentity(i *PlatformIdentity) error {
+	res, err := d.Exec(`INSERT INTO platform_identities(id, workspace_id, platform, platform_user_id, linked_at)
 		VALUES(?,?,?,?,datetime('now'))
-		ON CONFLICT(platform, platform_user_id) DO UPDATE SET
-		  workspace_id=excluded.workspace_id`,
+		ON CONFLICT(workspace_id, platform) DO NOTHING`,
 		i.ID, i.WorkspaceID, i.Platform, i.PlatformUserID)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	existing, err := d.GetPlatformIdentity(i.WorkspaceID, i.Platform, i.PlatformUserID)
+	if err == nil && existing != nil {
+		return nil
+	}
+	return ErrAlreadyLinked
 }
 
-func (d *DB) GetPlatformIdentity(platform, platformUserID string) (*PlatformIdentity, error) {
+// GetPlatformIdentity returns the link between this chat and this workspace's
+// bot. It is scoped to the workspace on purpose: a lookup by chat id alone
+// cannot tell which bot a message arrived on, and once routed a message to the
+// Demo workspace that had been sent to the Personal bot.
+func (d *DB) GetPlatformIdentity(workspaceID, platform, platformUserID string) (*PlatformIdentity, error) {
 	row := d.QueryRow(`SELECT id,workspace_id,platform,platform_user_id,linked_at
-		FROM platform_identities WHERE platform=? AND platform_user_id=?`, platform, platformUserID)
+		FROM platform_identities WHERE workspace_id=? AND platform=? AND platform_user_id=?`,
+		workspaceID, platform, platformUserID)
 	var i PlatformIdentity
 	var linkedAt string
 	err := row.Scan(&i.ID, &i.WorkspaceID, &i.Platform, &i.PlatformUserID, &linkedAt)
@@ -430,6 +456,18 @@ func (d *DB) ListPlatformIdentities(workspaceID, platform string) ([]*PlatformId
 		out = append(out, &i)
 	}
 	return out, rows.Err()
+}
+
+// RekeyPlatformIdentity moves every link on oldID to newID. A Telegram group
+// that is upgraded to a supergroup is given a new chat id, and without this its
+// link would silently stop matching. Returns the number of links moved.
+func (d *DB) RekeyPlatformIdentity(platform, oldID, newID string) (int64, error) {
+	res, err := d.Exec(`UPDATE platform_identities SET platform_user_id=?
+		WHERE platform=? AND platform_user_id=?`, newID, platform, oldID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // DeletePlatformIdentity unlinks a workspace from one chat platform. Deleting an

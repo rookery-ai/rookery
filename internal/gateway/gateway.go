@@ -24,10 +24,16 @@ import (
 type Message struct {
 	Platform       string // "telegram"
 	PlatformUserID string // platform-specific user/chat ID
-	WorkspaceID    string // resolved internal user ID (empty if not yet linked)
+	WorkspaceID    string // the workspace that owns the bot that received this message
 	Text           string
 	MessageID      string // platform message ID (used to delete incoming messages)
 	Attachment     *Attachment
+	// Group marks a message from a chat several people share (a Telegram group).
+	// Set by the adapter so dispatch need not know each platform's chat types.
+	Group bool
+	// MigrateFromID, when set, makes this a control message rather than text: the
+	// chat formerly known by this id is now PlatformUserID.
+	MigrateFromID string
 }
 
 // Attachment is a file a user sent through a chat platform. Adapters download
@@ -398,6 +404,22 @@ func (m *GatewayManager) sendPanicReply(msg Message) {
 	}
 }
 
+// rekeyMigratedChat follows a chat to its new id. Telegram gives a group a new
+// chat id when it is upgraded to a supergroup (making the bot an admin can
+// trigger it), and a link left on the old id would silently stop matching.
+func (m *GatewayManager) rekeyMigratedChat(msg Message) {
+	n, err := m.db.RekeyPlatformIdentity(msg.Platform, msg.MigrateFromID, msg.PlatformUserID)
+	if err != nil {
+		slog.Error("gateway: re-key migrated chat failed", "platform", msg.Platform,
+			"workspace_id", msg.WorkspaceID, "from", msg.MigrateFromID, "to", msg.PlatformUserID, "err", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("gateway: chat migrated, link re-keyed", "platform", msg.Platform,
+			"from", msg.MigrateFromID, "to", msg.PlatformUserID, "links", n)
+	}
+}
+
 // goSafe runs fn in a new goroutine under its own panic guard. A background
 // goroutine spawned off the message path (auto-delete timers, deferred
 // cleanups, progress fan-out) is NOT covered by dispatchFunc's recover — Go's
@@ -419,21 +441,32 @@ func (m *GatewayManager) goSafe(label string, fn func()) {
 }
 
 // dispatch is called by adapters when a message arrives.
-// It resolves the platform identity and enforces that only the linked user
-// can interact with the bot. Unlinked senders may only use /start.
+//
+// The workspace is decided by the BOT, never by the sender: every adapter stamps
+// msg.WorkspaceID with the workspace that owns it, and dispatch only checks that
+// the sender is the chat linked to THAT workspace. It used to resolve the sender
+// globally and overwrite msg.WorkspaceID with the result, so one account linked
+// to Demo who messaged the Personal bot was routed into Demo and answered out of
+// Demo's bot. Unlinked senders may only use /start.
 func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
-	identity, err := m.db.GetPlatformIdentity(msg.Platform, msg.PlatformUserID)
-	if err != nil {
-		// Sender is not linked. Only /start is permitted.
+	if msg.MigrateFromID != "" {
+		m.rekeyMigratedChat(msg)
+		return
+	}
+
+	if _, err := m.db.GetPlatformIdentity(msg.WorkspaceID, msg.Platform, msg.PlatformUserID); err != nil {
+		// Sender is not linked to this bot's workspace. Only /start is permitted.
 		cmd, _ := ParseCommand(msg.Text)
 		if cmd != "start" {
-			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID,
-				"This is a private bot. Send /start to link your account.")
+			// A group stays silent: with privacy mode off the bot sees every
+			// message in it, and answering each one would spam a group the bot
+			// was merely added to.
+			if !msg.Group {
+				_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID,
+					"This is a private bot. Send /start to link your account.")
+			}
 			return
 		}
-		// For /start, keep msg.WorkspaceID = ownerWorkspaceID so the router can create the identity.
-	} else {
-		msg.WorkspaceID = identity.WorkspaceID
 	}
 
 	// For plain-text messages (not commands), use typing indicator + placeholder
