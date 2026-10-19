@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/rookery-ai/rookery/compare/v0.18.3...v0.18.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **gateway:** bind each workspace to its own chat bot ([#376](https://github.com/rookery-ai/rookery/issues/376)) ([d56a1a2](https://github.com/rookery-ai/rookery/commit/d56a1a28c3250001531f1053d6339b83001a85c3))
+
 ## [0.18.3](https://github.com/rookery-ai/rookery/compare/v0.18.2...v0.18.3) (2026-10-16)
 
 
