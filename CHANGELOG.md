@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/rookery-ai/rookery/compare/v0.18.4...v0.18.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **coder:** pass CLI prompts on stdin so the designer works on Windows ([#378](https://github.com/rookery-ai/rookery/issues/378)) ([3e9a039](https://github.com/rookery-ai/rookery/commit/3e9a03996c3263c37ab390792c977256660a2f3f))
+
 ## [0.18.4](https://github.com/rookery-ai/rookery/compare/v0.18.3...v0.18.4) (2026-10-19)
 
 
