@@ -31,7 +31,9 @@ function localModelPlaceholder(bin: string): string {
   if (b.includes("codex")) return "gpt-5.5-codex";
   if (b.includes("gemini")) return "gemini-2.5-pro";
   if (b.includes("cursor")) return "sonnet-4.5";
-  if (b.includes("claude")) return "inherits your login";
+  // Not "inherits your login": Rookery runs Claude Code with its own settings
+  // suppressed, so a default model picked inside Claude Code never applies.
+  if (b.includes("claude")) return "opus — empty uses Claude Code's built-in default";
   return "model name";
 }
 

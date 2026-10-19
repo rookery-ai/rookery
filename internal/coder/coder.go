@@ -12,9 +12,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -517,7 +519,19 @@ func (c *Coder) generateCLI(ctx context.Context, workspaceID, prompt string) (*R
 
 	start := time.Now()
 
-	args := backend.buildArgs(prompt, c.noTools, c.effectiveAllowedTools())
+	// The prompt goes over stdin wherever the backend supports it, never on the
+	// command line — see stdinPrompter for the Windows limit this avoids.
+	var args []string
+	var stdin io.Reader
+	if sp, ok := backend.(stdinPrompter); ok {
+		args = sp.stdinArgs(c.noTools, c.effectiveAllowedTools())
+		stdin = strings.NewReader(prompt)
+	} else {
+		args = backend.buildArgs(prompt, c.noTools, c.effectiveAllowedTools())
+		if err := checkCommandLineLength(runtime.GOOS, c.bin, args); err != nil {
+			return nil, err
+		}
+	}
 	env := c.buildEnv(userDir, backend)
 	runDir := userDir
 	if c.workDir != "" {
@@ -532,19 +546,25 @@ func (c *Coder) generateCLI(ctx context.Context, workspaceID, prompt string) (*R
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Stdin = stdin // nil leaves the null device, as before
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 		}
+		// A process that never started cannot have hit a usage limit, and it
+		// has no output, which is exactly the Claude backend's limit signature.
+		// So this must be decided BEFORE looksLikeLimit. In the other order every
+		// launch failure (a missing binary, a Windows command line over its
+		// length cap) reached the owner as "claude hit its usage limit".
+		if cmd.ProcessState == nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err() // cancelled before launch, not a broken coder
+			}
+			return nil, c.startErr(err)
+		}
 		if backend.looksLikeLimit(stdout.String(), stderr.String()) {
 			return nil, ErrUsageLimit
-		}
-		// A binary that is not installed never produced output to report, and
-		// wrapping it in the stdout/stderr message below buries the one fact
-		// that matters behind two empty sections.
-		if mapped := c.mapCLIErr(err); errors.Is(mapped, ErrCoderUnreachable) {
-			return nil, mapped
 		}
 		return nil, fmt.Errorf("coder exited with error: %w\nstdout: %.500s\nstderr: %.500s", err, stdout.String(), stderr.String())
 	}
@@ -658,6 +678,17 @@ func (c *Coder) mapCLIErr(err error) error {
 		return fmt.Errorf("%w: the coder binary %q is not installed or is not on PATH", ErrCoderUnreachable, c.bin)
 	}
 	return err
+}
+
+// startErr classifies a subprocess that could not be launched at all. Both
+// causes seen in practice, a missing binary and the OS refusing the exec, mean
+// the coder is not there to answer, so both are ErrCoderUnreachable with the
+// OS's own reason kept in the detail.
+func (c *Coder) startErr(err error) error {
+	if mapped := c.mapCLIErr(err); errors.Is(mapped, ErrCoderUnreachable) {
+		return mapped
+	}
+	return fmt.Errorf("%w: the coder binary %q could not be started: %v", ErrCoderUnreachable, c.bin, err)
 }
 
 // Chat sends a conversational message to the coder with optional history. It is
@@ -883,7 +914,7 @@ func dedupePaths(paths ...string) []string {
 func (c *Coder) selectBackend() CoderBackend {
 	switch c.backendType {
 	case "claude":
-		return &claudeBackend{sysClaudeDir: c.sysClaudeDir}
+		return &claudeBackend{sysClaudeDir: c.sysClaudeDir, model: c.cliModel}
 	case "generic":
 		return &genericCLIBackend{}
 	case "opencode":
@@ -897,7 +928,7 @@ func (c *Coder) selectBackend() CoderBackend {
 	}
 	// Auto-detect by binary name.
 	if strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude") {
-		return &claudeBackend{sysClaudeDir: c.sysClaudeDir}
+		return &claudeBackend{sysClaudeDir: c.sysClaudeDir, model: c.cliModel}
 	}
 	return &genericCLIBackend{}
 }
@@ -943,7 +974,14 @@ func (c *Coder) buildEnv(homeDir string, backend CoderBackend) []string {
 			overrides[k] = v
 		}
 	}
-	return overrideEnv(os.Environ(), overrides)
+	env := overrideEnv(os.Environ(), overrides)
+	// On Windows the coder reaches the bridges as the bare name `rookery` (see
+	// BridgeBin), so the binary's own directory must be on the PATH it sees —
+	// an installer that put it on the user PATH is not something to rely on.
+	if runtime.GOOS == "windows" && c.selfExe != "" {
+		env = prependPathDir(env, filepath.Dir(c.selfExe), ";")
+	}
+	return env
 }
 
 func overrideEnv(base []string, overrides map[string]string) []string {
