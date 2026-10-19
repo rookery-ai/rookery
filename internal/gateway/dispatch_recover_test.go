@@ -62,7 +62,7 @@ func newDispatchTestManager(t *testing.T, router messageHandler, platform, works
 	if err := database.CreateWorkspace(&db.Workspace{ID: workspaceID, Name: "dispatch-recover-test"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID:             "ident-1",
 		WorkspaceID:    workspaceID,
 		Platform:       platform,

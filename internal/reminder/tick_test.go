@@ -137,7 +137,7 @@ func TestTickSendsToChatWhenConnected(t *testing.T) {
 // linkIdentity gives the workspace a connected chat platform.
 func linkIdentity(t *testing.T, database *db.DB, workspaceID string) {
 	t.Helper()
-	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+	if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 		ID: uuid.New().String(), WorkspaceID: workspaceID,
 		Platform: "telegram", PlatformUserID: "12345", LinkedAt: time.Now().UTC(),
 	}); err != nil {
