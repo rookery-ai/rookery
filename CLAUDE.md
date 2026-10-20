@@ -599,9 +599,9 @@ delegates subcommands via `github.com/urfave/cli/v3`. The `serve` subcommand:
 ### Inbound message pipeline
 
 ```
-Per-workspace chat adapter (Telegram, Discord)
-  → GatewayManager.route()
-    → IdentityResolver  (platform_user_id → internal workspace_id via platform_identities table)
+Per-workspace chat adapter (Telegram, Discord, Slack) — stamps msg.WorkspaceID with ITS OWN workspace
+  → GatewayManager.dispatch()
+    → is this chat linked to THIS workspace? (platform_identities, scoped by workspace_id)
     → Router.Handle()
       → /agent  → agentdesigner.Flow (conversational FSM)
       → /skill  → skilldesigner.Flow (conversational FSM; list/create/cancel)
@@ -613,6 +613,38 @@ Per-workspace chat adapter (Telegram, Discord)
       → plain text → one-off chat (coder.Coder with read+write KB tools + the workspace's connector tools; see "Chat knowledge-base access" + "Chat connector access")
 ```
 
+**A workspace is bound to its BOT, never to the person's chat account.** `dispatch`
+used to resolve the sender with a global `GetPlatformIdentity(platform, user)` and
+OVERWRITE the adapter's workspace with the result, while `platform_identities`
+carried `UNIQUE(platform, platform_user_id)`. So an owner linked to the Demo
+workspace who connected a second bot for Personal and sent it `/start` was routed
+into Demo and answered "You're already linked!" — out of **Demo's** bot, so the bot
+they had messaged appeared to do nothing at all. Migration 021 drops that
+constraint (keeping `UNIQUE(workspace_id, platform)`: a bot still serves one chat)
+and every lookup is now scoped by workspace. Four things are load-bearing:
+
+- **`LinkPlatformIdentity` is a plain insert, never an upsert on
+  `(workspace_id, platform)`.** An upsert would let a second chat's `/start`, racing
+  `handleStart`'s "already linked?" check, silently replace the linked chat and take
+  the workspace. A conflict with a different chat is `db.ErrAlreadyLinked`.
+- **Identity on Telegram is the CHAT id, so a group is a valid link target** —
+  `/start` sent inside a group lets every member drive the workspace, with full
+  access (there is no per-member control; that was a deliberate choice over
+  per-person links). `stripOwnMention` turns `/help@ThisBot` into `/help` — and only
+  THIS bot's suffix, because telebot already drops a command naming another bot, so
+  two workspace bots in one group never both answer. An unlinked group
+  (`Message.Group`) gets no "private bot" reply, or privacy-mode-off bots would answer
+  every message in any group they were added to.
+- **A basic group upgraded to a supergroup gets a NEW chat id** (promoting the bot to
+  admin can trigger it). `OnMigration` sends a control message
+  (`Message.MigrateFromID`) and `RekeyPlatformIdentity` moves the link, or it would
+  silently stop matching.
+- **Migration 021 is one-way in practice**: pre-021 code upserts with
+  `ON CONFLICT(platform, platform_user_id)`, which SQLite rejects against the new
+  schema. Roll back by restoring a database snapshot, not by running an older binary.
+  `ensureBotUnused` still refuses one bot across two workspaces — both would open a
+  session for the token and answer every message twice.
+
 ### Key packages
 
 | Package | Responsibility |
@@ -622,7 +654,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/auth` | `BootstrapOwner`, `Authenticate` (owner login), `ChangePassword` (owner), `CreateWorkspace(name, about)`, `GenerateSecretsSalt`, bcrypt |
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
-| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
+| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router` (identity is checked per workspace in `GatewayManager.dispatch` — see "A workspace is bound to its BOT"); adapters `TelegramGateway` (DMs and groups — chat-id identity) + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
 | `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one, recovers `-layout` column blocks as markdown tables, and **falls back to OCR** via `pdftoppm`+`tesseract` when there is no usable text layer), json, and images (OCR via tesseract when installed; an honest stub naming what is missing when not). Embedded images are extracted from docx/pptx and returned in `Result.Assets` — the package stays pure, so the CALLER stores them (see "KB import fidelity" below). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); the sanctioned reverse is `internal/export`. |
 | `internal/export` | Markdown note → HTML, DOCX or PDF, the sanctioned reverse of `internal/convert` and a separate package precisely so convert stays into-markdown-only. HTML and DOCX are pure Go and always available; PDF shells out to a headless renderer. **The renderer is looked for in Playwright's cache BEFORE PATH** (`browser.ChromiumExecutable`), because the platform installs its own Chromium via `rookery browser install` and probing PATH alone reported "PDF unavailable" on a host whose `/healthz` said `"browser": true`. `pandoc` is deliberately NOT a supported engine, and has now been rejected TWICE for different reasons: as a PDF engine it cannot render HTML→PDF without a LaTeX engine it does not bundle, so probing it turned an honest "unavailable" into a button that failed with an opaque 500; as a DOCX engine it is unverifiable here and would produce stacked cells where the grid should be (see "Export fidelity" below). A `layout.go` AST transformer gives both renderers columns, alignment and real image widths from one pass, so a `pandoc` route would add a host dependency to be strictly worse. Chromium's argv carries `--no-pdf-header-footer`, or every page is stamped with the print date and the source `file://` temp path. |
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
@@ -2402,6 +2434,12 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 **Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely (CLI engine only).
 
+**A CLI prompt travels on STDIN, never on the command line, wherever the backend has been verified to read it there** (`stdinPrompter` in `backend.go`; today `claudeBackend` only). Windows' `CreateProcess` caps the WHOLE command line at 32,767 UTF-16 units, and the agent designer's system prompt alone measures ~41k — so on Windows the designer's very first turn failed before `claude.exe` even started, while chat (~13k) happened to fit until its flattened history grew. Linux allows ~128 KiB per argument, which is why nothing here ever saw it. A backend not yet verified on stdin keeps `buildArgs` behind `checkCommandLineLength`, which on Windows refuses an over-long command line with a sentence naming the cause rather than an exec error. Add a backend to `stdinPrompter` only after it passes `TestLiveCLIReadsAnOversizedPromptFromStdin` (`ROOKERY_LIVE_CODER=1`): a fake binary proves the prompt is WRITTEN to stdin, never that the CLI reads it. OpenCode was tried and left out because every login on the development host was dead.
+
+**The failure mode was invisible because a launch failure read as a usage limit.** `claudeBackend.looksLikeLimit` treats "non-zero exit with empty stdout and stderr" as the usage-limit signature, and a process that never started has no output — so a too-long command line, and equally a missing `claude` binary, reached the owner as *"claude.exe hit its usage limit"*. `generateCLI` now checks `cmd.ProcessState == nil` BEFORE `looksLikeLimit` and returns `ErrCoderUnreachable` with the OS's reason (`Coder.startErr`). Reordering those two checks back reintroduces both misreports.
+
+**On Windows a CLI coder reaches the bridges as the bare name `rookery`, not the absolute path** (`coder.BridgeBin`, used by every `<bin> connector exec` / `kb` / `mcp exec` / `browser read` site so the prompt and the `Bash(<bin> …:*)` grant cannot disagree). Claude Code's Bash tool on Windows is Git Bash, where the unquoted backslashes in `C:\…\rookery.exe` are escapes; a model that repairs the path by quoting it or flipping the slashes produces a command that no longer prefix-matches the grant, which a `-p` run denies silently; and a user folder containing a space breaks a forward-slash path too. `buildEnv` prepends the binary's directory to the child's PATH (matching the key case-insensitively, since Windows spells it `Path`). Off Windows `BridgeBin` returns the absolute path, byte-identical to before. None of this has run on a Windows host — the helpers take GOOS as a parameter precisely so every branch is tested on Linux, and the cross-compile gate checks the rest.
+
 **Coder detection off Linux.** `DetectInstalled` takes a `detectHost` (GOOS, home,
 `LookPath`, `Stat`, `Getenv`) rather than calling the OS directly, because there is
 no macOS or Windows runner here and every bug it had was platform-specific.
@@ -2421,7 +2459,7 @@ where it is real. `detect_platform_test.go` describes all three platforms agains
 fake filesystem; the claim is that the logic is right and pinned, **not** that it was
 run on a Mac.
 
-**OpenCode requires an explicit model (multi-provider, no built-in default).** Unlike Claude (whose default model is tied to its login), OpenCode talks to many providers and has NO default model of its own. When none is specified it targets a hardcoded default provider (**OpenRouter**) and returns `coder error: User not found. (status 401)` if that provider isn't authed — the failure looks like broken auth but is really a missing model. The model comes from the workspace's `CoderModel` field, passed as `opencode run … -m <provider/model>` (e.g. `ollama-cloud/glm-5.2`); `opencodeBackend.buildArgs` adds `-m` only when `CoderModel` is set, and **the coder settings form's `#coder_local` section now has a Model input** that says so inline. Codex, Gemini and Cursor take the same field via `-m`/`--model`. The requirement is stated as help text, never enforced as validation: a hard rule would be wrong the moment OpenCode ships a default of its own, and would block anyone relying on a host-level one. **The per-workspace sandbox redirects `XDG_CONFIG_HOME` to an empty dir, so OpenCode does NOT inherit the operator's `~/.config/opencode/opencode.json`** (its default model, `plugin` list, and `mcp` servers such as `oh-my-openagent` / `codebase-memory-mcp`) — only the seeded `~/.local/share/opencode/auth.json`. Consequences: (a) setting a default model in the host `opencode.json` does NOT reach workspaces — the model must come from `CoderModel`; (b) host plugins/MCP intentionally do not run inside the sandbox. Re-authing a provider (`opencode auth login`) does not change the default-model selection, so it alone never fixes the 401.
+**OpenCode requires an explicit model (multi-provider, no built-in default).** Unlike Claude (which falls back to a built-in default), OpenCode talks to many providers and has NO default model of its own. When none is specified it targets a hardcoded default provider (**OpenRouter**) and returns `coder error: User not found. (status 401)` if that provider isn't authed — the failure looks like broken auth but is really a missing model. The model comes from the workspace's `CoderModel` field, passed as `opencode run … -m <provider/model>` (e.g. `ollama-cloud/glm-5.2`); `opencodeBackend.buildArgs` adds `-m` only when `CoderModel` is set, and **the coder settings form's `#coder_local` section now has a Model input** that says so inline. Claude, Codex, Gemini and Cursor take the same field via `-m`/`--model`. Claude's was silently dropped until 2026-10, and it matters more there than it looks: `--setting-sources ""` suppresses the operator's own Claude Code settings, so a default model chosen inside Claude Code never reaches a workspace and this field is the only way to pick one. The requirement is stated as help text, never enforced as validation: a hard rule would be wrong the moment OpenCode ships a default of its own, and would block anyone relying on a host-level one. **The per-workspace sandbox redirects `XDG_CONFIG_HOME` to an empty dir, so OpenCode does NOT inherit the operator's `~/.config/opencode/opencode.json`** (its default model, `plugin` list, and `mcp` servers such as `oh-my-openagent` / `codebase-memory-mcp`) — only the seeded `~/.local/share/opencode/auth.json`. Consequences: (a) setting a default model in the host `opencode.json` does NOT reach workspaces — the model must come from `CoderModel`; (b) host plugins/MCP intentionally do not run inside the sandbox. Re-authing a provider (`opencode auth login`) does not change the default-model selection, so it alone never fixes the 401.
 
 ### API coder engine (`coder_kind == "api"`)
 

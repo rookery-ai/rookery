@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.18.5](https://github.com/rookery-ai/rookery/compare/v0.18.4...v0.18.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **coder:** pass CLI prompts on stdin so the designer works on Windows ([#378](https://github.com/rookery-ai/rookery/issues/378)) ([3e9a039](https://github.com/rookery-ai/rookery/commit/3e9a03996c3263c37ab390792c977256660a2f3f))
+
+## [0.18.4](https://github.com/rookery-ai/rookery/compare/v0.18.3...v0.18.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **gateway:** bind each workspace to its own chat bot ([#376](https://github.com/rookery-ai/rookery/issues/376)) ([d56a1a2](https://github.com/rookery-ai/rookery/commit/d56a1a28c3250001531f1053d6339b83001a85c3))
+
+## [0.18.3](https://github.com/rookery-ai/rookery/compare/v0.18.2...v0.18.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **web/ui:** KB header truncates the path instead of overlapping it ([#373](https://github.com/rookery-ai/rookery/issues/373)) ([d0efd5a](https://github.com/rookery-ai/rookery/commit/d0efd5a478dc7e8391ea135cab654353072ce095))
+
+
+### Documentation
+
+* **readme:** sharper hero and an animated tour ([#374](https://github.com/rookery-ai/rookery/issues/374)) ([46a65c2](https://github.com/rookery-ai/rookery/commit/46a65c24b1ee9ae52fd8fdbf8163cfc528662c95))
+
+## [0.18.2](https://github.com/rookery-ai/rookery/compare/v0.18.1...v0.18.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **web/ui:** Pushover logo shipped as an empty image ([#370](https://github.com/rookery-ai/rookery/issues/370)) ([082de70](https://github.com/rookery-ai/rookery/commit/082de70f831e18bac160cb0a42a7dc7e3ed506c5))
+
+
+### Documentation
+
+* **readme:** lead with product screenshots from a demo workspace ([#371](https://github.com/rookery-ai/rookery/issues/371)) ([198785e](https://github.com/rookery-ai/rookery/commit/198785e83460d26f236db90f592eb9f937e1400e))
+
+## [0.18.1](https://github.com/rookery-ai/rookery/compare/v0.18.0...v0.18.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **agentdesigner:** agent descriptions end on a whole sentence ([#368](https://github.com/rookery-ai/rookery/issues/368)) ([ffaa394](https://github.com/rookery-ai/rookery/commit/ffaa39469f9f07e0cebc5ea8b7773dbbdaced319))
+* **browser:** designer site check waits for load, not network-idle ([#365](https://github.com/rookery-ai/rookery/issues/365)) ([8773580](https://github.com/rookery-ai/rookery/commit/8773580cabce056bd325b88e43feaff043c66c8d))
+* **prompts:** tell the designer how irreversible-action permission actually works ([#367](https://github.com/rookery-ai/rookery/issues/367)) ([40aa1fb](https://github.com/rookery-ai/rookery/commit/40aa1fbedbfdf7433e0517b485411b530ef7028c))
+
 ## [0.18.0](https://github.com/rookery-ai/rookery/compare/v0.17.1...v0.18.0) (2026-10-14)
 
 

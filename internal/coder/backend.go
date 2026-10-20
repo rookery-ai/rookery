@@ -55,6 +55,25 @@ type CoderBackend interface {
 	looksLikeLimit(stdout, stderr string) bool
 }
 
+// stdinPrompter is implemented by a backend whose CLI reads its prompt from
+// standard input. generateCLI prefers it over buildArgs whenever it is present.
+//
+// The reason is Windows, where CreateProcess caps the WHOLE command line at
+// 32,767 UTF-16 units. The agent designer's system prompt alone is ~41k, and
+// every CLI prompt (history included) used to ride on the command line as one
+// argument — so on Windows the designer's first turn failed before the coder
+// even started, while chat, at ~13k, happened to fit until its history grew.
+// Linux allows ~128 KiB per argument, which is why it never showed up there.
+//
+// Only backends whose stdin behaviour has been verified against the real CLI
+// implement this. The rest keep buildArgs behind checkCommandLineLength, which
+// fails with an explanation instead of a launch error.
+type stdinPrompter interface {
+	// stdinArgs returns the CLI flags for an invocation whose prompt is
+	// written to stdin. It must not contain the prompt.
+	stdinArgs(noTools bool, allowedTools string) []string
+}
+
 // ─── Claude backend ───────────────────────────────────────────────────────────
 
 // claudeBackend drives the Claude CLI (claude or any binary whose name contains
@@ -62,15 +81,34 @@ type CoderBackend interface {
 // and the --allowedTools / --setting-sources flags.
 type claudeBackend struct {
 	sysClaudeDir string // operator's ~/.claude — for credential copying
+	// model is the workspace's CoderModel, passed as --model when set. It has
+	// to be explicit: --setting-sources "" suppresses the operator's own Claude
+	// Code settings, so a default model chosen inside Claude Code never reaches
+	// a Rookery invocation. Empty leaves Claude Code's built-in default.
+	model string
 }
 
 func (b *claudeBackend) buildArgs(prompt string, noTools bool, allowedTools string) []string {
-	args := []string{"-p", prompt, "--output-format", "json", "--setting-sources", ""}
+	return append([]string{"-p", prompt}, b.flags(noTools, allowedTools)...)
+}
+
+// stdinArgs is buildArgs without the prompt: `claude -p` given no positional
+// prompt reads it from stdin (verified against Claude Code 2.1.303 in
+// --output-format json mode, and end-to-end in stdin_live_test.go).
+func (b *claudeBackend) stdinArgs(noTools bool, allowedTools string) []string {
+	return append([]string{"-p"}, b.flags(noTools, allowedTools)...)
+}
+
+func (b *claudeBackend) flags(noTools bool, allowedTools string) []string {
+	args := []string{"--output-format", "json", "--setting-sources", ""}
 	switch {
 	case noTools:
 		args = append(args, "--allowedTools", "")
 	case allowedTools != "":
 		args = append(args, "--allowedTools", allowedTools)
+	}
+	if b.model != "" {
+		args = append(args, "--model", b.model)
 	}
 	return args
 }

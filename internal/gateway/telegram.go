@@ -59,6 +59,7 @@ func (g *TelegramGateway) Start(ctx context.Context) error {
 	g.bot.Handle(telebot.OnText, g.handle)
 	g.bot.Handle(telebot.OnDocument, g.handle)
 	g.bot.Handle(telebot.OnPhoto, g.handle)
+	g.bot.Handle(telebot.OnMigration, g.handleMigration)
 	// Registered from the shared table rather than a hand-written list, which had
 	// already drifted: /skill, /pending, /approve and /reject were absent. They
 	// still reached the router via the OnText fallback, so nothing was broken —
@@ -213,6 +214,53 @@ func (g *TelegramGateway) EditMessage(platformUserID, msgID, text string) error 
 	return nil
 }
 
+// username is the bot's own @username, or "" before the bot has identified
+// itself (tests construct a gateway without a live bot).
+func (g *TelegramGateway) username() string {
+	if g.bot == nil || g.bot.Me == nil {
+		return ""
+	}
+	return g.bot.Me.Username
+}
+
+// stripOwnMention turns "/help@ThisBot args" into "/help args". In a group,
+// Telegram addresses commands to a specific bot by suffixing its username, and
+// the router's command parser would otherwise read "help@thisbot" as an unknown
+// command. Only THIS bot's suffix is stripped: telebot already drops a command
+// naming a different bot, so two workspace bots sharing one group never both
+// answer it.
+func stripOwnMention(text, username string) string {
+	if username == "" || !strings.HasPrefix(text, "/") {
+		return text
+	}
+	cmd, rest, _ := strings.Cut(text, " ")
+	name, mention, ok := strings.Cut(cmd, "@")
+	if !ok || !strings.EqualFold(mention, username) {
+		return text
+	}
+	if rest == "" {
+		return name
+	}
+	return name + " " + rest
+}
+
+// handleMigration reports a group's upgrade to a supergroup, which gives it a
+// new chat id, so the group's link follows it.
+func (g *TelegramGateway) handleMigration(tc telebot.Context) error {
+	from, to := tc.Migration()
+	if from == 0 || to == 0 {
+		return nil
+	}
+	g.dispatch(context.Background(), Message{
+		Platform:       "telegram",
+		PlatformUserID: strconv.FormatInt(to, 10),
+		WorkspaceID:    g.ownerWorkspaceID,
+		MigrateFromID:  strconv.FormatInt(from, 10),
+		Group:          true,
+	})
+	return nil
+}
+
 func (g *TelegramGateway) handle(tc telebot.Context) error {
 	chat := tc.Chat()
 	sender := tc.Sender()
@@ -224,8 +272,9 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 		Platform:       "telegram",
 		PlatformUserID: strconv.FormatInt(chat.ID, 10),
 		WorkspaceID:    g.ownerWorkspaceID,
-		Text:           tc.Text(),
+		Text:           stripOwnMention(tc.Text(), g.username()),
 		MessageID:      strconv.Itoa(tc.Message().ID),
+		Group:          chat.Type != telebot.ChatPrivate,
 	}
 
 	// Commands arrive as "/cmd" from telebot — ensure leading slash is present.
@@ -291,6 +340,9 @@ func init() {
 		SetupSteps: []string{
 			"Open @BotFather in Telegram", "Send /newbot and follow the prompts",
 			"Copy the token it gives you and paste it here",
+			// Privacy mode is ON for every new bot, so in a group it receives
+			// only commands — chatting with the workspace silently does nothing.
+			"Using it in a group? In @BotFather send /setprivacy, pick this bot and choose Disable so it can read ordinary messages, not just commands",
 		},
 		LinkURLs: func(b BotIdentity) LinkTargets {
 			if b.Username == "" {

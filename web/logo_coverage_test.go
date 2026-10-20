@@ -292,3 +292,28 @@ func TestBrandLogoAssetsCarryNoDanglingClasses(t *testing.T) {
 		}
 	}
 }
+
+// TestBrandLogoRastersAreNotEmpty fails on a wrapped raster with no bytes.
+// pushover.net answered its apple-touch-icon with 200 and a zero-length body;
+// curl -f accepted that, the wrapper base64-encoded nothing, and the shipped
+// logo rendered as a broken image while every structural test passed.
+func TestBrandLogoRastersAreNotEmpty(t *testing.T) {
+	entries, err := os.ReadDir(logoAssetDir)
+	if err != nil {
+		t.Fatalf("read logo dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".svg" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(logoAssetDir, e.Name()))
+		if err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+			continue
+		}
+		if strings.Contains(string(b), `;base64,"`) {
+			t.Errorf("%s: embeds an EMPTY data URI — the upstream download returned no "+
+				"bytes. Fix its URL in scripts/vendor-brand-logos.sh and re-vendor.", e.Name())
+		}
+	}
+}

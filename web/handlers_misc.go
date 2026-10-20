@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -150,9 +149,7 @@ func (s *Server) runChatCoder(
 	if browserReady {
 		coder = coder.WithBrowser(s.browserMgr, browser.Policy{})
 		if s.browserBridge != nil && s.browserBridge.Addr() != "" {
-			if p, err := os.Executable(); err == nil {
-				browserBin = p
-			}
+			browserBin = codersvc.BridgeBin()
 		}
 	}
 
@@ -200,9 +197,7 @@ func (s *Server) runChatCoder(
 		}
 		var kbBin string
 		if s.kbBridge != nil && s.kbBridge.URL() != "" {
-			if p, err := os.Executable(); err == nil {
-				kbBin = p
-			}
+			kbBin = codersvc.BridgeBin()
 			if kbBin != "" {
 				kbTok := s.kbBridge.Register(workspaceID, false)
 				defer s.kbBridge.Unregister(kbTok)
@@ -224,9 +219,7 @@ func (s *Server) runChatCoder(
 					for _, d := range s.connectors.ToolDefs(bound) {
 						connTools = append(connTools, d.Name)
 					}
-					if p, err := os.Executable(); err == nil {
-						connBin = p
-					}
+					connBin = codersvc.BridgeBin()
 				}
 			}
 		}
@@ -242,9 +235,7 @@ func (s *Server) runChatCoder(
 				for _, d := range mcp.ToolDefs(bound) {
 					mcpTools = append(mcpTools, d.Name)
 				}
-				if p, err := os.Executable(); err == nil {
-					mcpBin = p
-				}
+				mcpBin = codersvc.BridgeBin()
 			}
 		}
 		if len(extraEnv) > 0 {

@@ -71,3 +71,17 @@ func TestSetupStepsHaveNoMultiClauseSemicolons(t *testing.T) {
 		}
 	}
 }
+
+// A bot added to a group sees only commands while BotFather's privacy mode is
+// on — the default for every new bot — so plain-text chat in a linked group
+// silently does nothing. The step that says how to turn it off is pinned.
+func TestTelegramSetupStepsExplainGroupPrivacyMode(t *testing.T) {
+	spec, ok := CredSpecFor("telegram")
+	if !ok {
+		t.Fatal("telegram spec not registered")
+	}
+	joined := strings.Join(spec.SetupSteps, "\n")
+	if !strings.Contains(joined, "/setprivacy") {
+		t.Fatalf("telegram steps never explain group privacy mode:\n%s", joined)
+	}
+}

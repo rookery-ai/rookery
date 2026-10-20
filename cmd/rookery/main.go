@@ -296,6 +296,11 @@ func serveCmd() *cli.Command {
 				slog.Info("agent files migrated", "agents", n)
 			}
 
+			// Rewrite descriptions the old first-line byte cut produced mid-word.
+			if n := agentdesigner.BackfillAgentDescriptions(database, vaultsDir); n > 0 {
+				slog.Info("agent descriptions rewritten", "agents", n)
+			}
+
 			// Any run still flagged in-progress is a leftover from a crash/shutdown
 			// mid-run — close it out so it can't show a permanently stuck "Running…"
 			// badge (runs now execute on a detached context that outlives the request).
@@ -503,9 +508,7 @@ func serveCmd() *cli.Command {
 				if browserReady {
 					cd = cd.WithBrowser(browserMgr, browser.Policy{})
 					if browserBridge != nil && browserBridge.Addr() != "" {
-						if p, err := os.Executable(); err == nil {
-							browserBin = p
-						}
+						browserBin = coder.BridgeBin()
 					}
 				}
 
@@ -549,9 +552,7 @@ func serveCmd() *cli.Command {
 					}
 					var kbBin string
 					if kbBridge != nil && kbBridge.URL() != "" {
-						if p, err := os.Executable(); err == nil {
-							kbBin = p
-						}
+						kbBin = coder.BridgeBin()
 						if kbBin != "" {
 							kbTok := kbBridge.Register(workspaceID, false)
 							defer kbBridge.Unregister(kbTok)
@@ -573,9 +574,7 @@ func serveCmd() *cli.Command {
 								for _, d := range connReg.ToolDefs(bound) {
 									connTools = append(connTools, d.Name)
 								}
-								if p, err := os.Executable(); err == nil {
-									connBin = p
-								}
+								connBin = coder.BridgeBin()
 							}
 						}
 					}
@@ -591,9 +590,7 @@ func serveCmd() *cli.Command {
 							for _, d := range mcp.ToolDefs(bound) {
 								mcpTools = append(mcpTools, d.Name)
 							}
-							if p, err := os.Executable(); err == nil {
-								mcpBin = p
-							}
+							mcpBin = coder.BridgeBin()
 						}
 					}
 					if browserBin != "" {

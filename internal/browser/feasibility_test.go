@@ -12,6 +12,7 @@ type stubBrowser struct {
 	calls     int
 	byURL     map[string]Result
 	err       error
+	lastReq   Request
 }
 
 func (s *stubBrowser) Available() Availability {
@@ -20,6 +21,7 @@ func (s *stubBrowser) Available() Availability {
 
 func (s *stubBrowser) Render(_ context.Context, r Request) (Result, error) {
 	s.calls++
+	s.lastReq = r
 	if s.err != nil {
 		return Result{}, s.err
 	}
@@ -150,5 +152,24 @@ func TestExtractURLsTrimsTrailingPunctuation(t *testing.T) {
 	want := []string{"https://example.com/page", "https://other.example.com"}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// A page that holds a connection open — a long-poll, a chat widget, an analytics
+// beacon, demoblaze.com's cart sync — never reaches network-idle. Probing with
+// WaitFor "networkidle" timed out on every such site, and the designer told the
+// user it "could not be opened … may be down" while it answered in 0.3 s. A
+// feasibility check needs the page RENDERED, which "load" already guarantees.
+func TestFeasibilityProbeDoesNotWaitForNetworkIdle(t *testing.T) {
+	br := &stubBrowser{available: true, byURL: map[string]Result{
+		"https://www.demoblaze.com": {Title: "STORE", Text: "Samsung galaxy s6 Nokia lumia"},
+	}}
+	var cache *FeasibilityCache
+	Feasibility(context.Background(), br, &cache, "order from https://www.demoblaze.com")
+	if br.lastReq.WaitFor == "networkidle" {
+		t.Fatal("feasibility probe waits for network-idle, which a page with an open connection never reaches")
+	}
+	if br.lastReq.WaitFor != "load" {
+		t.Errorf("probe WaitFor = %q, want \"load\"", br.lastReq.WaitFor)
 	}
 }

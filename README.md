@@ -1,7 +1,13 @@
+<!--
+The screenshots come from a demo workspace populated only through the product's
+own flows. How it was built, and what it found, is in
+docs/superpowers/specs/2026-10-13-demo-designer-log.md.
+-->
+
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-banner-dark.svg">
-    <img src="docs/assets/hero-banner.svg" alt="Rookery — describe an agent, watch it tested, let it run" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/hero-dark.gif">
+    <img src="docs/assets/screenshots/hero-light.gif" alt="Building an agent in Rookery: a vague request to reorder a monitor, the designer asking which one and when it should run, the answer, then a plan that flags paying cannot be undone and offers Allow and build." width="100%">
   </picture>
 </p>
 
@@ -23,32 +29,6 @@ They run on a schedule, or when you ask, and they tell you what happened. The
 whole thing is designed to sit on a machine that stays on, so the work carries
 on while you are not watching.
 
-<!--
-SCREENSHOT SLOT — not captured yet. Two shots, in this order.
-
-1. THE RUN TIMELINE (here). The ordered steps of a real run, with the approval
-   gate visible IN THE SAME FRAME as the payment step. Capability and restraint
-   together read as competence; the same capability with the restraint explained
-   underneath reads as recklessness discovered. Secret fields must show the
-   PLACEHOLDERS (${CARD_NUMBER}, ${CVV}) and never values — the only safe shot,
-   and the more convincing one, because it is the visible evidence that the
-   model never receives them.
-
-2. THE BUILD CONVERSATION (under "What you get"). The designer asking its
-   clarifying questions and proposing a plan, with "Allow and build" visible.
-
-Use a test card, a sandbox account or a throwaway. Never real payment data: a
-screenshot cannot be redacted, which is exactly why agents are never given one.
-
-Markup, ready to uncomment once the file exists. It is commented rather than
-live because an <img> pointing at a missing file renders as a broken image on
-GitHub, which is worse than no image at all:
-
-<p align="center">
-  <img src="docs/assets/run-timeline.png" alt="A run timeline: opened the page, signed in, found one unpaid bill for the previous month, filled the card fields from stored secrets, then stopped before paying and asked for approval" width="100%">
-</p>
--->
-
 ## Quickstart
 
 ```bash
@@ -56,7 +36,7 @@ curl -fsSL https://rookery.cloud/install.sh | sh
 rookery onboard
 ```
 
-Then open `http://localhost:8899`, log in, and create your first workspace.
+Then open `http://localhost:8899`, sign in and create your first workspace.
 
 <details>
 <summary>Windows</summary>
@@ -66,12 +46,12 @@ irm https://rookery.cloud/install.ps1 | iex
 rookery onboard
 ```
 
-`iex` cannot pass arguments, so a specific version needs a script block:
-`& ([scriptblock]::Create((irm https://rookery.cloud/install.ps1))) -Version v0.2.0`.
+`iex` can't pass arguments, so installing a specific version takes a script
+block: `& ([scriptblock]::Create((irm https://rookery.cloud/install.ps1))) -Version v0.2.0`.
 
-Windows has no filesystem confinement. Autostart is a Task Scheduler logon task
-that `rookery service` registers for you — see
-[the Windows guide](https://rookery.cloud/docs/installation/windows).
+Windows has no filesystem sandbox. `rookery service` registers a Task Scheduler
+logon task, so Rookery starts when you sign in. The
+[Windows guide](https://rookery.cloud/docs/installation/windows) has the details.
 </details>
 
 <details>
@@ -82,14 +62,14 @@ docker run -d --name rookery -p 8899:8899 \
   -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
-The image is slim — no CLI coder binary, `ROOKERY_CODER_MODE=slim` — so
-workspaces must use the `api` coder kind.
+The image is slim. It ships no CLI coder (`ROOKERY_CODER_MODE=slim`), so
+workspaces have to use the `api` coder kind.
 </details>
 
 <details>
 <summary>Build from source</summary>
 
-Requires Go 1.26 and Node 24.
+You need Go 1.26 and Node 24.
 
 ```bash
 make build
@@ -98,57 +78,75 @@ make build
 ```
 </details>
 
-## What you get
+## A look around
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/features-dark.svg">
-  <img src="docs/assets/features.svg" alt="Knowledge base, agents, browser control, skills, connections, MCP servers, chat, notifications, models, secrets, scheduling and sandboxing" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/tour-dark.gif">
+  <img src="docs/assets/screenshots/tour-light.gif" alt="A tour of Rookery: the home dashboard, an agent and its last run, a knowledge base note with the AI actions menu, a chat, searching services, AI provider settings, secrets and skills." width="100%">
 </picture>
 
-**100+ services** and **900+ curated actions**, over OAuth or an API key you
-paste — never a broker. **22 skills** built in, plus any you create the same
-conversational way.
+Rookery connects to 130+ services with 900+ curated actions, over OAuth or an
+API key you paste in, and no third-party service sits in between. It comes
+with 20+ core skills, and you can write your own by describing them, the same
+way you build an agent.
 
-Read more —
-[Workspaces](https://rookery.cloud/docs/concepts/workspaces) ·
-[Knowledge base](https://rookery.cloud/docs/concepts/knowledge-base) ·
-[Agents](https://rookery.cloud/docs/concepts/agents) ·
-[Browser](https://rookery.cloud/docs/concepts/browser) ·
-[Skills](https://rookery.cloud/docs/concepts/skills) ·
-[Connections](https://rookery.cloud/docs/concepts/connections) ·
-[MCP servers](https://rookery.cloud/docs/concepts/mcp-servers) ·
-[Chat](https://rookery.cloud/docs/concepts/chat) ·
-[Notifications](https://rookery.cloud/docs/concepts/notifications) ·
-[Models](https://rookery.cloud/docs/concepts/models) ·
-[Secrets](https://rookery.cloud/docs/concepts/secrets) ·
-[Scheduling](https://rookery.cloud/docs/concepts/scheduling)
+The documentation covers each part:
+[workspaces](https://rookery.cloud/docs/concepts/workspaces),
+[the knowledge base](https://rookery.cloud/docs/concepts/knowledge-base),
+[agents](https://rookery.cloud/docs/concepts/agents),
+[the browser](https://rookery.cloud/docs/concepts/browser),
+[skills](https://rookery.cloud/docs/concepts/skills),
+[connections](https://rookery.cloud/docs/concepts/connections),
+[MCP servers](https://rookery.cloud/docs/concepts/mcp-servers),
+[chat](https://rookery.cloud/docs/concepts/chat),
+[notifications](https://rookery.cloud/docs/concepts/notifications),
+[models](https://rookery.cloud/docs/concepts/models),
+[secrets](https://rookery.cloud/docs/concepts/secrets) and
+[scheduling](https://rookery.cloud/docs/concepts/scheduling).
+
+## Agents that use the web
+
+- Agents can sign in to a website and click through it for you, checkout
+  included.
+- Anything they cannot undo, like paying, needs your permission. You give it
+  once when you build the agent, and you can take it back on the agent's page.
+- Card numbers and passwords stay in your secrets. The agent types
+  `${CARD_NUMBER}` and Rookery fills in the real value, so the model never sees
+  it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/pair-dark.png">
+    <img src="docs/assets/screenshots/pair-light.png" alt="The same shopping agent run twice. Without permission it stops at checkout. With permission it pays, typing ${CARD_NUMBER} in place of the card number." width="100%">
+  </picture>
+</p>
 
 ## How it fits together
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
-  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser talk to one binary on your machine, holding the knowledge base, chat, agents, skills and secrets, all of them running on the coder — a CLI tool, a hosted provider or a local model — and both reading and writing the connected services and any MCP server" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser talk to one binary on your machine. It holds the knowledge base, chat, agents, skills and secrets, runs them on the coder (a CLI tool, a hosted provider or a local model), and reads and writes the connected services and any MCP server." width="100%">
 </picture>
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
+| `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback only |
 | `ROOKERY_PORT` | `8899` | listen port |
-| `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the database |
+| `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also moves the database |
 | `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
-| `ROOKERY_SYSTEM_KEY` | generated | hex key encrypting stored credentials |
-| `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
-| `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
-| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private/loopback addresses (e.g. a self-hosted dashboard). Off by default — see [the browser guide](https://rookery.cloud/docs/concepts/browser) |
+| `ROOKERY_SYSTEM_KEY` | generated | hex key that encrypts stored credentials |
+| `ROOKERY_PUBLIC_URL` | unset | externally reachable base URL for OAuth callbacks |
+| `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` turns off Landlock confinement |
+| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private and loopback addresses, such as a self-hosted dashboard. Off by default; see [the browser guide](https://rookery.cloud/docs/concepts/browser) |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind |
-| `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not chosen one |
-| `ROOKERY_CLAUDE_BIN` | — | **deprecated** alias for `ROOKERY_CODER_BIN`; still honoured, warns at startup |
+| `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not picked one |
+| `ROOKERY_CLAUDE_BIN` | unset | **deprecated** alias for `ROOKERY_CODER_BIN`; still read, with a warning at startup |
 
-`ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
-URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
-a real hostname or `http://localhost`.
+Set `ROOKERY_PUBLIC_URL` if you plan to connect anything over OAuth. Providers
+reject redirect URIs on non-public hostnames, so a `.lan` address fails
+Google's validation. Use a real hostname or `http://localhost`.
 
 ## Platform support
 
@@ -159,24 +157,24 @@ a real hostname or `http://localhost`.
 | darwin amd64/arm64 | none | launchd user agent (at login) |
 | windows amd64/arm64 | none | Task Scheduler logon task |
 
-**Off Linux there is no filesystem sandbox** — coder subprocesses run
-unconfined. `GET /healthz` reports that, along with version, coder mode and
-host-tool presence; a `python3` warning there is not cosmetic, because without
-it the agent-tool AST guardrail self-skips.
+Outside Linux there is no filesystem sandbox, so coder subprocesses run
+unconfined. `GET /healthz` reports this, along with the version, the coder mode
+and which host tools are installed. Take a `python3` warning there seriously:
+without Python, the check that scans agents' tool scripts before they run
+skips itself.
 
 ## Contributing
 
-Branch off `main`; `main` only ever advances through merged pull requests. Use
-[Conventional Commits](https://www.conventionalcommits.org/) — the PR title
-becomes the squashed commit and drives release versioning. Push the branch and
-read the result from CI rather than reproducing it locally; `make ci-fmt`,
-`ci-vet`, `ci-ui` and `ci-docs` are the quick targeted checks worth running
-first.
+Branch off `main`, which only moves forward through merged pull requests.
+Write commits as [Conventional Commits](https://www.conventionalcommits.org/);
+the pull request title becomes the squashed commit and sets the next release
+version. Push your branch and let CI run the full checks. Locally, `make ci-fmt`,
+`ci-vet`, `ci-ui` and `ci-docs` are quick and worth running first.
 
 ## License
 
-**Apache-2.0, permanently.** See [LICENSE](LICENSE).
+Apache-2.0, permanently. See [LICENSE](LICENSE).
 
-There is no contributor licence agreement. Without one, nobody — the maintainers
-included — can relicense this project unilaterally, which makes the line above a
-structural fact about the repository rather than a statement of intent.
+There is no contributor licence agreement, so changing the license would need
+the agreement of everyone who has contributed. Nobody, the maintainers
+included, can relicense the project on their own.

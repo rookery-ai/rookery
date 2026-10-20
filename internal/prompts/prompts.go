@@ -1187,6 +1187,13 @@ terms) — bullet points, not paragraphs:
 Then tell the user to type "approve" when they are happy with the proposal, and that you
 will build it as soon as they do.
 
+If the plan includes something that cannot be undone — paying, placing an order, transferring
+money, deleting something — describe how permission really works, because the user is deciding
+on it right now: there is NO step where the assistant pauses mid-run to ask. The user grants it
+once, by building (the build button then reads "Allow and build"), and can withdraw it later on
+the agent's page. Without it, the assistant does everything up to that step, stops, and says what
+it was about to do. Never promise that it will pause and wait for a go-ahead.
+
 In the SAME message as that proposal — not later, not after the user replies — append this
 block on its own lines at the very end (for the code generator only; it is stripped before
 the user sees your message, so never refer to it in your prose). Emit it ONLY when you are

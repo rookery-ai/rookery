@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
@@ -3118,8 +3119,27 @@ func ParseRequiredSecrets(agentMD string) []string {
 	return secrets
 }
 
-// extractDescription builds a one-line description from the AGENT.md content.
+// extractDescription builds the agent's short description from AGENT.md.
+//
+// It takes the first prose PARAGRAPH (AGENT.md wraps prose across lines, so
+// reading only the first line yielded half a sentence) and keeps whole
+// sentences up to maxDescriptionChars. A single sentence longer than that is
+// cut at a word boundary with an ellipsis, never mid-word or mid-rune — the old
+// byte cut produced descriptions like "…and send the" on every agent card.
 func extractDescription(agentMD, fallback string) string {
+	para := firstProseParagraph(agentMD)
+	if para == "" {
+		return fallback
+	}
+	return summarizeSentences(para, maxDescriptionChars)
+}
+
+const maxDescriptionChars = 200
+
+// legacyExtractDescription is the pre-fix algorithm (first line, byte cut at
+// 200). Kept only so BackfillAgentDescriptions can tell a description it
+// derived from one an owner may have set by other means.
+func legacyExtractDescription(agentMD, fallback string) string {
 	for _, line := range strings.Split(agentMD, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -3131,6 +3151,132 @@ func extractDescription(agentMD, fallback string) string {
 		return line
 	}
 	return fallback
+}
+
+// firstProseParagraph returns the first run of consecutive non-blank,
+// non-heading lines, joined with single spaces and stripped of inline
+// emphasis/code markers. List items, tables and fences are not prose.
+func firstProseParagraph(md string) string {
+	var lines []string
+	inFence := false
+	for _, raw := range strings.Split(md, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			if len(lines) > 0 {
+				break
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		notProse := line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|") ||
+			strings.HasPrefix(line, ">") || strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") ||
+			strings.HasPrefix(line, "<") || isOrderedItem(line)
+		if notProse {
+			if len(lines) > 0 {
+				break
+			}
+			continue
+		}
+		lines = append(lines, line)
+	}
+	s := strings.Join(lines, " ")
+	s = strings.NewReplacer("**", "", "__", "", "`", "").Replace(s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func isOrderedItem(line string) bool {
+	i := 0
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+	return i > 0 && i+1 < len(line) && (line[i] == '.' || line[i] == ')') && line[i+1] == ' '
+}
+
+// summarizeSentences keeps as many whole sentences of s as fit in limit runes,
+// skipping a leading role preamble ("You are a … agent.") that says nothing
+// about the task. A first sentence that does not fit first loses its
+// parenthetical asides; if it still does not fit it is cut at the last clause
+// boundary (comma, semicolon, colon), else at a word, and ends with "…".
+func summarizeSentences(s string, limit int) string {
+	sentences := splitSentences(s)
+	if len(sentences) > 1 && isRolePreamble(sentences[0]) {
+		sentences = sentences[1:]
+	}
+	out := ""
+	for _, sent := range sentences {
+		next := strings.TrimSpace(out + " " + sent)
+		if utf8.RuneCountInString(next) > limit {
+			break
+		}
+		out = next
+	}
+	if out != "" {
+		return out
+	}
+	first := dropParentheticals(sentences[0])
+	if utf8.RuneCountInString(first) <= limit {
+		return first
+	}
+	r := []rune(first)
+	cut := 0
+	for i := limit - 1; i > limit/2; i-- {
+		if (r[i] == ',' || r[i] == ';' || r[i] == ':') && i+1 < len(r) && r[i+1] == ' ' {
+			cut = i
+			break
+		}
+	}
+	if cut == 0 {
+		for cut = limit - 1; cut > 0 && r[cut] != ' '; cut-- {
+		}
+		if cut == 0 {
+			cut = limit - 1
+		}
+	}
+	return strings.TrimRight(string(r[:cut]), " ,;:(—-") + "…"
+}
+
+// splitSentences splits on ". ", "! " and "? " (keeping the punctuation).
+func splitSentences(s string) []string {
+	var out []string
+	r := []rune(s)
+	start := 0
+	for i := 0; i < len(r); i++ {
+		if (r[i] == '.' || r[i] == '!' || r[i] == '?') && (i+1 == len(r) || r[i+1] == ' ') {
+			out = append(out, strings.TrimSpace(string(r[start:i+1])))
+			start = i + 1
+		}
+	}
+	if rest := strings.TrimSpace(string(r[start:])); rest != "" {
+		out = append(out, rest)
+	}
+	return out
+}
+
+func isRolePreamble(sentence string) bool {
+	l := strings.ToLower(sentence)
+	return (strings.HasPrefix(l, "you are a ") || strings.HasPrefix(l, "you are an ")) &&
+		utf8.RuneCountInString(sentence) < 80
+}
+
+// dropParentheticals removes " (…)" asides, which are detail rather than gist.
+func dropParentheticals(s string) string {
+	var b strings.Builder
+	depth := 0
+	for _, c := range s {
+		switch {
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case depth == 0:
+			b.WriteRune(c)
+		}
+	}
+	out := strings.Join(strings.Fields(b.String()), " ")
+	return strings.NewReplacer(" ,", ",", " .", ".", " :", ":", " ;", ";").Replace(out)
 }
 
 // ─── Approval detection ───────────────────────────────────────────────────────

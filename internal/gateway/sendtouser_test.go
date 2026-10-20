@@ -26,7 +26,7 @@ func TestResolveDeliveryOrderPrefersPrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"discord", "telegram"} {
-		if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 			ID: "id-" + p, WorkspaceID: "ws1", Platform: p, PlatformUserID: "u-" + p,
 		}); err != nil {
 			t.Fatal(err)

@@ -56,13 +56,13 @@ function FileViewerHeader({
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {segments.slice(0, -1).map((seg, i) => {
           const target = segments.slice(0, i + 1).join("/");
           return (
             <span
               key={target}
-              className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2"
+              className="flex min-w-[2ch] shrink-[4] items-center gap-1.5 text-xs text-muted-2"
             >
               <button
                 type="button"
@@ -71,7 +71,7 @@ function FileViewerHeader({
                 // (review fix) so KBPage doesn't have to re-derive it from
                 // the path string.
                 onClick={() => setParams({ path: target, dir: "1" })}
-                className="hover:text-foreground hover:underline"
+                className="max-w-48 truncate hover:text-foreground hover:underline"
               >
                 {seg}
               </button>
@@ -79,7 +79,7 @@ function FileViewerHeader({
             </span>
           );
         })}
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <span className="min-w-[6ch] flex-1 truncate text-sm font-semibold">
           {filename}
         </span>
       </div>

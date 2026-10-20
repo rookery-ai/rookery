@@ -22,16 +22,14 @@ var ErrBotAlreadyConnected = errors.New("bot already connected to another worksp
 
 // ensureBotUnused refuses to connect a bot that another workspace already uses.
 //
-// Sharing one bot across workspaces cannot work, and fails in a way that looks
-// like a product bug rather than a misconfiguration. platform_identities carries
-// UNIQUE(platform, platform_user_id), so a given chat account can be linked to
-// exactly ONE workspace; the second workspace's /start is refused by
-// Router.handleStart ("You're already linked!") and its connect wizard waits for
-// a handshake that can never arrive. Worse, both workspaces open their own
-// gateway session for the same token, so every inbound DM is delivered twice,
-// dispatched twice, and answered twice — by the FIRST workspace both times,
-// since GatewayManager.dispatch resolves the identity globally. The user sees
-// duplicate replies and pays for two coder turns per message.
+// A workspace is bound to its BOT (GatewayManager.dispatch routes by the bot that
+// received a message), so the model is one bot per workspace — one chat account
+// may link to many workspaces, but only through many bots. Sharing one bot across
+// workspaces fails in a way that looks like a product bug rather than a
+// misconfiguration: both workspaces open their own gateway session for the same
+// token, so every inbound message is delivered twice, dispatched twice — once
+// into each workspace — and answered twice. The user sees duplicate replies,
+// pays for two coder turns per message, and cannot tell which workspace acted.
 //
 // Keyed on the bot's platform user id rather than the token: a token reset in
 // the provider's console yields the same bot with different bytes, which a

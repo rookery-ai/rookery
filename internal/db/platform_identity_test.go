@@ -29,14 +29,14 @@ func TestListPlatformIdentitiesIsDeterministic(t *testing.T) {
 		{"id-a", "slack"},
 		{"id-b", "discord"},
 	} {
-		if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 			ID: id.rowID, WorkspaceID: "ws1", Platform: id.platform, PlatformUserID: "u-" + id.platform,
 		}); err != nil {
 			t.Fatalf("upsert %s: %v", id.platform, err)
 		}
 	}
 
-	// Force the tie this test is ABOUT. UpsertPlatformIdentity hardcodes
+	// Force the tie this test is ABOUT. LinkPlatformIdentity hardcodes
 	// linked_at to datetime('now'), which has one-second granularity, so the
 	// three inserts tie only when they land inside the same second. On a loaded
 	// CI runner they straddled a boundary, discord got a later timestamp, and
@@ -88,7 +88,7 @@ func TestListPlatformIdentitiesIsDeterministic(t *testing.T) {
 func TestDeletePlatformIdentityRemovesOnlyThatPlatform(t *testing.T) {
 	database := newIdentityTestDB(t)
 	for _, p := range []string{"telegram", "discord"} {
-		if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		if err := database.LinkPlatformIdentity(&db.PlatformIdentity{
 			ID: "id-" + p, WorkspaceID: "ws1", Platform: p, PlatformUserID: "u-" + p,
 		}); err != nil {
 			t.Fatal(err)
