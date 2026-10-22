@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.7](https://github.com/rookery-ai/rookery/compare/v0.18.6...v0.18.7) (2026-10-22)
+
+
+### Bug Fixes
+
+* **deps:** hono 4.13.13 for the serveStatic double-decode advisory ([#382](https://github.com/rookery-ai/rookery/issues/382)) ([cfbb93d](https://github.com/rookery-ai/rookery/commit/cfbb93da628283519a8b2998da473a674155db84))
+* **deps:** vitest 5.0.5 for the @vitest/mocker advisories ([#387](https://github.com/rookery-ai/rookery/issues/387)) ([be89b09](https://github.com/rookery-ai/rookery/commit/be89b09727cca6a681c7d84c8df79ced984decb2))
+
 ## [0.18.6](https://github.com/rookery-ai/rookery/compare/v0.18.5...v0.18.6) (2026-10-22)
 
 
