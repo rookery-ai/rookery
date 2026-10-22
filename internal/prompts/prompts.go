@@ -214,8 +214,9 @@ safety margin.
 			"  ✗ DO NOT write a helper script to make one simple HTTP request that returns small data.",
 			"  ✓ For a simple read of a PUBLIC url (weather/news/feed), CALL web_fetch directly —\n"+
 				"    no script. To FIND a url you don't have, CALL web_search, then web_fetch to read\n"+
-				"    it. Write a helper script (run_script/bash) only when the call needs a SECRET,\n"+
-				"    must paginate, or needs heavier processing.",
+				"    it. A call that needs a SECRET goes through a connected-account tool when one\n"+
+				"    exists, or one direct bash step (curl reading the secret from its env var) that\n"+
+				"    AGENT.md describes — never an authored script file.",
 			1)
 		// Surface the discovery tools in the philosophy block too: finding a note by content
 		// (search_files) or files by name (glob) are direct read-only tool calls, TIER 1 —
@@ -227,8 +228,52 @@ safety margin.
 				"    are read-only lookups (TIER 1).\n"+
 				"</agent_philosophy>\n",
 			1)
+		block = strings.Replace(block, "</agent_philosophy>\n", toolCallingTierCeiling+"</agent_philosophy>\n", 1)
 	}
 	return block
+}
+
+// toolCallingTierCeiling caps the tool-calling (API engine) backend at TIER 1. TIER 2/3
+// mean authoring a helper script and then proving it works, and the small models this
+// backend usually runs could not do either reliably: builds either shipped a script that
+// never returned real data or spent the whole turn budget trying. A CLI coder (Claude Code
+// and the like) has its own shell and test loop, so those tiers are reserved for it. An
+// agent a CLI coder built still RUNS on this backend — run_script/bash stay offered at run
+// time (BuildCoderPrompt is untouched) — so "build on a CLI coder, run on a cheap API one"
+// keeps working. decideBuildOutcome enforces the same ceiling (apiTierCeilingViolation),
+// because a prompt steers and does not bind.
+const toolCallingTierCeiling = `
+## Tier ceiling on THIS coder: TIER 1 only
+
+You are running as a direct model API, not as a CLI coder with its own shell and test loop.
+On this coder, agents are built at TIER 1 ONLY: create ZERO files under tools/. TIER 2 and
+TIER 3 (helper scripts, multi-file projects) are built exclusively by a CLI coder, which can
+write and test code properly.
+  ✓ Do every step with your direct tools — connected-account tools, web_fetch, web_search,
+    search_files, glob, read_file, kb_file_map, kb_table_query, the browser tools — and
+    your own reasoning. A call that needs a secret is one direct bash step (curl with the
+    secret from its env var) described in AGENT.md, not a script file.
+  ✗ If the task genuinely needs helper code (paginating dozens of pages, parsing large
+    structured data), do NOT write it. Say so in plain language: this agent needs a CLI
+    coder (for example Claude Code) to build; the user can switch the workspace coder in
+    Settings → Coder, build it there, and switch back — it will run fine on this coder.
+`
+
+// designTierCeilingBlock tells the DESIGNER that this workspace's coder (the API engine)
+// builds TIER 1 agents only, and what to tell the user when the task needs more.
+func designTierCeilingBlock() string {
+	return `<coder_tier_ceiling>
+This workspace's coder is a direct model API, which builds TIER 1 agents only (no helper
+code). Propose Tier: 1. Almost every agent fits: connected accounts, web pages, the browser,
+the knowledge base and its table queries are all reachable without code.
+If the task genuinely needs helper code — paginating dozens of pages, crunching a large
+dataset — say so before proposing the plan, in plain words: building this one needs a CLI
+coder such as Claude Code. The user can switch the coder in Settings → Coder, build the
+agent, then switch back; it will keep running on the current coder. Do not propose Tier 2
+or 3 here.
+</coder_tier_ceiling>
+
+`
 }
 
 // chatAppCommands returns the commands a user can type in a given connected chat
@@ -736,12 +781,21 @@ func agentArchitectureGateBlock(backendType string) string {
     • web_fetch(url) — a single read of a PUBLIC url (no secret needed). This is a [SINGLE]
       action: for a simple public fetch, CALL web_fetch directly and stay TIER 1 — do NOT
       write a script for it.
-    • run_script / bash — use these when the call needs a SECRET (API key/token/auth header),
-      must PAGINATE many pages/items, or needs heavier processing. That is [BULK] → TIER 2,
-      one thin helper script (it fetches and prints raw data; YOU reason over the output).
-  Use only tools/libraries already installed (Python stdlib and requests are available); do
-  NOT pip install or add any new package.
-  During THIS build, actually CALL web_search/web_fetch/bash (or run your script) and confirm
+    • bash — when a call needs a SECRET (API key/token/auth header) and no connected-account
+      tool covers it, make it ONE direct bash step (curl, reading the secret from its env var)
+      and describe that step in AGENT.md. It is still TIER 1: no file under tools/.
+  TIER CEILING ON THIS BACKEND: TIER 1. You may NOT create any file under tools/ — helper
+  scripts (TIER 2/3) are built only by a CLI coder. A [BULK] task that a handful of direct tool
+  calls cannot cover (dozens of pages, large structured data) is NOT buildable here: write
+  nothing and emit [BLOCKED] saying in plain language that this agent needs a CLI coder (for
+  example Claude Code) to build — the user can switch the workspace coder in Settings → Coder,
+  build it, then switch back, and it will run on this coder.
+  EDITING an agent that already has files under tools/ (a CLI coder built it): leave every one
+  of them byte-for-byte unchanged and add none. Fix the problem in AGENT.md. If the fix truly
+  requires changing that code, change nothing and emit [BLOCKED] saying this edit needs a CLI
+  coder.
+  Do NOT pip install or add any new package.
+  During THIS build, actually CALL web_search/web_fetch/bash and confirm
   it returns the real data you expect BEFORE you finish — a plan you never executed is not a
   verified agent. Pure reasoning, text, and reading/writing the user's notes need no network →
   TIER 1.
@@ -751,8 +805,8 @@ func agentArchitectureGateBlock(backendType string) string {
     • fetch top headlines from a public news/RSS feed  → [SINGLE] public read → web_fetch, no script
     • write the summary and send it                    → [REASON] → you do it directly in [CHAT]
     Verdict: TIER 1, ZERO files — just call web_fetch twice and reason over the results.
-    (If a source instead needed an API KEY, that one call would move to a thin run_script/bash
-    step — TIER 2 — because web_fetch cannot carry the secret.)
+    (If a source instead needed an API KEY, that one call would become a direct bash curl
+    step reading the key from its env var — still TIER 1, still no file.)
   WORKED EXAMPLE — "find my notes about the dentist and remind me what date":
     • search_files("dentist") to locate the note       → [SINGLE] content read → search_files, no script
     • read_file the note it found                       → [SINGLE] → read_file
@@ -981,6 +1035,12 @@ context. Follow these rules exactly:
 	// Design is backend-agnostic (its proposed tier is only a hint; the implementation
 	// gate does the real, backend-aware enforcement), so pass no backend here.
 	sb.WriteString(agentPhilosophyBlock(""))
+	// The tier IS backend-dependent in one respect: an API-engine workspace can only build
+	// TIER 1 (see toolCallingTierCeiling). The designer is told, so the plan the user
+	// approves is one the build will accept rather than one it refuses after six minutes.
+	if p.BackendType == BackendToolCalling {
+		sb.WriteString(designTierCeilingBlock())
+	}
 
 	// ── Designing for flexibility ─────────────────────────────────────────────
 	sb.WriteString(`<design_for_flexibility>
@@ -1310,6 +1370,9 @@ type ImplementationParams struct {
 	// steered only by an advisory History note, and a weak model regenerates the same
 	// unverifiable script — the loop this flag exists to break.
 	ForceTier1 bool
+	// IsEdit marks an EDIT build, whose working copy already holds the live agent's
+	// tools. It keeps forceTier1Block from telling the model to delete them.
+	IsEdit bool
 	// BrowserAvailable tells the BUILD coder the browser exists. Without it a weak
 	// model writes a Playwright script by hand — the exact failure the native tool
 	// replaces — or concludes a JavaScript-rendered site cannot be read at all.
@@ -1344,7 +1407,7 @@ func (p ImplementationParams) capabilitySpec() string {
 	// LAST, so it is the most recent instruction the model reads — this is an override of
 	// the tier machinery above, and a weak model weights later text more heavily.
 	if p.ForceTier1 {
-		sb.WriteString(forceTier1Block())
+		sb.WriteString(forceTier1Block(p.IsEdit))
 	}
 	return sb.String()
 }
@@ -1356,7 +1419,15 @@ func (p ImplementationParams) capabilitySpec() string {
 //
 // It is deliberately absolute. A softer "prefer not to write a script" reads, to a weak
 // model, as permission to write one — which is exactly what produced the loop.
-func forceTier1Block() string {
+func forceTier1Block(isEdit bool) string {
+	// On an edit the working copy holds the LIVE agent's tools — often written by a CLI
+	// coder — so "delete the code files" would silently strip a working agent. The staging
+	// dir is rebuilt from the live agent on every attempt, so there are no leftovers from a
+	// previous attempt to clean up either.
+	cleanup := "- If the agent already has code files from the previous attempt, DELETE them.\n"
+	if isEdit {
+		cleanup = "- Leave the agent's EXISTING code files exactly as they are; add no new ones.\n"
+	}
 	return "<mandatory_override>\n" +
 		"THIS ATTEMPT: create ZERO code files. This overrides any tier reasoning above.\n" +
 		"The previous attempt wrote a helper script that could not be confirmed to work.\n" +
@@ -1366,7 +1437,7 @@ func forceTier1Block() string {
 		"  read_file to read them. Read what comes back and decide, judge, extract, and\n" +
 		"  format it yourself — that is the agent's whole implementation.\n" +
 		"- Write AGENT.md describing those steps in plain language, and nothing else.\n" +
-		"- If the agent already has code files from the previous attempt, DELETE them.\n" +
+		cleanup +
 		"- If some step genuinely cannot be done without code, do NOT write the code: say\n" +
 		"  so in plain language and explain what is missing. A clear explanation is a\n" +
 		"  useful answer here; another unverifiable script is not.\n" +
