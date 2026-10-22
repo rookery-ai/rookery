@@ -1858,6 +1858,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		ConnectionTools:    connToolNames,
 		Skills:             sess.Skills,
 		ForceTier1:         forceTier1,
+		IsEdit:             isEdit,
 		// Without this the build prompt never mentions the browser, so a weak
 		// model either hand-writes a Playwright script — the exact failure the
 		// native tools replace — or concludes a JavaScript-rendered site cannot
@@ -1946,6 +1947,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	var workDir, prompt string
 	var cleanupOnFail, cleanupOnSuccess func()
+	// baselineTools is what tools/ held BEFORE the coder ran — the live agent's tools on an
+	// edit, nothing on a create — so the API-engine tier ceiling can tell the files a build
+	// authored from the ones a CLI coder wrote earlier (see apiTierCeilingViolation).
+	var baselineTools map[string]string
 
 	if isEdit {
 		// Edit mode: never let the coder touch the live agent dir before approval —
@@ -1958,6 +1963,9 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			return "", false, "", fmt.Errorf("prepare staging workspace: %w", err)
 		}
 		workDir = stagingDir
+		if t, err := readToolsFromDisk(stagingDir); err == nil {
+			baselineTools = t
+		}
 		prompt = prompts.BuildEditImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap), implParams)
 		remove := func() { _ = os.RemoveAll(stagingDir) }
 		cleanupOnFail, cleanupOnSuccess = remove, remove
@@ -2119,7 +2127,23 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		usedConns = result.UsedConnectionIDs
 		usedMCPIDs = result.UsedMCPServerIDs
 	}
-	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
+	// Tier ceiling: on the API engine an agent is built at TIER 1 only (no helper code).
+	// Checked against disk, before the presentability gates, so they can be told what it
+	// found.
+	var ceilingHit []string
+	if built, rerr := readToolsFromDisk(workDir); rerr == nil {
+		ceilingHit = apiTierCeilingViolation(backendType, baselineTools, built)
+	}
+	// gateBackend is the backend the presentability gates judge by. On the API engine the
+	// ceiling has already decided everything the weak-backend "unverified authored script"
+	// gate exists for: an authored script is a ceiling hit, and any tools that remain are
+	// the live agent's own, written by a CLI coder and untouched by this edit. Left on, that
+	// gate would refuse such an edit for "a helper it wrote" that it never touched.
+	gateBackend := backendType
+	if backendType == prompts.BackendToolCalling {
+		gateBackend = ""
+	}
+	decision := decideBuildOutcome(workDir, resultText, gateBackend, scriptVerified, scriptOutput)
 
 	if err != nil && !decision.saveable {
 		closeProgress()
@@ -2182,6 +2206,15 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	notify("🔍 Validating agent safety checks…")
 
+	if len(ceilingHit) > 0 {
+		// "Keep it as-is" would save the script agent anyway, walking straight past the
+		// ceiling, so a violating build is never offered as saveable.
+		decision.saveable = false
+		if !isEdit {
+			removeAuthoredTools(workDir, ceilingHit)
+		}
+	}
+
 	// Record whether "keep it as-is" is a real option for this build (a saveable AGENT.md +
 	// guardrail-passing tools on disk). The web UI gates the button on this so it's never
 	// offered when there's nothing to save (e.g. a no-AGENT.md block), and always offered
@@ -2203,7 +2236,18 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 
 	blocked := parseBlockedOutput(resultText)
-	outcome := reconcileBlockedOutcome(decision, blocked, backendType)
+	outcome := reconcileBlockedOutcome(decision, blocked, gateBackend)
+	if len(ceilingHit) > 0 {
+		slog.Warn("agentdesigner: build exceeded the API-engine tier ceiling",
+			"build_id", buildID, "workspace_id", workspaceID, "agent_id", agentIDSnap,
+			"edit", isEdit, "files", len(ceilingHit))
+		outcome = reconciledOutcome{
+			message:        tierCeilingMessage(isEdit),
+			advance:        false,
+			recordFailNote: tierCeilingFailNote(isEdit),
+			forceTier1:     true,
+		}
+	}
 
 	slog.Info("agentdesigner: build decision",
 		"build_id", buildID, "workspace_id", workspaceID,
@@ -2640,6 +2684,9 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 	// no authored script has nothing unverified to hold back. When the engine already
 	// confirmed the script ran (scriptVerified), this gate does NOT fire — presenting it as
 	// unverified would contradict the finish gate that let the build end.
+	// runGeneration no longer reaches this with BackendToolCalling: the API-engine tier
+	// ceiling (apiTierCeilingViolation) refuses any authored script outright and passes a
+	// neutral backend here. Kept because the gate is still correct for its own inputs.
 	if backendType == prompts.BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified {
 		return buildDecision{
 			saveable:          true, // AGENT.md + tools are on disk and passed ethics/guardrails — keep-as-is can save them

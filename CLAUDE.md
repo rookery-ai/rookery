@@ -2501,6 +2501,42 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
   its own failure is the same defect this whole change set exists to remove.
 - **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
 - **Script-verification bridge → `coder.Result`.** The engine tracks per authored `tools/*.py` whether it RAN with real stdout (`hostToolSet.producedOutput`) and captures that stdout (`lastVerifiedOutput`, secret-redacted via `redactSecrets`). `runToolLoop` surfaces this ground truth on `Result.ScriptVerified` / `Result.ScriptOutput` (+ `Result.ScriptRan` = an authored script was executed at least once, for observability). The agent designer's `decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)` **trusts the engine** instead of re-deriving verification from a `[TEST_OUTPUT]` marker the weak model often forgets: an engine-confirmed run advances to review showing the real captured output as the sample, and the weak-backend gate (`BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified`) only fires when the engine did NOT confirm a run — fixing the false "I couldn't confirm the helper it wrote actually runs." When that gate DOES fire, the `agentdesigner: build not presentable` slog carries `script_ran` to discriminate "ran but produced nothing" (broken/outbound-blocked) from "never ran". Fields are zero for CLI coders and runs/chat. **On a CREATE build this is no longer the last word on the review sample**: `dryRun` runs the finished agent once afterwards and overwrites the sample with that output when it produces one (see "A create build RUNS the agent once before showing it to you"), so a TIER 1 agent — which authors no script and can therefore never set `ScriptVerified` — still shows something that ran. Covered by `build_outcome_test.go` + `api_engine_test.go`.
+- **The API engine builds TIER 1 only; TIER 2/3 are reserved for CLI coders.** Everything above
+  about verifying an authored script on this backend is now upstream of a stricter rule. The gate
+  used to route a secret-bearing, paginated or heavy call to "[BULK] → TIER 2, one thin helper
+  script", and the small models this backend usually runs could not do it: builds shipped a script
+  that never returned real data, or spent the whole budget trying. Two halves, because a prompt
+  steers and does not bind. **The prompts** (`prompts.toolCallingTierCeiling` in the philosophy
+  block, the gate's `TIER CEILING ON THIS BACKEND`, and `designTierCeilingBlock` in the DESIGN
+  prompt — which already received `BackendType` and used it only for the browser block) say
+  TIER 1, route a secret-bearing call to a connector or one direct `bash`/`curl` step described in
+  AGENT.md, and name the way through: build on a CLI coder, then switch back. The designer is told
+  so the plan the user approves is one the build will accept. **`apiTierCeilingViolation`**
+  (`internal/agentdesigner/tierceiling.go`) is the binding half: on `BackendToolCalling` any file
+  under `tools/` a build ADDED or CHANGED refuses the build — not presentable, not saveable (or
+  keep-as-is would save the script agent anyway), `forceTier1` set, and on a create the refused
+  files are deleted from the draft so an obedient retry is not refused for leftovers. Four things
+  are load-bearing:
+  - **The baseline is what `tools/` held before the coder ran** (`baselineTools`, read from the
+    edit staging dir), not "is `tools/` non-empty". `hasAuthoredScript` is set for every file in
+    `tools/` despite its name, and an edit's staging copy carries the live agent's tools — so a
+    naive check would refuse every edit of a CLI-built agent on the API engine, which is exactly
+    the "build on Claude Code, run on a cheap model" workflow this exists to keep. A DELETED tool is
+    not reported: dropping code is a move toward TIER 1.
+  - **The weak-backend "unverified authored script" gate is bypassed on this backend**
+    (`gateBackend = ""` for `decideBuildOutcome` and `reconcileBlockedOutcome`). The ceiling already
+    decided everything it caught, and left on it would refuse an edit that kept the CLI coder's
+    script intact for "the helper it wrote" whenever the model forgot `[TEST_OUTPUT]`. The gate's
+    code and tests remain, correct for their own inputs, but `runGeneration` no longer feeds it
+    `BackendToolCalling`.
+  - **`forceTier1Block(isEdit)` no longer says DELETE on an edit.** Its unconditional "delete the
+    code files from the previous attempt" would have stripped a CLI-built agent's working tools;
+    the edit staging dir is rebuilt from the live agent on every attempt, so there are no
+    leftovers to clean anyway. `ImplementationParams.IsEdit` carries it.
+  - **Running is untouched.** `BuildCoderPrompt` takes `agentPhilosophyBlock("")` and the exec
+    gate still offers `run_script`/`bash` on runs, so a TIER 2 agent a CLI coder built keeps
+    working after the workspace switches to an API coder. `TestRuntimePromptStillOffersScriptsOnTheAPIEngine`
+    pins it, because "the ceiling should apply everywhere" is the tempting over-reach.
 - **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the always-on host tools, minus the exec-gated `run_script`/`bash`/`get_state`/`set_state`, for on-demand KB read/write — parity with the CLI chat's set).
 
 - **The design conversation runs a READ-ONLY tool profile** (`Coder.WithReadOnlyTools`,

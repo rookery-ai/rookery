@@ -342,15 +342,12 @@ func TestRunGeneration_BlockedBuildDoesNotDryRun(t *testing.T) {
 
 	workDir := DraftAgentDir(agentsDir, workspaceID, "watcher")
 
-	// Guard the fixture before trusting the count. A build that is not PRESENTABLE has
-	// always skipped the dry run, so if this shape ever stopped being presentable the
-	// assertion below would pass for a reason that has nothing to do with the placement.
-	d := decideBuildOutcome(workDir, blockedBuildOutput, prompts.BackendToolCalling, false, "")
-	if !d.presentable {
-		t.Fatalf("fixture no longer reaches the presentable-but-blocked path: message=%q", d.message)
-	}
-	if out := reconcileBlockedOutcome(d, parseBlockedOutput(blockedBuildOutput), prompts.BackendToolCalling); out.advance {
-		t.Fatalf("fixture no longer produces a non-advancing outcome; the test proves nothing")
+	// Guard the fixture before trusting the count. On the API engine an authored script now
+	// stops at the tier ceiling (apiTierCeilingViolation), which is presentable on disk but
+	// never advances — the same not-advancing position the weak-backend blocked path used
+	// to occupy. If the build ever advanced instead, the count below would prove nothing.
+	if msg != tierCeilingMessage(false) {
+		t.Fatalf("fixture no longer stops at the tier ceiling; the test proves nothing: %q", msg)
 	}
 
 	if n := coderInvocations(t, workDir); n != 1 {
