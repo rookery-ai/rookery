@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/rookery-ai/rookery/compare/v0.18.5...v0.18.6) (2026-10-22)
+
+
+### Bug Fixes
+
+* **agentdesigner:** restrict helper-script tiers to CLI coders ([#383](https://github.com/rookery-ai/rookery/issues/383)) ([d866d99](https://github.com/rookery-ai/rookery/commit/d866d997367cdbd89a3bb82dbfed3c136419c303))
+
 ## [0.18.5](https://github.com/rookery-ai/rookery/compare/v0.18.4...v0.18.5) (2026-10-19)
 
 
