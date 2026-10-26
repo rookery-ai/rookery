@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/rookery-ai/rookery/compare/v0.18.7...v0.19.0) (2026-10-26)
+
+
+### Features
+
+* **web/chat:** stop an in-flight chat turn ([#389](https://github.com/rookery-ai/rookery/issues/389)) ([a3ab9c1](https://github.com/rookery-ai/rookery/commit/a3ab9c11eef558c847fff47cc60ddbe12cff57b6))
+
+
+### Bug Fixes
+
+* **coder:** stop chat from looping on empty web searches ([#388](https://github.com/rookery-ai/rookery/issues/388)) ([34a259e](https://github.com/rookery-ai/rookery/commit/34a259e4ec5f4ea14e029e43e04fcc74a7cff599))
+* **deps:** bump labstack/echo to v4.16.1 ([#390](https://github.com/rookery-ai/rookery/issues/390)) ([3b7b0cb](https://github.com/rookery-ai/rookery/commit/3b7b0cb65a80da214db1d66fcc3582e36cbd2a88))
+
 ## [0.18.7](https://github.com/rookery-ai/rookery/compare/v0.18.6...v0.18.7) (2026-10-22)
 
 
