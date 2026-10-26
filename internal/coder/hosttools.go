@@ -400,6 +400,11 @@ func (h *hostToolSet) executeOrNudge(ctx context.Context, call llm.ToolCall) str
 			"the arguments, use a fundamentally different tool/approach, or stop and report the outcome to the " +
 			"user with [CHAT], or emit [BLOCKED] if you're stuck."
 	}
+	// Cleared first, not only after: a path that runs webSearch without coming
+	// through here (tests call execute directly) would otherwise leave the flag
+	// set, and the next real call — a successful read_file — would be counted
+	// as fruitless.
+	h.lastFruitless = false
 	result := h.execute(ctx, call)
 	isErr := strings.HasPrefix(result, "error:")
 	h.trackScriptProgress(call, result, isErr)
