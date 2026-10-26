@@ -492,7 +492,7 @@ func (f *Flow) runGenerationLogged(ctx context.Context, workspaceID string) (str
 	f.mu.Unlock()
 	slog.Info("skilldesigner: build start", "build_id", buildID, "workspace_id", workspaceID, "skill", skill)
 	started := time.Now()
-	msg, done, id, err := f.runGeneration(ctx, workspaceID)
+	msg, done, id, err := f.runGeneration(context.WithValue(ctx, buildIDKey{}, buildID), workspaceID)
 	state := ""
 	f.mu.Lock()
 	if sess := f.sessions[workspaceID]; sess != nil {
@@ -504,7 +504,15 @@ func (f *Flow) runGenerationLogged(ctx context.Context, workspaceID string) (str
 	return msg, done, id, err
 }
 
+// buildIDKey carries runGenerationLogged's build id into runGeneration, so the lines
+// logged between start and finish (coder result, decision) share it.
+type buildIDKey struct{}
+
 func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
+	buildID, _ := ctx.Value(buildIDKey{}).(string)
+	decide := func(decision string) {
+		slog.Info("skilldesigner: build decision", "build_id", buildID, "workspace_id", workspaceID, "decision", decision)
+	}
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	// Reset the failure flag for this fresh attempt; a soft-fail below re-sets it
@@ -624,11 +632,25 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "", false, "", fmt.Errorf("coder: %w", err)
 	}
 
-	if blocked := parseBlockedOutput(result.Text); blocked != "" {
-		cleanupStaging()
-		closeProgress()
-		f.markGenerationFailed(workspaceID, blocked)
-		return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
+	blocked := parseBlockedOutput(result.Text)
+	slog.Info("skilldesigner: coder returned", "build_id", buildID, "workspace_id", workspaceID,
+		"stop_reason", result.StopReason, "script_verified", result.ScriptVerified, "script_ran", result.ScriptRan,
+		"blocked", blocked != "")
+	// A [BLOCKED] reply is reconciled against what is on disk before anything is
+	// discarded (mirrors agentdesigner.reconcileBlockedOutcome): the turn-budget grace
+	// nudge asks every exhausted build for [BLOCKED], so a builder that finished its
+	// skill and then ran out of turns would otherwise lose the whole build.
+	blockCaveat := ""
+	if blocked != "" {
+		proceed, caveat := reconcileSkillBlock(stagingDir, blocked)
+		if !proceed {
+			decide("blocked")
+			cleanupStaging()
+			closeProgress()
+			f.markGenerationFailed(workspaceID, blocked)
+			return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
+		}
+		blockCaveat = caveat
 	}
 
 	notify("🔍 Validating skill safety checks…")
@@ -640,6 +662,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		decide("no_skill_md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMDBytes, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
@@ -647,6 +670,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		decide("no_skill_md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
@@ -666,6 +690,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		closeProgress()
 		slog.Warn("skilldesigner: skill failed safety checks", "workspace_id", workspaceID, "skill_name", skillNameSnap, "err", err)
 		f.markGenerationFailed(workspaceID, "the generated SKILL.md failed a safety check: "+err.Error())
+		decide("guardrails")
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
@@ -674,6 +699,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
 			f.markGenerationFailed(workspaceID, "the generated file "+filename+" failed an internal safety check: "+err.Error())
+			decide("guardrails")
 			return "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.", false, "", nil
 		}
 	}
@@ -689,6 +715,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// A blocked vetting verdict (🔴/⛔ or "do not save") keeps the user in the
 	// design state to revise — the skill is NOT saved.
 	if vettingBlocksSave(report) {
+		decide("vetting_blocked")
 		msg := fmt.Sprintf(
 			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
 			report,
@@ -728,7 +755,8 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// longer returns ErrMaxTurns, and the deterministic exhaustionSummary carries no
 	// [BLOCKED], so nothing below this point would notice. The reason comes from the
 	// engine (Result.StopReason), never from the model remembering to emit a marker.
-	return caveatTruncatedBuild(fmt.Sprintf(
+	decide("ready")
+	return blockCaveat + caveatTruncatedBuild(fmt.Sprintf(
 		"Here's the generated skill and how it tested:\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
 		testOut, vettingReportBlock(report),
 	), result.StopReason), false, "", nil
@@ -765,9 +793,8 @@ const truncatedBuildCaveat = "⚠️ Heads up — this build ran out of steps be
 // review, caveated when the engine cut the tool loop short. An empty stopReason is a
 // normal finish and passes through untouched.
 //
-// Two args, not agentdesigner's three: a [BLOCKED] reply already returns early above
-// (parseBlockedOutput), so this is never reached with one and a `blocked` parameter would
-// be dead code here.
+// Two args, not agentdesigner's three: a [BLOCKED] reply that reaches review is already
+// caveated by reconcileSkillBlock, so a `blocked` parameter here would say it twice.
 func caveatTruncatedBuild(message, stopReason string) string {
 	if strings.TrimSpace(stopReason) == "" {
 		return message
@@ -1217,6 +1244,24 @@ func parseTestOutput(text string) string {
 		return strings.TrimSpace(text[start:])
 	}
 	return strings.TrimSpace(text[start : start+end])
+}
+
+// reconcileSkillBlock decides whether a [BLOCKED] build still has a skill worth reviewing:
+// it does when staging holds a SKILL.md whose frontmatter names the skill. The caveat it
+// returns opens the review message, so the builder's reason is shown rather than lost.
+func reconcileSkillBlock(stagingDir, blocked string) (proceed bool, caveat string) {
+	root, err := LocateSkillRoot(stagingDir)
+	if err != nil {
+		return false, ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if err != nil {
+		return false, ""
+	}
+	if meta, _ := skilllibrary.ParseMeta(string(data)); strings.TrimSpace(meta.Name) == "" {
+		return false, ""
+	}
+	return true, "Note: the builder reported a problem it could not resolve: " + blocked + "\n\n"
 }
 
 // parseBlockedOutput extracts the coder's explanation from a [BLOCKED] block. Only a
