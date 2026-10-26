@@ -6,6 +6,7 @@ package prompts
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -2985,17 +2986,63 @@ type SkillBin struct {
 	Path  string // resolved absolute path, "" if not installed
 }
 
+// SkillPyEnv is one declared skill's Python environment as the runtime prompt reports
+// it: what to install, which secrets its scripts read, and whether it is already there.
+type SkillPyEnv struct {
+	Skill, Env        string
+	Packages, Secrets []string
+	Ready             bool
+}
+
+// skillPyEnvLines spells out the exact install and run calls for both coder kinds, so a
+// weak model copies a working call rather than composing one — and never reaches for
+// pip, which would bypass the install sandbox.
+func skillPyEnvLines(envs []SkillPyEnv, rookeryBin string) string {
+	quote := func(xs []string) string {
+		q := make([]string, len(xs))
+		for i, x := range xs {
+			q[i] = strconv.Quote(x)
+		}
+		return "[" + strings.Join(q, ", ") + "]"
+	}
+	var sb strings.Builder
+	sb.WriteString("Python environments for declared skills (install and run ONLY this way, never pip):\n")
+	for _, e := range envs {
+		if e.Ready {
+			fmt.Fprintf(&sb, "- Python environment `%s` for skill %s is ready.\n", e.Env, e.Skill)
+		} else {
+			cli := rookeryBin + " deps install --env " + e.Env
+			for _, p := range e.Packages {
+				cli += " --package " + p
+			}
+			fmt.Fprintf(&sb, "- Python environment `%s` for skill %s is NOT installed yet. Before first use call install_packages(env=%q, packages=%s) — CLI: `%s`.\n",
+				e.Env, e.Skill, e.Env, quote(e.Packages), cli)
+		}
+		run := rookeryBin + " deps run --env " + e.Env
+		for _, s := range e.Secrets {
+			run += " --secret " + s
+		}
+		fmt.Fprintf(&sb, "  Run its scripts with run_in_env(env=%q, script=..., secrets=%s) — CLI: `%s -- <script> [args]`.\n",
+			e.Env, quote(e.Secrets), run)
+	}
+	return sb.String()
+}
+
 // SkillEnvBlock builds the <skill_environment> block injected into an agent run
 // alongside <skill_instructions>. For each declared tool it states the resolved
 // absolute path (or "missing — install via the cli-tool-installer skill") plus
 // the sandbox conventions: invoke tools by absolute path, use $TMPDIR not /tmp,
 // tools live at $HOME/.local/bin, secrets are env vars, vault root.
-func SkillEnvBlock(bins []SkillBin, homeDir, vaultRoot string) string {
-	if len(bins) == 0 && vaultRoot == "" {
+func SkillEnvBlock(bins []SkillBin, envs []SkillPyEnv, homeDir, vaultRoot, rookeryBin string) string {
+	if len(bins) == 0 && len(envs) == 0 && vaultRoot == "" {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("<skill_environment>\n")
+	if len(envs) > 0 {
+		sb.WriteString(skillPyEnvLines(envs, rookeryBin))
+		sb.WriteString("\n")
+	}
 	if len(bins) > 0 {
 		sb.WriteString("Declared skill tools and their resolved paths:\n")
 		seen := map[string]bool{}

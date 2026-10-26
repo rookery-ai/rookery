@@ -26,6 +26,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/prompts"
 	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/skilldeps"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
 	"github.com/rookery-ai/rookery/internal/skillstore"
 	"github.com/rookery-ai/rookery/internal/vault"
@@ -388,7 +389,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	homeDir := filepath.Join(r.homesDir, input.WorkspaceID)
 	vaultRoot := filepath.Join(r.agentsDir, input.WorkspaceID)
-	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.WorkspaceID, homeDir, declaredSkills, declaredContent), homeDir, vaultRoot)
+	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.WorkspaceID, homeDir, declaredSkills, declaredContent),
+		r.resolveSkillEnvs(homeDir, declaredSkills, declaredContent), homeDir, vaultRoot, connectorBinPath())
 
 	// Resolve the workspace's configured coder up front so both the prompt's backend
 	// description and the actual execution use the same (correct) coder.
@@ -1559,6 +1561,38 @@ func (r *Runner) resolveSkillBins(workspaceID, homeDir string, declaredSkills []
 		for _, b := range meta.AnyBins {
 			add(name, b)
 		}
+	}
+	return out
+}
+
+// resolveSkillEnvs reports, for every declared skill with `kind: pip` install entries,
+// the environment named after it, the packages and secrets it declares, and whether a
+// recorded install already covers every package — so the prompt asks for an install only
+// when one is needed.
+func (r *Runner) resolveSkillEnvs(homeDir string, declaredSkills []string, declaredContent map[string]string) []prompts.SkillPyEnv {
+	var out []prompts.SkillPyEnv
+	for _, name := range declaredSkills {
+		content, ok := declaredContent[name]
+		if !ok {
+			continue
+		}
+		meta, _ := skilllibrary.ParseMeta(content)
+		var pkgs []string
+		for _, in := range meta.Install {
+			if in.Kind == "pip" && in.Package != "" {
+				pkgs = append(pkgs, in.Package)
+			}
+		}
+		if len(pkgs) == 0 {
+			continue
+		}
+		dir, err := skilldeps.EnvDir(homeDir, name)
+		if err != nil {
+			slog.Warn("agentrunner: skill name is not a valid environment name", "skill", name, "err", err)
+			continue
+		}
+		m, _ := skilldeps.ReadManifest(dir)
+		out = append(out, prompts.SkillPyEnv{Skill: name, Env: name, Packages: pkgs, Secrets: meta.RequiresEnv, Ready: m.Satisfies(pkgs)})
 	}
 	return out
 }
