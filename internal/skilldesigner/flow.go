@@ -604,7 +604,9 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker the connector build-guard checks for.
-	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
+	// KindSkill is what makes install_packages / `rookery deps install` refuse here: a
+	// skill is written for an agent to install at run time.
+	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation, buildphase.KindEnvVar: buildphase.KindSkill}
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {
 			for k, v := range env {

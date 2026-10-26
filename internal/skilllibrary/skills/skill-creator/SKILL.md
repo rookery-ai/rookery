@@ -92,6 +92,38 @@ line tool — that is often the whole point of a skill.
   Don't write instructions that assume a script runs unless you are
   authoring a user skill.
 
+## Python dependencies
+
+A script that needs packages beyond the standard library does NOT install them
+while the skill is being built. The skill declares them, and the agent that
+uses it installs them on first use into a contained environment named after
+the skill, which persists for later runs.
+
+- Declare each package under `metadata.install` as `kind: pip` with a pinned
+  `package:` — `requests==2.32.4`, or a `git+https://…@<tag>` URL. Declare
+  every secret a script reads under `metadata.requires.env`.
+- In the body, tell the agent to install with the `install_packages` tool
+  (`env` = the skill's name) before first use, and to run the script with
+  `run_in_env`, passing the declared secrets by name. CLI coders use
+  `rookery deps install --env <skill> --package <requirement>` and
+  `rookery deps run --env <skill> --secret <NAME> -- scripts/<file>.py`.
+  Never write a raw `pip install` instruction.
+- Import the package lazily, inside the function that needs it after argument
+  parsing, so `--help` and a clear "not installed — run install_packages
+  first" error work without it.
+- Never write a secret's value to disk — no `.env` files, configs, caches or
+  notes. Read it from `os.environ` each time; the security review refuses a
+  skill that persists one.
+
+```yaml
+metadata:
+  requires:
+    env: [MY_API_KEY]
+  install:
+    - kind: pip
+      package: requests==2.32.4
+```
+
 ## Testing
 
 Run every script you write before you finish — with `--help`, or against a
@@ -147,6 +179,8 @@ program usually produces a plausible *number* rather than an error.
   **Invoke every installed tool by absolute path** (`$HOME/.local/bin/pandoc`),
   never bare `pandoc` — the inherited PATH points at the operator's dirs.
 - **No `/tmp`** — use `$TMPDIR` (= `$HOME/tmp`).
+- Python packages go through `install_packages` / `rookery deps install` into
+  a per-skill environment, never `pip install` — see "Python dependencies".
 - Can't install system-wide (`/usr/bin` is RO). Static-binary download to
   `$HOME/.local/bin/` is the mechanism for pandoc/ffmpeg/poppler/jq.
 - The runtime **environment block** tells the agent the resolved absolute path

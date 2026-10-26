@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -104,5 +105,24 @@ func TestRunGenerationLogged_LinesShareABuildID(t *testing.T) {
 		if ids[m] != ids[want[0]] {
 			t.Errorf("%q has build_id %q, want %q", m, ids[m], ids[want[0]])
 		}
+	}
+}
+
+// The install tools refuse during a skill build by reading ROOKERY_BUILD_KIND from the
+// coder's env; the skill designer is the one place that must set it.
+func TestRunGeneration_SetsTheSkillBuildMarker(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "kind.txt")
+	fake := newFakeSkillCoder(t, fmt.Sprintf("import os\nopen(%q, 'w').write(os.environ.get('ROOKERY_BUILD_KIND', ''))\n", probe))
+	flow, workspaceID := newGenSkillFlow(t, fake)
+	flow.sessions[workspaceID] = newDesigningSession(workspaceID, "my-skill")
+	if _, _, _, err := flow.runGeneration(context.Background(), workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "skill" {
+		t.Fatalf("ROOKERY_BUILD_KIND = %q in the build coder's env, want \"skill\"", got)
 	}
 }
