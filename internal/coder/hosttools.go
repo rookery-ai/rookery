@@ -25,6 +25,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/llm"
 	"github.com/rookery-ai/rookery/internal/mcp"
 	"github.com/rookery-ai/rookery/internal/sandbox"
+	"github.com/rookery-ai/rookery/internal/skilldeps"
 	"github.com/rookery-ai/rookery/internal/vault"
 	"github.com/rookery-ai/rookery/internal/websearch"
 
@@ -77,6 +78,11 @@ type hostToolSet struct {
 	// here (the caller has not wired one through) never surfaces as wrong data, only as a
 	// blank " # State — " heading on the rare first-ever write.
 	agentName string
+
+	// deps installs and runs skill dependencies (install_packages / run_in_env). Zero in
+	// production, where depsRunner fills it from sandbox/selfExe; tests inject a fake
+	// interpreter.
+	deps skilldeps.Runner
 
 	// journal records what a REHEARSAL — an agent build or the create-build dry
 	// run — writes into the user's knowledge base, so the designer can undo it
@@ -324,7 +330,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 				Name: "bash",
 				Description: "Run a bash command with your working directory as CWD, sandboxed, and return its stdout. " +
 					"Secrets are available as environment variables (e.g. curl -H \"Authorization: Bearer $MY_TOKEN\" ...), so use this (or run_script) for any call that needs a secret. " +
-					"On failure both stdout and stderr are returned so you can see what went wrong. Do NOT install packages (no internet-backed pip/apt) — use tools that are already present.",
+					"On failure both stdout and stderr are returned so you can see what went wrong. Install Python packages with install_packages, never pip in bash; no system packages (apt) either.",
 				Parameters: rawSchema(`{"type":"object","properties":{"command":{"type":"string","description":"the bash command line to run"}},"required":["command"]}`),
 			},
 			llm.Tool{
@@ -343,6 +349,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 				Parameters: rawSchema(`{"type":"object","properties":{"patch":{"type":"object","description":"keys to merge into the current state; a null value deletes that key"}},"required":["patch"]}`),
 			},
 		)
+		tools = append(tools, depsTools()...)
 	}
 	tools = append(tools, h.connectorTools()...)
 	tools = append(tools, h.mcpTools()...)
@@ -362,6 +369,10 @@ var mutatingToolNames = map[string]bool{
 	"write_file": true,
 	"edit_file":  true,
 	"save_to_kb": true,
+	// Exec-gated already (readOnly forces includeExecTools off); listed so the by-name
+	// refusal covers them too.
+	"install_packages": true,
+	"run_in_env":       true,
 }
 
 // withoutMutatingTools drops the state-changing tools from a declaration list.
@@ -691,6 +702,10 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		DestDir   string            `json:"dest_dir"`
 		Title     string            `json:"title"`
 		Patch     map[string]any    `json:"patch"`
+		Env       string            `json:"env"`
+		Packages  []string          `json:"packages"`
+		Script    string            `json:"script"`
+		Secrets   []string          `json:"secrets"`
 		Section   string            `json:"section"`
 		Select    []string          `json:"select"`
 		Where     map[string]string `json:"where"`
@@ -832,6 +847,24 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			return "error: " + err.Error()
 		}
 		return h.spillLargeOutput(out, "bash")
+	case "install_packages":
+		if !h.includeExecTools {
+			return "error: install_packages is not available"
+		}
+		out, err := h.installPackages(ctx, args.Env, args.Packages)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "run_in_env":
+		if !h.includeExecTools {
+			return "error: run_in_env is not available"
+		}
+		out, err := h.runInEnv(ctx, args.Env, args.Script, args.Args, args.Secrets, args.Stdin)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return h.spillLargeOutput(out, "run_in_env")
 	case "get_state":
 		if !h.includeExecTools {
 			return "error: get_state is not available"
