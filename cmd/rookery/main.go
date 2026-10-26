@@ -73,6 +73,7 @@ func main() {
 			mcpCmd(),
 			kbCmd(),
 			stateCmd(),
+			depsCmd(),
 			backupCommand(),
 			upgradeCmd(),
 			uninstallCmd(),

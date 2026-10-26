@@ -489,6 +489,9 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
 	// secrets + the connector-bridge vars. Injected for every coder type.
 	extraEnv := map[string]string{}
+	// `rookery deps run` (CLI coders) grants a skill script the knowledge base only when
+	// told where it is; it cannot ask the server, so the run hands it over.
+	extraEnv["ROOKERY_VAULT_ROOT"] = vaultRoot
 	if input.MasterPw != "" {
 		if user, err := r.db.GetWorkspaceByID(input.WorkspaceID); err == nil {
 			svc := secrets.New(r.db, input.WorkspaceID, input.MasterPw, user.SecretsSalt)
