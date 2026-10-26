@@ -2502,6 +2502,20 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
   behaviour was reviewed: the gateway branch was already unreachable, and an
   exhausted run now records `exit 0` with the summary delivered as its message.
 
+  **An empty web search is FRUITLESS — neither progress nor failure — and that is what
+  makes the streak guard reach a search loop at all.** `web_search` answers an empty cascade
+  with a non-error notice so the oscillation guard leaves it alone, and the turn budget used
+  to read every non-error call as productive — so each empty search RESET the unproductive
+  streak, and a chat rewording an unanswerable query searched for over ten minutes with the
+  budget never moving. `hostToolSet.noteFruitless` counts such a call toward the total only.
+  On top of that `web_search` carries a per-call allowance (`maxEmptySearchStreak` 3 in a row,
+  `maxEmptySearches` 6 in total, `maxUnavailableSearches` 2 outcomes where EVERY engine
+  failed, read from `websearch.Outcome.Failed`): past it the tool answers without touching the
+  network, with a settled notice telling the model to answer with what it has — not an
+  `error:`, because a refusal is an outcome to act on, not a failure to retry. A search that
+  finds something resets the streak but never the total, or alternating hits and misses could
+  search forever. Chat is also told when to give up (`chatStopLookingBlock`).
+
   **A truncated build must not read as a finished one.** Because the grace turn now
   always returns a non-nil `Result`, an exhausted BUILD whose script had already
   verified gets `thinProof=false`, so the weak-backend gate never fires and

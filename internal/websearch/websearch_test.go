@@ -243,3 +243,30 @@ func TestDecodeDDGRedirect(t *testing.T) {
 		})
 	}
 }
+
+// Failed separates an engine that ERRORED from one that answered with nothing.
+// A caller needs the difference: rewording a query can find results an engine
+// did not have, but it cannot get past an engine that is refusing the request,
+// so a cascade where every engine failed means search is down, not unlucky.
+func TestSearchRecordsFailedProviders(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gone", http.StatusForbidden)
+	}))
+	defer dead.Close()
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<html><body>nothing</body></html>`))
+	}))
+	defer empty.Close()
+
+	c := testClient(&ddgProvider{name: "a", base: dead.URL}, &ddgProvider{name: "b", base: empty.URL})
+	outcome, err := c.Search(context.Background(), "q")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(outcome.Tried) != 2 {
+		t.Fatalf("Tried = %v, want both engines", outcome.Tried)
+	}
+	if len(outcome.Failed) != 1 || outcome.Failed[0] != "a" {
+		t.Fatalf("Failed = %v, want only the erroring engine [a]", outcome.Failed)
+	}
+}

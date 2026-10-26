@@ -171,6 +171,17 @@ type hostToolSet struct {
 	failedCalls     int
 	succeededTools  []string
 
+	// Web-search allowance. An empty search is FRUITLESS: not a failure (no
+	// "error:", so the oscillation guard stays out of it) and not progress
+	// either. Counting it as progress is what let a chat rephrase an
+	// unanswerable query for ten minutes — every empty result reset the
+	// unproductive streak, so the turn budget never moved. lastFruitless is
+	// set by webSearch and consumed by executeOrNudge for the call it just ran.
+	lastFruitless       bool
+	emptySearchStreak   int
+	emptySearches       int
+	unavailableSearches int
+
 	// Self-managed OAuth connector tools. When an agent is bound to service
 	// connections (agent_connections), each connection's curated actions are offered
 	// as native typed tools (connectorTools) and dispatched through connectors.Execute.
@@ -389,10 +400,20 @@ func (h *hostToolSet) executeOrNudge(ctx context.Context, call llm.ToolCall) str
 			"the arguments, use a fundamentally different tool/approach, or stop and report the outcome to the " +
 			"user with [CHAT], or emit [BLOCKED] if you're stuck."
 	}
+	// Cleared first, not only after: a path that runs webSearch without coming
+	// through here (tests call execute directly) would otherwise leave the flag
+	// set, and the next real call — a successful read_file — would be counted
+	// as fruitless.
+	h.lastFruitless = false
 	result := h.execute(ctx, call)
 	isErr := strings.HasPrefix(result, "error:")
 	h.trackScriptProgress(call, result, isErr)
-	h.noteCall(call.Name, isErr)
+	if h.lastFruitless && !isErr {
+		h.noteFruitless()
+	} else {
+		h.noteCall(call.Name, isErr)
+	}
+	h.lastFruitless = false
 	if isErr {
 		h.recordFailure(call.Name, argsKey)
 		h.consecutiveFails++
@@ -1688,6 +1709,33 @@ func ctxSleep(ctx context.Context, d time.Duration) bool {
 // maxWebSearchResults bounds how many results web_search returns to the model.
 const maxWebSearchResults = 6
 
+// The web-search allowance for one coder call. Three empty searches in a row,
+// or six in total, mean the answer is not out there in a form search can reach;
+// two outcomes where every engine failed mean search is down on this host. Past
+// either, web_search answers without touching the network.
+const (
+	maxEmptySearchStreak   = 3
+	maxEmptySearches       = 6
+	maxUnavailableSearches = 2
+)
+
+// searchAllowanceNotice returns the refusal for a search past the allowance, or
+// "" while searching is still allowed. Deliberately NOT an "error:" result: it
+// is a settled outcome the model must act on — answer — not a failure to retry.
+func (h *hostToolSet) searchAllowanceNotice() string {
+	switch {
+	case h.unavailableSearches >= maxUnavailableSearches:
+		return "(web search is unavailable on this server right now, so it has been switched off for the rest of this turn. " +
+			"Do not search again — answer now with what you already have, say plainly what you could not find, " +
+			"and suggest where the user could look.)"
+	case h.emptySearchStreak >= maxEmptySearchStreak || h.emptySearches >= maxEmptySearches:
+		return fmt.Sprintf("(web search allowance spent: %d searches this turn found nothing. "+
+			"Do not search again — answer now with what you already have, say plainly what you could not find, "+
+			"and suggest where the user could look.)", h.emptySearches)
+	}
+	return ""
+}
+
 // webSearch runs the provider cascade and renders numbered title/url/snippet
 // entries. Reliability comes from the cascade, not from this function: a single
 // engine returning a JS-challenge page (200 OK, zero parseable results) is
@@ -1698,6 +1746,10 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
+	}
+	if notice := h.searchAllowanceNotice(); notice != "" {
+		h.lastFruitless = true
+		return notice, nil
 	}
 	client := h.httpClient
 	if client == nil {
@@ -1725,6 +1777,20 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 	if err != nil {
 		return "", err
 	}
+	if len(out.Results) == 0 {
+		h.lastFruitless = true
+		h.emptySearchStreak++
+		h.emptySearches++
+		// Every engine REFUSED (403, blocked proxy, network) rather than
+		// answering with nothing. Rewording cannot get past that, so say search
+		// is down instead of letting the model try another phrasing.
+		if len(out.Failed) > 0 && len(out.Failed) == len(out.Tried) {
+			h.unavailableSearches++
+			return "(web search is unavailable on this server right now — every engine failed: " +
+				strings.Join(websearch.Labels(out.Failed), ", ") +
+				". Retrying will not help; answer from what you already have.)", nil
+		}
+	}
 	// Name what was actually tried rather than a bare "no results" — otherwise a
 	// total cascade failure and a genuinely empty query look identical to the
 	// model, and it reports the second when it should report the first.
@@ -1735,6 +1801,10 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 		}
 		return "(no search results — tried " + strings.Join(tried, ", ") + ")", nil
 	}
+	// A search that found something means searching is still working, so the
+	// streak restarts — but the per-call total does not, or alternating hits
+	// and misses could search forever.
+	h.emptySearchStreak = 0
 	results := out.Results
 	if len(results) > maxWebSearchResults {
 		results = results[:maxWebSearchResults]
@@ -2042,6 +2112,14 @@ func (h *hostToolSet) noteCall(name string, failed bool) {
 		}
 	}
 	h.succeededTools = append(h.succeededTools, name)
+}
+
+// noteFruitless records an executed call that neither failed nor advanced the
+// run — an empty web search, or one refused because the allowance is spent. It
+// counts toward the total and nowhere else, so a turn made only of these is an
+// unproductive turn and the turn budget's streak guard can end the loop.
+func (h *hostToolSet) noteFruitless() {
+	h.totalCalls++
 }
 
 func (h *hostToolSet) callStats() callStats {
