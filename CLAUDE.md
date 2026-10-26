@@ -683,6 +683,7 @@ and every lookup is now scoped by workspace. Four things are load-bearing:
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.rkb` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `DefaultLocalDir(dataDir)` (the one definition of `<data_dir>/backups` — the local folder is not configurable), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
+| `internal/skilldeps` | Per-skill Python environments under `<workspace home>/.local/share/rookery/envs/<name>/`: `ValidateRequirement`/`EnvDir`, the `rookery-env.json` install manifest, the OSV `MAL-` check, and `Runner.Install`/`Runner.Run`, each in its own narrower Landlock sandbox. Reached by the API engine's `install_packages`/`run_in_env` and by `rookery deps install|run` — see "Skill dependencies" below. |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
 
@@ -2278,6 +2279,62 @@ At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content 
 
 Nightly GC (in `serve`) sweeps expired skill drafts and their orphaned `.staging-<name>/` dirs alongside agent drafts.
 
+**A `[BLOCKED]` reply no longer discards a skill that is on disk, and the marker is
+line-anchored in both designers.** A `trading-agents` build wrote its skill, ran out of
+turns, was told by `graceTurnBudgetNudge` to emit `[BLOCKED]`, and argued back in prose
+("whether a `[BLOCKED]` block is warranted…"). `parseBlockedOutput` was a bare
+`strings.Index`, so the mention counted, the "reason" swallowed the rest of the reply,
+and `cleanupStaging()` ran before anything read the staging dir. Now only a line that
+OPENS with the marker is a block (same rule as `chat.CleanReply`), and
+`reconcileSkillBlock` keeps a staged SKILL.md with parseable frontmatter, showing the
+block as a caveat — the skill designer's analogue of `reconcileBlockedOutcome`. The
+skill designer logs `coder returned` and `build decision` under the build's `build_id`.
+
+### Skill dependencies
+
+**A skill build never installs; the agent that uses the skill does, inside a narrower
+sandbox.** Skills declare Python packages as `metadata.install` `kind: pip` entries;
+`BuildSkillImplementationPrompt`'s `<dependencies>` block tells the builder to lazy-import
+them (so `--help` and the "not installed" path still run — that is what satisfies
+`SkillBuildSpec`'s Gate 2 without the package), to test without them, and that a missing
+live run is NOT a reason for `[BLOCKED]`. `ROOKERY_BUILD_KIND=skill` (alongside
+`buildphase.Generation`, which agent builds share) is the single source of truth both
+install doors read to refuse during a skill build; agent builds and dry runs may install.
+
+At run time `<skill_environment>` lists each declared skill's environment, whether its
+manifest already covers the declared packages, and the exact `install_packages` /
+`rookery deps install` and `run_in_env` / `rookery deps run` calls. Three prompt lines
+used to ban installing outright (tool-calling and full-coder capability blocks,
+`agentArchitectureGateBlock`); they now all route through `InstallPolicy`, and
+`TestNoPromptForbidsInstallingOutright` fails if any of the old wordings returns — one
+survivor leaves a coder kind unable to run a skill's install step.
+
+The home is persistent on purpose (it is the cache `cli-tool-installer` already uses), so
+the design is CONTAINMENT, not ephemerality. `internal/skilldeps` gives each step its own
+Landlock spec, nested inside a CLI coder's own sandbox (restrictions stack, so no bridge is
+needed):
+- **Install** writes only `envs/<name>/`, with an environment built from scratch (no
+  secrets, no bridge tokens, `PIP_CONFIG_FILE=/dev/null`, `--index-url` pinned to PyPI).
+  `ValidateRequirement` refuses anything pip would read as an option, which is how an extra
+  index (dependency confusion) would be smuggled in. pip resolves first (`--dry-run
+  --report`), the resolved set is checked against OSV `MAL-` advisories, and a hit refuses
+  the install. **OSV unreachable fails OPEN** (`MalwareCheck = "skipped: …"`, recorded in
+  the manifest) — failing closed would make installing impossible offline. Own 15-minute
+  deadline; the caller's cancel still stops it.
+- **Run** cannot see the workspace home (coder credentials, other environments), gets only
+  the secrets named on the call, and a private `TMPDIR` inside the env that is removed
+  afterwards. `TestRunIsConfinedUnderLandlock` runs this against the real kernel (the test
+  binary acts as the sandbox helper via `TestMain`) and was checked red with the sandbox off.
+- **Vetting** treats declared pip packages as the expected shape (🟡), and blocks a secret
+  written to disk, a source that hides where it downloads from, and typosquats.
+
+Residual, stated rather than hidden: a model can still `pip install` in `bash` and bypass
+all of it; the agent's own process still holds every workspace secret (`runner.go` injects
+`GetAll`); a running script has the network and the knowledge base; environments are shared
+across a workspace's agents; off Linux there is no confinement. `rookery deps` reads
+`ROOKERY_SANDBOX` alone because `config.yaml` is unreadable inside the coder sandbox, so it
+confines even when the operator disabled the sandbox in the file — stricter, never looser.
+
 ### Conversational agent editing
 
 Editing reuses the same `Flow` FSM via `DesignSession.IsEdit`. `loadAgentForEdit` reads live `AGENT.md` and reconciles its `# Suggested schedule:` line against the real `agent_schedules` row before the coder sees it.
@@ -2480,7 +2537,7 @@ run on a Mac.
 
 A workspace can run its coder as a **direct LLM provider API** instead of a host CLI binary. `Coder.runAPI`/`runToolLoop` (`internal/coder/api_engine.go`) drive an in-process loop: `Complete → execute host tools against the vault → feed results back → Complete`, until the model emits a final answer (no tool calls), the turn budget is spent, or the deadline passes. The model's final text carries the same `[CHAT]`/`[STATE]`/`[SILENT]` protocol markers, so the runner's parser is unchanged.
 
-- **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). `kb_file_map(path)` describes ONE file before it is read (kind, size, shape) and `kb_table_query(...)` filters/groups/aggregates a markdown table's rows — both added by PR #247, both **read-only pure functions of one vault file** and therefore also outside the exec gate. **Four** tools are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure, plus `get_state`/`set_state` (statetools.go), which only mean anything where workDir is a real agent's own dir. **`web_fetch` and `web_search` are NOT exec-gated** — this documentation claimed for a long time that they were and that chat could not reach them, while the code declared them above the gate and two tests (`hosttools_web_test.go`, `searchkey_wiring_test.go`) pinned them as available in chat. They are read-only, cannot carry secrets and cannot reach private address space, which is the reason they sit outside it. `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
+- **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). `kb_file_map(path)` describes ONE file before it is read (kind, size, shape) and `kb_table_query(...)` filters/groups/aggregates a markdown table's rows — both added by PR #247, both **read-only pure functions of one vault file** and therefore also outside the exec gate. **Six** tools are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure, plus `get_state`/`set_state` (statetools.go), which only mean anything where workDir is a real agent's own dir, plus `install_packages`/`run_in_env` (depstools.go — see "Skill dependencies"). **`web_fetch` and `web_search` are NOT exec-gated** — this documentation claimed for a long time that they were and that chat could not reach them, while the code declared them above the gate and two tests (`hosttools_web_test.go`, `searchkey_wiring_test.go`) pinned them as available in chat. They are read-only, cannot carry secrets and cannot reach private address space, which is the reason they sit outside it. `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
 - **Turn budgets are spent by UNPRODUCTIVE turns only** (`internal/coder/turnbudget.go`):
   base `maxAPITurns` (30) for runs/chat, `maxBuildAPITurns` (50) for builds, a
   `maxHardTurns` (150) ceiling never extended by anything, and a
@@ -2566,7 +2623,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
     gate still offers `run_script`/`bash` on runs, so a TIER 2 agent a CLI coder built keeps
     working after the workspace switches to an API coder. `TestRuntimePromptStillOffersScriptsOnTheAPIEngine`
     pins it, because "the ceiling should apply everywhere" is the tempting over-reach.
-- **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the always-on host tools, minus the exec-gated `run_script`/`bash`/`get_state`/`set_state`, for on-demand KB read/write — parity with the CLI chat's set).
+- **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the always-on host tools, minus the exec-gated `run_script`/`bash`/`get_state`/`set_state`/`install_packages`/`run_in_env`, for on-demand KB read/write — parity with the CLI chat's set).
 
 - **The design conversation runs a READ-ONLY tool profile** (`Coder.WithReadOnlyTools`,
   `hostToolSet.readOnly`). It was the only coder surface in the product offered NO tools
