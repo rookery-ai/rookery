@@ -55,18 +55,17 @@ command -v pandoc >/dev/null 2>&1 && echo "on PATH" || echo "not on PATH"
 | jq | github.com/jqlang/jq/releases (use `jq-linux-amd64` single binary) |
 | yq | github.com/mikefarah/yq/releases (single binary) |
 | ffmpeg | johnvansickle.com/ffmpeg/releases (static build) |
-| poppler (pdftotext) | no single static binary — prefer `pip install --user pdfplumber` for text extraction |
+| poppler (pdftotext) | no single static binary — read PDFs with `rookery kb convert` instead (see the pdf skill) |
 | wkhtmltopdf | github.com/wkhtmltopdf/packaging/releases |
 | tesseract | github.com/UB-Mannheim/tesseract/wiki (or distro package) |
 
-## Pip-installed tools (alternative)
+## Python packages are not installed this way
 
-If a tool has a Python wrapper with a bundled binary, `pip install --user`
-works and persists in `$HOME/.local`:
-
-```bash
-python3 -m pip install --user --quiet pypandoc
-```
+This skill installs standalone binaries only. A Python package — including a
+wrapper that bundles a binary — goes through `install_packages` (CLI coders:
+`rookery deps install --env <name> --package <requirement>`), and code that
+imports it runs through `run_in_env` / `rookery deps run`. Never run `pip`
+yourself: that skips the contained install and the malicious-package check.
 
 ## Best practices
 

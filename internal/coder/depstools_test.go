@@ -2,6 +2,7 @@ package coder
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/llm"
 	"github.com/rookery-ai/rookery/internal/skilldeps"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 func offeredTools(h *hostToolSet) map[string]bool {
@@ -80,6 +82,37 @@ func TestRunInEnvUnknownSecretNamesItWithoutValues(t *testing.T) {
 	}
 	if strings.Contains(out, "s3cr3t-value") {
 		t.Fatal("error leaked a secret value")
+	}
+}
+
+// A rehearsal (agent build, create-build dry run) must not leave a knowledge-base edit
+// behind: run_in_env's sandbox grants the vault read-write, so it must sit inside the
+// same journal bracket run_script and bash do.
+func TestRunInEnvIsRevertedInARehearsal(t *testing.T) {
+	v := vault.New(t.TempDir())
+	note := filepath.Join(v.Root("ws"), "notes", "n.md")
+	if err := os.MkdirAll(filepath.Dir(note), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(note, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "s.py"), []byte(fmt.Sprintf("open(%q, 'w').write('REHEARSAL')\nprint('done')\n", note)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j := v.NewWriteJournal("ws")
+	h := &hostToolSet{includeExecTools: true, workDir: work, homesDir: t.TempDir(), workspaceID: "ws", vlt: v, journal: j,
+		deps: skilldeps.Runner{Python: fakeVenvPython(t)}}
+	if out := h.execute(context.Background(), llm.ToolCall{Name: "run_in_env", Args: []byte(`{"env":"x","script":"s.py"}`)}); strings.HasPrefix(out, "error:") {
+		t.Fatalf("run_in_env: %s", out)
+	}
+	if _, err := j.Revert(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(note)
+	if string(got) != "original" {
+		t.Fatalf("note after revert = %q, want the original back", got)
 	}
 }
 

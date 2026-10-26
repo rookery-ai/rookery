@@ -66,9 +66,16 @@ func (h *hostToolSet) runInEnv(ctx context.Context, env, script string, args, se
 		}
 		secrets[name] = v
 	}
-	stdout, stderr, err := h.depsRunner().Run(ctx, skilldeps.RunRequest{
-		Home: h.userHomeDir(), Env: env, WorkDir: h.workDir, VaultRoot: h.vaultRootPath(),
-		Script: script, Args: args, Secrets: secrets, Stdin: stdin,
+	// Same journal bracket as run_script and bash: the run sandbox grants the vault
+	// read-write (skills write notes), so in a rehearsal its writes must be undoable.
+	var stdout, stderr string
+	err := h.journal.AroundExec(func() error {
+		var runErr error
+		stdout, stderr, runErr = h.depsRunner().Run(ctx, skilldeps.RunRequest{
+			Home: h.userHomeDir(), Env: env, WorkDir: h.workDir, VaultRoot: h.vaultRootPath(),
+			Script: script, Args: args, Secrets: secrets, Stdin: stdin,
+		})
+		return runErr
 	})
 	if err != nil {
 		return "", fmt.Errorf("script failed: %w\nstdout: %s\nstderr: %s", err, truncate(stdout), truncate(stderr))

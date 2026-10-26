@@ -14,6 +14,24 @@ func vetterBody(t *testing.T) string {
 	return body
 }
 
+// A core skill teaching a raw `pip install` steers agents around the install sandbox
+// and the malicious-package check — and the more specific instruction usually wins over
+// the runtime's "never pip install" line. The vetter and skill-creator may NAME pip to
+// forbid it; no other core skill may instruct it.
+func TestNoCoreSkillTeachesRawPipInstall(t *testing.T) {
+	for _, s := range LoadBundled() {
+		if s.Name == "skill-vetter" || s.Name == "skill-creator" {
+			continue
+		}
+		body, _ := CoreSkillContent(s.Name)
+		for _, bad := range []string{"pip install --user", "pip install -U", "-m pip install"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("core skill %s teaches %q; route it through install_packages", s.Name, bad)
+			}
+		}
+	}
+}
+
 // A secret persisted to disk outlives the run in a home every agent shares, so the
 // vetter blocks it and names the fix.
 func TestVetterBlocksSecretsWrittenToDisk(t *testing.T) {

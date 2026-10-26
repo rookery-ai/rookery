@@ -26,6 +26,18 @@ func TestDepsInstallRefusedDuringASkillBuild(t *testing.T) {
 	}
 }
 
+// A version range is one requirement, commas and all. urfave/cli splits slice flags on
+// commas by default, which turned `pandas>=3.0,<4` into two invalid requirements on the
+// CLI path only — so the same skill installed on the API engine and failed on a CLI coder.
+func TestDepsInstallKeepsCommasInARequirement(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", "") // no python3: an accepted requirement fails at the next step
+	err := runDeps(t, "install", "--env", "x", "--package", "pandas>=3.0,<4")
+	if err == nil || !strings.Contains(err.Error(), "python3 is not installed") {
+		t.Fatalf("err = %v, want the requirement accepted whole (and then no python3)", err)
+	}
+}
+
 // A named secret that is not set is reported by NAME — the error must never become a
 // way to print a value.
 func TestDepsRunMissingSecretNamesIt(t *testing.T) {

@@ -147,6 +147,14 @@ func (r Runner) Install(ctx context.Context, req InstallRequest) (InstallResult,
 	})
 	defer stop()
 
+	// One install at a time per environment: two concurrent pip runs corrupt a venv,
+	// and AppendInstall is read-modify-write.
+	unlock, err := lockEnv(envDir)
+	if err != nil {
+		return InstallResult{}, fmt.Errorf("lock environment: %w", err)
+	}
+	defer unlock()
+
 	if err := r.ensureVenv(ctx, envDir, python); err != nil {
 		return InstallResult{}, err
 	}
@@ -154,7 +162,9 @@ func (r Runner) Install(ctx context.Context, req InstallRequest) (InstallResult,
 	envPython := filepath.Join(envDir, "bin", "python")
 	pip := []string{envPython, "-m", "pip", "install", "--index-url", pypiIndex}
 
-	report := filepath.Join(envDir, ".tmp", "resolve-report.json")
+	// Per-call name as well as the lock: the malware check must read the report THIS
+	// resolve wrote, whatever else shares the environment.
+	report := filepath.Join(envDir, ".tmp", "resolve-"+randomHex()+".json")
 	defer os.Remove(report)
 	dry := append(append(append([]string{}, pip...), "--dry-run", "--ignore-installed", "--report", report), req.Specs...)
 	if _, stderr, err := r.exec(ctx, installSpec(envDir, dry, python, git), ""); err != nil {
@@ -200,7 +210,15 @@ func (r Runner) Run(ctx context.Context, req RunRequest) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	if err := r.ensureVenv(ctx, envDir, python); err != nil {
+	// Creating the venv takes the install lock so a run cannot race an install into
+	// a half-built environment; the run itself does not hold it.
+	unlock, err := lockEnv(envDir)
+	if err != nil {
+		return "", "", fmt.Errorf("lock environment: %w", err)
+	}
+	err = r.ensureVenv(ctx, envDir, python)
+	unlock()
+	if err != nil {
 		return "", "", err
 	}
 	tmp := filepath.Join(envDir, ".tmp", randomHex())

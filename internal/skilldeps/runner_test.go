@@ -3,6 +3,7 @@ package skilldeps
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,59 @@ func TestInstallStopsWhenTheCallerCancels(t *testing.T) {
 	r := Runner{Python: fakePython(t, evilReport), Checker: fakeChecker{}}
 	if _, err := r.Install(ctx, InstallRequest{Home: t.TempDir(), Env: "x", Specs: []string{"requests"}}); err == nil {
 		t.Fatal("an install whose caller already cancelled ran to completion")
+	}
+}
+
+// Up to three scheduled agents run at once, and two using one skill install into one
+// environment. Each install must check the set IT resolved — never another install's —
+// and every install must be recorded.
+func TestConcurrentInstallsCheckTheirOwnResolution(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	// Dry run: report a single package named after the requested spec, then linger so
+	// another install's report write lands before this one is read.
+	src := `#!/usr/bin/env python3
+import os, sys, shutil, time, json
+a = sys.argv[1:]
+if a[:2] == ["-m", "venv"]:
+    os.makedirs(os.path.join(a[2], "bin"), exist_ok=True)
+    d = os.path.join(a[2], "bin", "python")
+    shutil.copy(os.path.realpath(__file__), d)
+    os.chmod(d, 0o755)
+    sys.exit(0)
+if a[:3] == ["-m", "pip", "install"]:
+    if "--dry-run" in a:
+        with open(a[a.index("--report") + 1], "w") as f:
+            json.dump({"install": [{"metadata": {"name": a[-1], "version": "1"}}]}, f)
+        time.sleep(0.3)
+    sys.exit(0)
+`
+	py := filepath.Join(t.TempDir(), "python3")
+	if err := os.WriteFile(py, []byte(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	r := Runner{Python: py, Checker: fakeChecker{}}
+	specs := []string{"alpha", "bravo", "charlie", "delta"}
+	errs := make(chan error, len(specs))
+	for _, s := range specs {
+		go func() {
+			res, err := r.Install(context.Background(), InstallRequest{Home: home, Env: "shared", Specs: []string{s}})
+			if err == nil && (len(res.Resolved) != 1 || res.Resolved[0].Name != s) {
+				err = fmt.Errorf("install of %s checked %+v", s, res.Resolved)
+			}
+			errs <- err
+		}()
+	}
+	for range specs {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	m, _ := ReadManifest(filepath.Join(home, EnvsRel, "shared"))
+	if len(m.Installs) != len(specs) || !m.Satisfies(specs) {
+		t.Errorf("manifest lost installs: %+v", m.Installs)
 	}
 }
 

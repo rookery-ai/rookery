@@ -29,6 +29,9 @@ func depsCmd() *cli.Command {
 			{
 				Name:  "install",
 				Usage: "Install packages into a named environment: deps install --env <name> --package <spec> [--package <spec>]…",
+				// A version range ("pandas>=3.0,<4") is ONE requirement; urfave/cli would
+				// otherwise split it on the comma. Repeat --package for several.
+				DisableSliceFlagSeparator: true,
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "env", Usage: "environment name (usually the skill's name)", Required: true},
 					&cli.StringSliceFlag{Name: "package", Usage: "a requirement: name[==version] or an https/git+https URL", Required: true},
@@ -54,6 +57,8 @@ func depsCmd() *cli.Command {
 				Name:      "run",
 				Usage:     "Run a script with an environment's interpreter: deps run --env <name> [--secret NAME]… -- <script> [args…]",
 				ArgsUsage: "-- <script> [args…]",
+				// Secret names never contain commas; kept consistent with install.
+				DisableSliceFlagSeparator: true,
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "env", Usage: "environment name", Required: true},
 					&cli.StringSliceFlag{Name: "secret", Usage: "name of a secret to pass to the script (repeatable); no other secret reaches it"},
