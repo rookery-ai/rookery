@@ -1219,17 +1219,25 @@ func parseTestOutput(text string) string {
 	return strings.TrimSpace(text[start : start+end])
 }
 
+// parseBlockedOutput extracts the coder's explanation from a [BLOCKED] block. Only a
+// line that OPENS with the marker counts: a model reasoning about whether to block
+// ("whether a `[BLOCKED]` block is warranted…") mentions the token mid-sentence, and a
+// substring match read that as a block and discarded a finished skill. Same
+// line-anchoring rule as chat.CleanReply; agentdesigner carries an identical copy.
 func parseBlockedOutput(text string) string {
-	start := strings.Index(text, "[BLOCKED]")
-	if start < 0 {
-		return ""
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[BLOCKED]") {
+			continue
+		}
+		rest := strings.Join(append([]string{strings.TrimPrefix(trimmed, "[BLOCKED]")}, lines[i+1:]...), "\n")
+		if end := strings.Index(rest, "[/BLOCKED]"); end >= 0 {
+			rest = rest[:end]
+		}
+		return strings.TrimSpace(rest)
 	}
-	start += len("[BLOCKED]")
-	end := strings.Index(text[start:], "[/BLOCKED]")
-	if end < 0 {
-		return strings.TrimSpace(text[start:])
-	}
-	return strings.TrimSpace(text[start : start+end])
+	return ""
 }
 
 func sortedScriptNames(scripts map[string]string) []string {
