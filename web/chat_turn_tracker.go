@@ -34,6 +34,10 @@ import (
 type chatTurnState struct {
 	id         string
 	progressCh chan string
+	// cancel ends the turn's context. Only the owner's explicit Stop calls it
+	// (stopChatTurn) — never the progress stream closing — so leaving the page
+	// still does not kill a turn.
+	cancel context.CancelFunc
 
 	mu   sync.Mutex
 	done bool
@@ -48,6 +52,11 @@ type chatTurnState struct {
 	// Set and read under mu, together with the close itself, so "may I send?"
 	// and "close" cannot interleave.
 	closed bool
+	// stopped records that the owner pressed Stop. The outcome is decided from
+	// this flag rather than from the coder's error, because the API engine
+	// reports a cancelled context as ErrTimeout and a CLI coder surfaces its
+	// killed process differently again — neither says "the owner asked".
+	stopped bool
 	// lines accumulates every milestone so a client attaching MID-turn receives
 	// the history it missed rather than only what arrives after it connects.
 	// Following the live channel alone would show such a client an empty card on
@@ -116,7 +125,10 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			return "", false
 		}
 	}
-	st := &chatTurnState{id: uuid.NewString(), progressCh: make(chan string, 64)}
+	// Cancellable, but derived from Background rather than the request: the
+	// turn must outlive the POST that started it, and only Stop may end it early.
+	ctx, cancel := context.WithCancel(context.Background())
+	st := &chatTurnState{id: uuid.NewString(), progressCh: make(chan string, 64), cancel: cancel}
 	s.chatTurns[chatID] = st
 	s.chatTurnsMu.Unlock()
 
@@ -142,8 +154,8 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 	go func() {
 		// Detached: the turn must outlive the HTTP request that started it. The
 		// coder profile's own timeout still bounds it, so this does not run
-		// unbounded.
-		ctx := context.Background()
+		// unbounded, and the owner's Stop cancels it.
+		defer cancel()
 
 		onProgress := func(msg string) {
 			// The append and the send are under ONE lock hold, so a concurrent
@@ -215,7 +227,23 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		// The same ordering protects the SUCCESS path: a client that sees done
 		// refetches the chat, so marking done before AddChatMessage could hand
 		// it a conversation that is missing the reply it just waited for.
+		st.mu.Lock()
+		stopped := st.stopped
+		st.mu.Unlock()
+
 		switch {
+		case stopped && err != nil:
+			// The owner pressed Stop. Not a failure — no banner, so err is not
+			// recorded on the state — but the transcript still gets a reply, or
+			// the next turn's history would hold two user messages in a row.
+			// Whatever the turn already wrote to the knowledge base stays.
+			slog.Info("chat: turn stopped", "chat", logsafe.Value(chatID), "turn", st.id)
+			onProgress(chatTurnStoppedMilestone)
+			if aerr := s.db.AddChatMessage(chatID, "assistant", chatTurnStoppedReply); aerr != nil {
+				slog.Error("chat: persist stopped placeholder", "chat", logsafe.Value(chatID), "error", aerr)
+			}
+			_ = s.db.TouchChat(chatID)
+			err = nil
 		case err != nil:
 			// The user's message STAYS. Not persisting on failure was defensible
 			// while the browser held the bubble in memory; now that the message is
@@ -308,6 +336,53 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		})
 	}()
 	return st.id, true
+}
+
+// The two traces a stopped turn leaves: the last milestone on the live card,
+// and the assistant message persisted in its place.
+const (
+	chatTurnStoppedMilestone = "⏹ Stopped"
+	chatTurnStoppedReply     = "⏹ Stopped before an answer."
+)
+
+// stopChatTurn cancels the chat's in-flight turn on the owner's request. It
+// reports false when there is nothing running to stop — including a turn that
+// has just finished, so a Stop racing the reply is harmless. Calling it twice
+// is a no-op the second time: cancel is idempotent and the outcome is recorded
+// once, by the turn goroutine.
+func (s *Server) stopChatTurn(chatID string) bool {
+	st := s.chatTurn(chatID)
+	if st == nil {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.done {
+		return false
+	}
+	st.stopped = true
+	if st.cancel != nil {
+		st.cancel()
+	}
+	return true
+}
+
+// handleChatTurnCancel stops the chat's in-flight turn — the composer's Stop
+// button. 204 when a turn was stopped, 404 when none was running (already
+// finished, or never started), which the browser treats as harmless.
+//
+// POST /api/v1/chats/:id/turn/cancel
+func (s *Server) handleChatTurnCancel(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	id := c.Param("id")
+	ch, err := s.db.GetChat(id)
+	if err != nil || ch.WorkspaceID != u.ID {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "chat not found"})
+	}
+	if !s.stopChatTurn(id) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "no active turn"})
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // chatTurnFailureMessage turns a failed turn into one actionable sentence.

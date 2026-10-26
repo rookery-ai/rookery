@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 
 export type Chat = {
   id: string;
@@ -71,6 +71,20 @@ export function useCreateChat() {
 // their single error path.
 export async function startChatTurn(id: string, message: string): Promise<{ turn_id: string }> {
   return api.post<{ turn_id: string }>(`/api/v1/chats/${id}/messages`, { message });
+}
+
+// cancelChatTurn stops the chat's in-flight turn — the composer's Stop. The
+// turn then ends on its progress stream like any other, so the caller keeps
+// following that stream rather than treating this as the finish. Resolves
+// false on 404: the turn had already ended, which is not an error.
+export async function cancelChatTurn(id: string): Promise<boolean> {
+  try {
+    await api.post(`/api/v1/chats/${id}/turn/cancel`);
+    return true;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return false;
+    throw err;
+  }
 }
 
 // chatTurnProgressURL is the SSE endpoint carrying one turn's tool-call

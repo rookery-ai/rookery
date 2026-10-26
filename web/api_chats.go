@@ -26,6 +26,7 @@ func (s *Server) registerChatsAPI(g *echo.Group) {
 	g.PATCH("/chats/:id", s.apiRenameChat)
 	g.POST("/chats/:id/messages", s.handleChatMessage)
 	g.GET("/chats/:id/turn/progress", s.handleChatTurnProgress)
+	g.POST("/chats/:id/turn/cancel", s.handleChatTurnCancel)
 	g.POST("/chats/:id/resume", s.apiResumeChat)
 	g.POST("/chats/:id/stop", s.apiStopChat)
 	g.DELETE("/chats/:id", s.apiDeleteChat)

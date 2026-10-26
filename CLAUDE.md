@@ -1421,6 +1421,21 @@ while an agent build keeps the full log it wants. `toolMilestone` already shorte
 `$HOME` paths; it now also masks canonical UUIDs, before truncation so a 36-character id cannot
 spend the whole 60-character budget — which fixes agent builds and runs at the same time.
 
+**A turn can be STOPPED, and only by the owner's explicit Stop — never by the stream
+closing.** The detached context is `context.WithCancel(context.Background())`, and its cancel
+is called by exactly one thing: `POST /api/v1/chats/:id/turn/cancel` (`stopChatTurn`, 204, or
+404 when nothing is running — the browser treats that as a Stop racing the reply and says
+nothing). The outcome is decided from `chatTurnState.stopped`, **not from the error**: the API
+engine reports a cancelled context as `ErrTimeout` and a CLI coder's killed process surfaces
+differently again, so reading the error would show a stopped turn as a timeout banner. A
+stopped turn persists `⏹ Stopped before an answer.` as the assistant reply (the next turn's
+history must not hold two user messages in a row), ends its stream with `done`, not `error`,
+and keeps whatever it already wrote to the vault. In the browser, `Composer`'s `onStop` turns
+Send into **Stop** while busy and leaves the textarea disabled; `ChatWindow` passes it only for
+a running turn, not an upload, and keeps following the stream after the cancel so the stopped
+reply arrives through the same refetch as any finish. The designers pass no `onStop` and keep
+their disabled Send.
+
 **The concurrency guard is web-only, and the chat-platform path is still inline.**
 `cmd/rookery/main.go`'s Telegram/Discord/Slack turn was deliberately left as it was — there is
 no page to leave on a chat platform — but the two paths have now diverged, and the comment in

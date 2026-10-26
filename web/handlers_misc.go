@@ -103,7 +103,11 @@ func (s *Server) runChatCoder(
 		s.testCoderHook()
 	}
 	if s.testCoderBlock != nil {
-		<-s.testCoderBlock
+		select {
+		case <-s.testCoderBlock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if s.testCoderErr != "" {
 		return nil, errors.New(s.testCoderErr)
