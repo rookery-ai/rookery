@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDockedComposer } from "@/components/shell/dockedComposer";
 
@@ -37,9 +37,14 @@ type ComposerProps = {
   // lines up with the message column on the full-page chat surfaces. Off by
   // default: the ~448px slide-over panel has no width to spare.
   gutter?: boolean;
+  // While busy, turn Send into Stop and call this when it is pressed. The
+  // textarea stays disabled — there is nothing to type into a turn in flight —
+  // so the only live control is the way out of it. Undefined (the designers)
+  // keeps today's disabled Send.
+  onStop?: () => void;
 };
 
-export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText, leftSlot, gutter }: ComposerProps) {
+export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText, leftSlot, gutter, onStop }: ComposerProps) {
   // `gutter` marks the page-level docked composer (the slide-over passes it
   // false), which is exactly the case where the floating action buttons would
   // otherwise sit on top of the Send button. No-op outside the shell.
@@ -145,8 +150,19 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
           "focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
-      {/* Icon-only, but the accessible name stays exactly "Send" — every
-          surface's tests (and any screen reader) still find it by that name. */}
+      {/* Icon-only, but the accessible names stay exactly "Send" and "Stop" —
+          every surface's tests (and any screen reader) find them by name. */}
+      {busy && onStop ? (
+        <button
+          type="button"
+          onClick={onStop}
+          aria-label="Stop"
+          title="Stop"
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background"
+        >
+          <Square className="size-3.5 fill-current" />
+        </button>
+      ) : (
       <button
         type="button"
         onClick={send}
@@ -160,6 +176,7 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
       >
         <Send className="size-4" />
       </button>
+      )}
     </div>
   );
 }

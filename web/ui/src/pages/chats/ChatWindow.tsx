@@ -13,6 +13,7 @@ import {
   useChatAction,
   useRenameChat,
   startChatTurn,
+  cancelChatTurn,
   chatTurnProgressURL,
   type ChatMessage,
   type ChatDetail,
@@ -397,6 +398,18 @@ export function ChatWindow({
     return { ok: true };
   }
 
+  // Stop asks the server to cancel the turn and then keeps following the
+  // stream, which ends it with `done` and the refetch exactly as a normal finish
+  // does — so the stopped placeholder lands through the one path that already
+  // reconciles the transcript. A 404 means the turn ended first: not an error.
+  async function handleStop() {
+    try {
+      await cancelChatTurn(chatId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not stop the turn");
+    }
+  }
+
   async function handleSend(text: string) {
     setError(null);
     const result = await sendTurn(text);
@@ -665,6 +678,8 @@ export function ChatWindow({
       <Composer
         onSend={handleSend}
         busy={busy || attaching}
+        // Only a running TURN can be stopped; an upload in progress cannot.
+        onStop={busy && !attaching ? handleStop : undefined}
         initialText={autoSend ? undefined : initialText}
         autoFocus={autoFocus}
         leftSlot={attachControl}
