@@ -23,11 +23,14 @@ import (
 // report, and the one it used to throw away at the moment it was known.
 // It is empty when every provider was exhausted. Tried lists every engine
 // attempted, in order, so a caller can tell the user what was actually looked
-// at rather than a bare "no results".
+// at rather than a bare "no results". Failed is the subset of Tried whose
+// request ERRORED rather than answering with nothing — when it equals Tried,
+// search is down on this host, and rewording the query cannot help.
 type Outcome struct {
 	Results  []Result
 	Provider string
 	Tried    []string
+	Failed   []string
 }
 
 // Label maps a provider's internal Name() to a human display string. It is the
@@ -174,6 +177,7 @@ func (c *Client) Search(ctx context.Context, query string) (Outcome, error) {
 			} else {
 				slog.Warn("websearch provider failed", "provider", p.Name(), "err", err)
 			}
+			out.Failed = append(out.Failed, p.Name())
 			continue // hard failure for this engine — try the next
 		}
 		if len(results) > 0 {
