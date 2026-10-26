@@ -2453,6 +2453,22 @@ Examples:
 User input: %s`, nowStr, timezone, input)
 }
 
+// chatStopLookingBlock tells chat when an answer is not going to be found. A
+// chat once spent over ten minutes rewording a web search for a code that its
+// own note said had not been published yet, because nothing said that several
+// searches finding nothing IS the answer. The engine caps fruitless searching
+// (hostToolSet.searchAllowanceNotice); this is so the model rarely meets the cap.
+const chatStopLookingBlock = `## When to stop looking
+
+- For anything about the user's own data — their notes, documents, codes, accounts — search the
+  knowledge base first, and read the note you find before going to the web.
+- Two or three searches that find nothing mean the answer is not there. Do not keep rewording the
+  same search, and do not try more engines or sites hoping one will work.
+- Then answer: give what you did find, say plainly what you could not find, and suggest where the
+  user could get it (a bank, an official list, a person). A short honest answer is far better than
+  a long search that ends in nothing.
+`
+
 // BuildChatSystemPrompt returns the system instruction prepended to every one-off chat
 // turn (web composer + Telegram plain-text). It tells the model it has read+write file
 // tools scoped to the user's knowledge-base vault root, and that it should retrieve and
@@ -2578,6 +2594,8 @@ Boundaries:
 Respond naturally in the user's language. The user does not see your tool calls — they see
 only your final reply, so make sure your reply actually answers the question.`, vaultRoot))
 	}
+	sb.WriteString("\n")
+	sb.WriteString(chatStopLookingBlock)
 	if len(conns) > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(connectedToolsBlock(conns, connToolNames, mappedBackend, connectorBin))
