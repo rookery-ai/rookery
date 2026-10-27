@@ -2672,6 +2672,14 @@ type SkillDesignParams struct {
 	// coder types (it runs WithNoTools on every backend, so there is nothing
 	// mechanical to describe).
 	BackendType string
+
+	// Build-only research context (BuildSkillImplementationPrompt). Connections and
+	// ConnectionTools are the workspace's connected accounts and the tool names the
+	// build may call to READ them; HostPython is the `python3 --version` the skill's
+	// scripts will run under, so the builder does not guess.
+	Connections     []ConnectionRef
+	ConnectionTools []string
+	HostPython      string
 }
 
 // BuildSkillDesignSystemPrompt returns the system prompt for the conversational
@@ -2809,7 +2817,13 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	sb.WriteString(skillName)
 	sb.WriteString("\" for the Rookery platform.\n\n")
 
-	sb.WriteString(coderCapabilitiesBlockFor(p.BackendType, InstallNotDuringBuild))
+	sb.WriteString(skillBuildCapabilitiesBlock(p.BackendType))
+	// Native connector tools exist only on the API engine; a CLI coder would need a shell
+	// for `rookery connector exec`, and a skill build has none.
+	if p.BackendType == BackendToolCalling {
+		sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, ""))
+	}
+	sb.WriteString(agentRuntimeBlock(p.HostPython))
 
 	if skillCreatorBody != "" {
 		sb.WriteString("<skill_creator_guide>\n")
@@ -2859,14 +2873,14 @@ Follow these steps in EXACT order.
    with copy-pasteable examples. If scripts/ are needed, write them under
    scripts/ (minimal, robust).
 
-3. TEST — Run every script to confirm it does not crash:
-   `+"`python3 scripts/<file>.py --help`"+` or an import/smoke check against a sample.
-   For prompt-only skills, validate the frontmatter parses and the description
-   reads as a clear trigger. Report results inside:
-
-   [TEST_OUTPUT]
-   <what you tested, what passed, any errors you fixed>
-   [/TEST_OUTPUT]
+3. REVIEW — do not run anything. Re-read each script against the <agent_runtime>
+   above: imports, argument handling, paths, the one-line error on every failure,
+   and the exact output format SKILL.md promises. Fix what you find by editing the
+   file. Re-read SKILL.md as the agent will: every step must be doable with the
+   tools that agent has. A skill is tested when an agent that uses it is built —
+   the agent designer installs its packages and runs its scripts for real then —
+   so make that first run easy to get right. End with one short summary of what
+   the skill contains and what was not exercised.
 
 RULES:
 - Write tool names BARE in the body (pandoc ...). The runtime env block supplies the
@@ -2880,6 +2894,64 @@ RULES:
 </task>
 `, skillName))
 	return sb.String()
+}
+
+// skillBuildCapabilitiesBlock replaces the general capability block for a skill build,
+// which lists run_script and bash: a skill build researches and writes, and offering
+// tools in prose that the engine withholds sends a weak model chasing them. Running and
+// installing during skill builds made them take 14-20 minutes; the skill's scripts are
+// tested where they are used, when the agent designer builds an agent that uses it.
+func skillBuildCapabilitiesBlock(backendType string) string {
+	tools := "read_file, write_file, edit_file, list_dir, search_files, glob, kb_file_map, " +
+		"kb_table_query, web_search, web_fetch, browser_read (when available), and any " +
+		"connector or MCP tools listed below — call them as function tools"
+	if backendType != BackendToolCalling {
+		tools = "Read, Write, Edit, Glob, Grep, WebSearch and WebFetch"
+	}
+	return `<coder_capabilities>
+You are BUILDING A SKILL: you research, then write files. You do not run anything.
+Available: ` + tools + `.
+Use them to research how the thing really works — the user's knowledge base, the
+project's README, source and release notes, an API's documentation, a page in the
+browser, the user's connected accounts (read-only: anything that changes data is
+refused during a build).
+Not available, by design: shell commands, running or testing scripts, installing
+packages. Do not look for a way around this. ` + installNotDuringBuildLine + `
+</coder_capabilities>
+
+`
+}
+
+// agentRuntimeBlock tells a skill build what the AGENT that uses the skill will have,
+// so a skill never depends on something that agent cannot do. hostPython is the
+// version the skill's scripts will actually run under.
+func agentRuntimeBlock(hostPython string) string {
+	py := "the host's python3"
+	if strings.TrimSpace(hostPython) != "" {
+		py = strings.TrimSpace(hostPython) + " (the host's python3)"
+	}
+	return `<agent_runtime>
+The skill you write is used by an AGENT. Write SKILL.md for exactly what that agent can do:
+- Install declared Python packages: install_packages(env="<skill name>", packages=[...]),
+  or on a CLI coder ` + "`rookery deps install --env <skill name> --package <requirement>`" + `.
+  Each skill gets its own environment, kept between runs.
+- Run the skill's scripts with run_in_env(env, script, args, secrets=[NAMES]), or on a CLI
+  coder ` + "`rookery deps run --env <skill name> --secret <NAME> -- scripts/<file>.py`" + `.
+  A script sees ONLY the secrets named on the call, as environment variables.
+- Other tools the agent has: bash and run_script (no installed packages there), web_fetch,
+  web_search, the browser (read pages, and click/fill where its owner allowed), the
+  workspace's connector and MCP tools, and read/write access to the knowledge base.
+- Sandbox: write temporary files under $TMPDIR, never /tmp. No system installs (no sudo,
+  apt, dnf). Network access is available. Python is ` + py + `: prefer packages with
+  ready-made wheels for it.
+- Scripts are NOT run in this build. Write them to be right the first time: import packages
+  lazily after argument parsing, print one clear error line and exit non-zero on any
+  failure, and never invent or guess a result.
+- The skill is tested when an agent that uses it is built: the agent designer installs its
+  packages and runs its scripts for real. Make SKILL.md tell that agent exactly what to call.
+</agent_runtime>
+
+`
 }
 
 // skillDependenciesBlock tells a skill build how to handle Python packages: declare them,
@@ -2898,12 +2970,14 @@ If a script needs Python packages beyond the standard library:
   `+"`rookery deps install --env %s --package <requirement>`"+`), and to run each script with
   run_in_env, passing the declared secrets by name (CLI coders: `+"`rookery deps run --env %s --secret <NAME> -- scripts/<file>.py`"+`).
 - Import each package lazily — inside the function that needs it, after argument parsing —
-  so `+"`--help`"+` and the "package not installed" error path run and print output without it.
-- Test without the packages: --help, argument validation, the missing-package error path,
-  and the logic against a small stand-in. A live end-to-end run is not expected here; say
-  in [TEST_OUTPUT] what was not exercised. That is expected and is NOT a reason to emit [BLOCKED].
+  so `+"`--help`"+` and the "package not installed" error path work without it.
+- Find out what you need by RESEARCH, not by running: the package's own README, release
+  notes, source on its repository, where it writes its output, which version actually
+  exists (a release wheel or git URL when it is not on PyPI). Nothing is installed or run
+  in this build; that is expected and is NOT a reason to emit [BLOCKED].
 - Never write a secret's value to disk (no .env files, config files, caches or notes) —
   read it from os.environ every time. A skill that does is refused by the security review.
+- Never download or clone code inside a script at run time; declare it as a dependency.
 </dependencies>
 
 `, skillName, skillName, skillName)

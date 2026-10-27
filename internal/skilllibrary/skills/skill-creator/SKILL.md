@@ -126,9 +126,13 @@ metadata:
 
 ## Testing
 
-Run every script you write before you finish — with `--help`, or against a
-small fixture you create in the working directory. A script you have never
-seen run must not ship. Never print, log, or return a secret value.
+A skill build does NOT run its scripts: it researches and writes. Scripts are
+tested where they are used — when the agent designer builds an agent that uses
+the skill, it installs the packages and runs the scripts for real. So write
+them to be right the first time: read the tool's real documentation and source
+instead of guessing paths and output formats, re-read every script before you
+finish, and make each failure print one clear line and exit non-zero. Never
+print, log, or return a secret value.
 
 ## Degrees of freedom (match specificity to task fragility)
 
