@@ -2273,7 +2273,7 @@ At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content 
 
 **Conversational skill creator** (`internal/skilldesigner`, driven by the SPA via the `/api/v1/skills/design` FSM endpoints and by chat platforms via `/skill`): mirrors `agentdesigner.Flow`'s shape — FSM (`StateIdle → StateAwaitingResume → StateDescribing → StateDesigning → StateVerifying → StateDone`), SSE progress, 7-day drafts (`skill_drafts` table, one per user), strict/forgiving approval triggers (same split as the agent designer). Flow:
 1. Design conversation (text-only coder, `BuildSkillDesignSystemPrompt`) — focused Q&A, proposes a plan, asks for `approve`. Drafts are persisted on every turn so the conversation survives reloads/restarts (even on usage-limit).
-2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval), tests scripts, emits `[TEST_OUTPUT]`. Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
+2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval) after researching with read-only tools; it runs nothing (see "Skill dependencies"). Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
 3. Vetting (`vetSkill`, `BuildSkillVettingPrompt` with the `skill-vetter` core skill body as the system prompt) — a second text-only coder call audits the skill for malicious behaviour (exfil of vault notes/USER.md/SOUL.md/secrets, raw-IP network calls, obfuscated payloads, sudo, destructive ops, …) and emits a structured report. `vettingBlocksSave()` parses the authoritative `Verdict:` line (a pure `❌ do not save` blocks save; an echoed `✅ safe to save | ⚠️ … | ❌ do not save` alternation does NOT — guards against a literal model echoing the option list). A blocking verdict keeps the user in `StateDesigning` and the skill is NOT saved. Covered by `flow_test.go`.
 4. Approval → `SkillSaver.SaveSkill` writes SKILL.md+scripts/ to the vault, upserts the `skills` row (in-place overwrite if a skill of the same name exists; core-skill names are reserved and rejected), drops the draft + session, cleans up staging.
 
@@ -2295,9 +2295,23 @@ skill designer logs `coder returned` and `build decision` under the build's `bui
 **A skill build never installs; the agent that uses the skill does, inside a narrower
 sandbox.** Skills declare Python packages as `metadata.install` `kind: pip` entries;
 `BuildSkillImplementationPrompt`'s `<dependencies>` block tells the builder to lazy-import
-them (so `--help` and the "not installed" path still run — that is what satisfies
-`SkillBuildSpec`'s Gate 2 without the package), to test without them, and that a missing
-live run is NOT a reason for `[BLOCKED]`. `ROOKERY_BUILD_KIND=skill` (alongside
+them and to find the real package, version and output paths by research, and that a
+missing live run is NOT a reason for `[BLOCKED]`.
+
+**A skill build researches and writes; it runs NOTHING** (`SkillBuildSpec.NoExec`,
+`MaxTurns: 20`). Builds that installed, ran and re-tested took 14–20 minutes and grew
+their context until OpenRouter answered a 205 KB request with empty bodies. Now the API
+engine offers no exec tools (`bash`, `run_script`, `install_packages`, `run_in_env`,
+state) and skips the script-run gate; a CLI coder's grant is `skillBuildAllowedTools`
+(no `Bash`). Research stays: the knowledge base, web, and — API engine only, since a
+CLI coder would need a shell to reach them — the workspace's connections, MCP servers
+and browser reading, all read-only under the build guard. The build prompt's own
+capability block replaces the general one (which lists `run_script`/`bash`), and an
+`<agent_runtime>` block describes what the AGENT using the skill will have: the install
+and run doors, sandbox rules and the host's real `python3 --version`. **Testing moves to
+the agent designer**: building an agent that uses the skill installs its packages and
+runs its scripts for real, and the skill review says so instead of showing test output.
+Only `py_compile`/`bash -n` syntax checks still run at skill-build time. `ROOKERY_BUILD_KIND=skill` (alongside
 `buildphase.Generation`, which agent builds share) is the single source of truth both
 install doors read to refuse during a skill build; agent builds and dry runs may install.
 
