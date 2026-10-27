@@ -21,6 +21,28 @@ func TestSkillBuildGrantsNoShell(t *testing.T) {
 	}
 }
 
+// The step after the build only syntax-checks scripts (py_compile / bash -n); calling
+// it "Testing scripts" told the owner a test was running when nothing was executed.
+func TestRunGeneration_ProgressSaysSyntaxCheckNotTesting(t *testing.T) {
+	script, _ := vetFake(t, "Verdict: ✅ safe to save")
+	flow, workspaceID := newGenSkillFlow(t, newFakeSkillCoder(t, script))
+	sess := newDesigningSession(workspaceID, "my-skill")
+	var lines []string
+	sess.progressFunc = func(m string) { lines = append(lines, m) }
+	flow.sessions[workspaceID] = sess
+
+	if _, _, _, err := flow.runGeneration(context.Background(), workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(lines, "\n")
+	if strings.Contains(all, "Testing scripts") {
+		t.Errorf("progress still says scripts are tested:\n%s", all)
+	}
+	if !strings.Contains(all, "Checking script syntax") {
+		t.Errorf("progress does not name the syntax check:\n%s", all)
+	}
+}
+
 // The review used to say "Here's the generated skill and how it tested". Nothing is
 // run now, so it must say so — and say where the testing happens instead.
 func TestRunGeneration_ReviewSaysTheSkillWasNotRun(t *testing.T) {

@@ -714,7 +714,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	blocked := parseBlockedOutput(result.Text)
 	slog.Info("skilldesigner: coder returned", "build_id", buildID, "workspace_id", workspaceID,
 		"stop_reason", result.StopReason, "script_verified", result.ScriptVerified, "script_ran", result.ScriptRan,
-		"blocked", blocked != "")
+		"blocked", blocked != "",
+		// Which tools the build called, with counts and bytes: the live activity card is
+		// the only other record, and it is gone once the page closes.
+		"tools", coder.SummarizeToolTrace(result.ToolTrace))
 	// A [BLOCKED] reply is reconciled against what is on disk before anything is
 	// discarded (mirrors agentdesigner.reconcileBlockedOutcome): the turn-budget grace
 	// nudge asks every exhausted build for [BLOCKED], so a builder that finished its
@@ -783,7 +786,8 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 	}
 
-	notify("🧪 Testing scripts…")
+	// A syntax check only (py_compile / bash -n): skill builds never run their scripts.
+	notify("🔎 Checking script syntax…")
 	testOut := f.runTests(skillRoot, scripts, parseTestOutput(result.Text))
 
 	notify("🔒 Security vetting the skill…")

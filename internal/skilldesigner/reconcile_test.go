@@ -90,6 +90,12 @@ func TestRunGenerationLogged_LinesShareABuildID(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// "what did the build call, and why did it take nine minutes" must be answerable
+	// from the log: the coder-returned line carries the tool summary, as chat's does.
+	if !strings.Contains(buf.String(), `"msg":"skilldesigner: coder returned"`) || !strings.Contains(buf.String(), `"tools":`) {
+		t.Errorf("coder-returned line lacks the tools summary:\n%s", buf.String())
+	}
+
 	ids := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 		var rec map[string]any
