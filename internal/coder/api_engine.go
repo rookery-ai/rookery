@@ -522,16 +522,39 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 	}
 
 	msgs := c.threadHistory(history, userMessage)
-	resp, err := prov.Complete(ctx, llm.Request{
+	req := llm.Request{
 		Model:     c.api.model,
 		System:    systemContext,
 		Messages:  msgs,
 		MaxTokens: 0,
-	})
+	}
+	resp, err := prov.Complete(ctx, req)
 	if err != nil {
 		return nil, c.mapProviderErr(err)
 	}
-	return &Result{Text: resp.Content, Duration: time.Since(start), Usage: resp.Usage}, nil
+	usage := resp.Usage
+	// A reasoning model bills its thinking against the same completion cap as its answer,
+	// so a large input (the skill vetter reviewing a whole skill) can spend the default cap
+	// before one content token: empty content, finish_reason "length". The tool loop has
+	// always re-asked with more room; this text-only path did not, and every vetting call
+	// for one skill came back empty four times in a row. Re-ask once, like the loop does.
+	if strings.TrimSpace(resp.Content) == "" && resp.FinishReason == "length" {
+		slog.Warn("coder: text-only answer was cut off before any content; retrying with more room",
+			"model", c.api.model, "reasoning_bytes", len(resp.Reasoning), "retry_max_tokens", truncationRetryMaxTokens)
+		req.MaxTokens = truncationRetryMaxTokens
+		if retry, rerr := prov.Complete(ctx, req); rerr == nil {
+			resp = retry
+			usage = usage.Add(retry.Usage)
+		} else {
+			return nil, c.mapProviderErr(rerr)
+		}
+	}
+	if strings.TrimSpace(resp.Content) == "" {
+		// Callers see only an empty string; the reason lives here.
+		slog.Warn("coder: text-only answer was empty", "model", c.api.model,
+			"finish_reason", resp.FinishReason, "reasoning_bytes", len(resp.Reasoning))
+	}
+	return &Result{Text: resp.Content, Duration: time.Since(start), Usage: usage}, nil
 }
 
 // chatToolsAPI is the API-coder path for one-off chat — Chat called WITHOUT
