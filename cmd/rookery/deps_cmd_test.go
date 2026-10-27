@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,6 +50,32 @@ func TestDepsRunMissingSecretNamesIt(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "s3cr3t-value") {
 		t.Fatal("error leaked a secret value")
+	}
+}
+
+// Same resolution as the API engine's run_in_env: a vault-relative skill script is found
+// from an agent's own folder, and a path outside the knowledge base is refused.
+func TestDepsScriptPathResolution(t *testing.T) {
+	vault := t.TempDir()
+	agent := filepath.Join(vault, "agents", "a1")
+	script := filepath.Join(vault, "skills", "x", "scripts", "s.py")
+	for _, d := range []string{agent, filepath.Dir(script)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(script, []byte("print(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveDepsScript("skills/x/scripts/s.py", agent, vault)
+	if err != nil || got != script {
+		t.Fatalf("got %q, %v; want %q", got, err, script)
+	}
+	if _, err := resolveDepsScript("/etc/passwd", agent, vault); err == nil {
+		t.Error("a script outside the knowledge base was accepted")
+	}
+	if got, err := resolveDepsScript("s.py", agent, ""); err != nil || got != "s.py" {
+		t.Errorf("without a vault root the path passes through, got %q, %v", got, err)
 	}
 }
 

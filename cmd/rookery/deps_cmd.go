@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rookery-ai/rookery/internal/skilldeps"
@@ -19,6 +20,35 @@ func depsRunner() skilldeps.Runner {
 	v := os.Getenv("ROOKERY_SANDBOX")
 	on := !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))
 	return skilldeps.Runner{SelfExe: self, Sandbox: on, Checker: skilldeps.NewOSVClient("", nil)}
+}
+
+// resolveDepsScript mirrors the API engine's run_in_env resolution: relative paths are
+// tried from the working directory, then from the knowledge base root (skills live at
+// <vault>/skills/<name>/ while an agent runs from agents/<id>/), and anything outside the
+// knowledge base is refused. With no vault root known, the path passes through.
+func resolveDepsScript(script, wd, vaultRoot string) (string, error) {
+	if vaultRoot == "" {
+		return script, nil
+	}
+	root := filepath.Clean(vaultRoot)
+	inside := func(p string) bool { return p == root || strings.HasPrefix(p, root+string(os.PathSeparator)) }
+	abs := script
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(wd, script)
+	}
+	abs = filepath.Clean(abs)
+	if !inside(abs) {
+		return "", fmt.Errorf("script %s is outside the knowledge base", script)
+	}
+	if _, err := os.Stat(abs); err == nil || filepath.IsAbs(script) {
+		return abs, nil
+	}
+	if alt := filepath.Clean(filepath.Join(root, script)); inside(alt) {
+		if _, err := os.Stat(alt); err == nil {
+			return alt, nil
+		}
+	}
+	return abs, nil
 }
 
 func depsCmd() *cli.Command {
@@ -77,12 +107,16 @@ func depsCmd() *cli.Command {
 						secrets[name] = v
 					}
 					wd, _ := os.Getwd()
+					script, err := resolveDepsScript(args[0], wd, os.Getenv("ROOKERY_VAULT_ROOT"))
+					if err != nil {
+						return err
+					}
 					stdout, stderr, err := depsRunner().Run(ctx, skilldeps.RunRequest{
 						Home:      os.Getenv("HOME"),
 						Env:       cmd.String("env"),
 						WorkDir:   wd,
 						VaultRoot: os.Getenv("ROOKERY_VAULT_ROOT"),
-						Script:    args[0],
+						Script:    script,
 						Args:      args[1:],
 						Secrets:   secrets,
 					})

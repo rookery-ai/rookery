@@ -524,9 +524,18 @@ func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isEr
 // redactSecrets replaces any exact secret VALUE from the run env with a placeholder, so an
 // authored script that echoes a token doesn't leak it into the review sample surfaced to the
 // user. Only non-trivial values are matched (short/empty values would over-redact benign text).
+// notSecretEnv are run-env variables that hold paths or markers, not credentials.
+// Redacting ROOKERY_VAULT_ROOT turned a failure log into "[redacted]/agents/…", hiding
+// the very path that explained the failure.
+var notSecretEnv = map[string]bool{
+	"ROOKERY_VAULT_ROOT":  true,
+	"ROOKERY_BUILD_PHASE": true,
+	"ROOKERY_BUILD_KIND":  true,
+}
+
 func (h *hostToolSet) redactSecrets(s string) string {
-	for _, v := range h.subprocessEnv {
-		if len(v) < 6 {
+	for k, v := range h.subprocessEnv {
+		if len(v) < 6 || notSecretEnv[k] {
 			continue
 		}
 		s = strings.ReplaceAll(s, v, "[redacted]")

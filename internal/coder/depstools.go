@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -74,7 +76,37 @@ func (h *hostToolSet) installPackages(ctx context.Context, env string, pkgs []st
 	return fmt.Sprintf("installed %s: %d packages (malware check: %s)\n%s", res.Env, len(res.Resolved), res.MalwareCheck, res.Output), nil
 }
 
+// resolveScript turns run_in_env's script argument into a path inside the knowledge base.
+// Relative paths are tried against the working directory first and then the knowledge
+// base root, because skills live at <vault>/skills/<name>/ while an agent runs from
+// agents/<id>/ — and "skills/<name>/scripts/x.py" is how a model naturally names one.
+// Anything outside the knowledge base is refused.
+func (h *hostToolSet) resolveScript(script string) (string, error) {
+	if h.vlt == nil {
+		return script, nil
+	}
+	abs, err := h.resolveVault(script)
+	if err != nil {
+		return "", fmt.Errorf("the script must be inside the knowledge base: %w", err)
+	}
+	if _, statErr := os.Stat(abs); statErr == nil || filepath.IsAbs(script) {
+		return abs, nil
+	}
+	root := h.vlt.Root(h.workspaceID)
+	alt := filepath.Clean(filepath.Join(root, script))
+	if strings.HasPrefix(alt, root+string(os.PathSeparator)) {
+		if _, statErr := os.Stat(alt); statErr == nil {
+			return alt, nil
+		}
+	}
+	return abs, nil
+}
+
 func (h *hostToolSet) runInEnv(ctx context.Context, env, script string, args, secretNames []string, stdin string) (string, error) {
+	script, err := h.resolveScript(script)
+	if err != nil {
+		return "", err
+	}
 	secrets := map[string]string{}
 	for _, name := range secretNames {
 		v, ok := h.subprocessEnv[name]
@@ -86,7 +118,7 @@ func (h *hostToolSet) runInEnv(ctx context.Context, env, script string, args, se
 	// Same journal bracket as run_script and bash: the run sandbox grants the vault
 	// read-write (skills write notes), so in a rehearsal its writes must be undoable.
 	var stdout, stderr string
-	err := h.journal.AroundExec(func() error {
+	err = h.journal.AroundExec(func() error {
 		var runErr error
 		stdout, stderr, runErr = h.depsRunner().Run(ctx, skilldeps.RunRequest{
 			Home: h.userHomeDir(), Env: env, WorkDir: h.workDir, VaultRoot: h.vaultRootPath(),

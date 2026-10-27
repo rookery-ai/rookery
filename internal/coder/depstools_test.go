@@ -99,7 +99,11 @@ func TestRunInEnvIsRevertedInARehearsal(t *testing.T) {
 	if err := os.WriteFile(note, []byte("original"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	work := t.TempDir()
+	// A run's working directory is the agent's own folder inside the knowledge base.
+	work := filepath.Join(v.Root("ws"), "agents", "a1")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(work, "s.py"), []byte(fmt.Sprintf("open(%q, 'w').write('REHEARSAL')\nprint('done')\n", note)), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +168,64 @@ func TestDepsFailuresAreLoggedOnTheServer(t *testing.T) {
 	}
 	if strings.Contains(logs, "s3cr3t-value") {
 		t.Error("server log leaked a secret value")
+	}
+}
+
+// Skills live at <vault>/skills/<name>/, and an agent runs with its own folder as the
+// working directory, so the natural way to name a skill's script is vault-relative. The
+// first real run passed "skills/trading-consultant/scripts/run_analysis.py" and got
+// "can't open file <vault>/agents/<id>/skills/…": it was resolved against the agent dir.
+func TestRunInEnvResolvesAVaultRelativeScript(t *testing.T) {
+	v := vault.New(t.TempDir())
+	root := v.Root("ws")
+	scriptDir := filepath.Join(root, "skills", "x", "scripts")
+	agentDir := filepath.Join(root, "agents", "a1")
+	for _, d := range []string{scriptDir, agentDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "s.py"), []byte("print('from the skill')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &hostToolSet{includeExecTools: true, workDir: agentDir, homesDir: t.TempDir(), workspaceID: "ws", vlt: v,
+		deps: skilldeps.Runner{Python: fakeVenvPython(t)}}
+	out := h.execute(context.Background(), llm.ToolCall{Name: "run_in_env", Args: []byte(`{"env":"x","script":"skills/x/scripts/s.py"}`)})
+	if strings.TrimSpace(out) != "from the skill" {
+		t.Fatalf("got %q, want the skill script's output", out)
+	}
+}
+
+// The tool says "absolute within the vault"; nothing enforced it. A path outside the
+// knowledge base is refused before anything runs (Landlock would contain it on Linux,
+// but not off Linux or with the sandbox switched off).
+func TestRunInEnvRefusesAScriptOutsideTheVault(t *testing.T) {
+	v := vault.New(t.TempDir())
+	agentDir := filepath.Join(v.Root("ws"), "agents", "a1")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "evil.py")
+	if err := os.WriteFile(outside, []byte("print('ran')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &hostToolSet{includeExecTools: true, workDir: agentDir, homesDir: t.TempDir(), workspaceID: "ws", vlt: v,
+		deps: skilldeps.Runner{Python: fakeVenvPython(t)}}
+	for _, p := range []string{outside, "../../../../evil.py"} {
+		out := h.execute(context.Background(), llm.ToolCall{Name: "run_in_env", Args: []byte(fmt.Sprintf(`{"env":"x","script":%q}`, p))})
+		if !strings.HasPrefix(out, "error:") || strings.Contains(out, "ran") {
+			t.Errorf("script %q: got %q, want a refusal", p, out)
+		}
+	}
+}
+
+// ROOKERY_VAULT_ROOT is a path, not a secret; redacting it made the run_in_env failure
+// log read "[redacted]/agents/…", hiding the very path that explained the failure.
+func TestRedactSecretsLeavesTheVaultRootAlone(t *testing.T) {
+	h := &hostToolSet{subprocessEnv: map[string]string{"ROOKERY_VAULT_ROOT": "/data/vaults/ws", "API_KEY": "s3cr3t-value"}}
+	got := h.redactSecrets("can't open /data/vaults/ws/agents/a with s3cr3t-value")
+	if !strings.Contains(got, "/data/vaults/ws/agents/a") || strings.Contains(got, "s3cr3t-value") {
+		t.Errorf("got %q", got)
 	}
 }
 
