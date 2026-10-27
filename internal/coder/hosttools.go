@@ -678,7 +678,9 @@ func (h *hostToolSet) verifyFinishNudge() string {
 	}
 
 	// Gate 2: refuse to ship an authored entry-point script that never returned real output.
-	if !h.needsScriptVerification() {
+	// Not for a NoExec build: it has no way to run anything, so the gate could only nudge
+	// it to the limit.
+	if spec.NoExec || !h.needsScriptVerification() {
 		return ""
 	}
 	h.verifyNudges++

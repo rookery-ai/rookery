@@ -29,9 +29,11 @@ type turnBudget struct {
 // read-only, so the two cannot both be true today — ordering it first means a
 // future caller that sets both gets the generous budget rather than silently
 // inheriting the design one, which would cut builds short.
-func newTurnBudget(isBuild, isDesign bool) *turnBudget {
+func newTurnBudget(isBuild, isDesign bool, buildMaxTurns int) *turnBudget {
 	base := maxAPITurns
 	switch {
+	case isBuild && buildMaxTurns > 0:
+		base = buildMaxTurns
 	case isBuild:
 		base = maxBuildAPITurns
 	case isDesign:

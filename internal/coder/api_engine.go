@@ -132,7 +132,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	emptyNudges := 0
 	truncationRetries := 0
 	var toolTrace []ToolCallStat
-	budget := newTurnBudget(tools.verifyBuild, tools.readOnly)
+	budget := newTurnBudget(tools.verifyBuild, tools.readOnly, tools.buildSpec().MaxTurns)
 	offered := toolNames(req.Tools)
 	var stopReason string
 	for {
@@ -667,7 +667,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 	// by construction rather than as a side effect of a path comparison a future
 	// WithDir change could quietly invalidate.
 	includeExecTools := false
-	if !c.noTools && !c.readOnlyTools && workDir != "" && vaultRoot != "" {
+	if !c.noTools && !c.readOnlyTools && !c.buildSpec.NoExec && workDir != "" && vaultRoot != "" {
 		includeExecTools = filepath.Clean(workDir) != filepath.Clean(vaultRoot)
 	}
 	return &hostToolSet{

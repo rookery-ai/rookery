@@ -105,7 +105,7 @@ func TestTurnBudgetBases(t *testing.T) {
 		{"build wins over design", true, true, maxBuildAPITurns},
 	}
 	for _, tc := range cases {
-		if got := newTurnBudget(tc.build, tc.design).base; got != tc.want {
+		if got := newTurnBudget(tc.build, tc.design, 0).base; got != tc.want {
 			t.Errorf("%s: base = %d, want %d", tc.name, got, tc.want)
 		}
 	}
