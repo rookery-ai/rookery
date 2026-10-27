@@ -82,12 +82,12 @@ func TestRunGeneration_VettingRetryThatSucceedsReachesReview(t *testing.T) {
 
 func TestVettingComplete(t *testing.T) {
 	cases := map[string]bool{
-		"":                                       false,
-		"Risk level: 🔴 HIGH":                     false,
+		"":                   false,
+		"Risk level: 🔴 HIGH": false,
 		"⚠️ Security vetting could not run automatically. Review the skill manually before approving.": false,
-		"Verdict: ✅ safe to save":                true,
-		"Verdict: ❌ do not save":                 true,
-		"  verdict: ⚠️ save with caution":        true,
+		"Verdict: ✅ safe to save":         true,
+		"Verdict: ❌ do not save":          true,
+		"  verdict: ⚠️ save with caution": true,
 	}
 	for in, want := range cases {
 		if got := vettingComplete(in); got != want {
