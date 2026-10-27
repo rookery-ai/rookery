@@ -47,7 +47,11 @@ func TestReconcileSkillBlockDiscardsUnparseableSkill(t *testing.T) {
 // The reported failure: the builder wrote the skill, then emitted a [BLOCKED] it
 // argued against itself. The skill must reach review, caveated, not be deleted.
 func TestRunGeneration_BlockWithSkillOnDiskReachesReview(t *testing.T) {
-	fake := newFakeSkillCoder(t, `with open('SKILL.md', 'w') as f:
+	fake := newFakeSkillCoder(t, `import sys
+if 'auditing a newly generated skill' in ' '.join(sys.argv):
+    print("Verdict: ✅ safe to save")
+    sys.exit(0)
+with open('SKILL.md', 'w') as f:
     f.write("---\nname: my-skill\ndescription: Does a thing. Use when asked to do the thing.\n---\nBody.\n")
 print("[BLOCKED]\nA live run needs the real package at call time.\n[/BLOCKED]")
 `)

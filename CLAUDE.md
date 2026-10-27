@@ -2327,6 +2327,17 @@ needed):
   binary acts as the sandbox helper via `TestMain`) and was checked red with the sandbox off.
 - **Vetting** treats declared pip packages as the expected shape (🟡), and blocks a secret
   written to disk, a source that hides where it downloads from, and typosquats.
+- **A review with no verdict blocks the save** (`vettingComplete`, one retry first). A
+  `trading-consultant` build reached review with a 0-byte report: the vetter returned no
+  text and "no verdict" counted as "not blocked". `vettingBlocksSave` still judges only a
+  verdict that exists; deciding whether a review HAPPENED is a separate question.
+- **`run_in_env` counts as running a script for the build gate** (`trackScriptProgress`
+  reads its `script` argument). The skill build is told to run scripts that way, so counting
+  only `run_script` nudged every such build to the limit with `script_ran=false`.
+- **A failed `install_packages` / `run_in_env` is logged on the server** (exit code and the
+  redacted tail of stderr/stdout). Before, the cause reached only the model, and a run
+  summarised as `run_in_env×4 (4 err)` could not be explained — it turned out to be the
+  skill's own script exiting 1 on a wrong output path, which the agent then worked around.
 
 Residual, stated rather than hidden: a model can still `pip install` in `bash` and bypass
 all of it; the agent's own process still holds every workspace secret (`runner.go` injects

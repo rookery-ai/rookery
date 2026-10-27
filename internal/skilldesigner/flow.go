@@ -711,8 +711,34 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	notify("🔒 Security vetting the skill…")
 	report := f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
+	if !vettingComplete(report) {
+		// An empty reply is often a one-off (a reasoning model spending its budget on
+		// thought); ask once more before treating the review as not having happened.
+		slog.Warn("skilldesigner: vetting returned no verdict, retrying", "build_id", buildID, "workspace_id", workspaceID, "report_bytes", len(report))
+		report = f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
+	}
 
 	closeProgress()
+
+	// Fail CLOSED on a review that did not happen. Vetting is the safety gate for skills
+	// that install and run third-party code; a skill once reached review with a 0-byte
+	// report because "no verdict" counted as "not blocked".
+	if !vettingComplete(report) {
+		decide("vetting_incomplete")
+		msg := "🔒 The security review did not complete, so the skill was not saved — the reviewer returned no verdict twice. Type **approve** to rebuild and review it again, or tell me what to change."
+		f.mu.Lock()
+		sess = f.sessions[workspaceID]
+		sess.State = StateDesigning
+		sess.PendingSkillMD = skillMD
+		sess.PendingScripts = scripts
+		sess.VettingReport = report
+		sess.GenerationFailed = true
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg, CreatedAt: time.Now().UTC()})
+		f.saveDraft(sess)
+		f.mu.Unlock()
+		cleanupStaging()
+		return msg, false, "", nil
+	}
 
 	// A blocked vetting verdict (🔴/⛔ or "do not save") keeps the user in the
 	// design state to revise — the skill is NOT saved.
@@ -870,15 +896,27 @@ func (f *Flow) vetSkill(ctx context.Context, workspaceID string, coderSvc *coder
 	return strings.TrimSpace(result.Text)
 }
 
+// vettingComplete reports whether the vetter produced a verdict at all. A report with no
+// "Verdict:" line — empty, cut off, or vetSkill's own could-not-run message — means the
+// review did not happen, which runGeneration treats as a block (after one retry).
+func vettingComplete(report string) bool {
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "verdict:") {
+			return true
+		}
+	}
+	return false
+}
+
 // vettingBlocksSave returns true if the vetting report carries a blocking
 // verdict. It parses the authoritative "Verdict:" line rather than scanning the
 // whole report for emoji: the skill-vetter format offers verdict options as
 // "✅ safe to save | ⚠️ save with caution | ❌ do not save", and a literal model
 // could echo the whole alternation — scanning for ❌ would then falsely block a
 // safe skill. A pure block verdict ("Verdict: ❌ do not save") contains "do not
-// save" but NOT "safe to save"; an echoed alternation contains both. A missing or
-// ambiguous report does NOT block (the report is still shown to the user, who
-// can decline to approve).
+// save" but NOT "safe to save"; an echoed alternation contains both. This judges
+// a verdict that EXISTS; a report with no verdict at all is caught earlier by
+// vettingComplete, which blocks the save rather than letting it pass unreviewed.
 func vettingBlocksSave(report string) bool {
 	if strings.TrimSpace(report) == "" {
 		return false
