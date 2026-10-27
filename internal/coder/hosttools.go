@@ -481,9 +481,15 @@ const maxVerifyNudges = 5
 // because one working script must not mask a second, broken one. Cheap, side-effect free.
 func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isErr bool) {
 	var a struct {
-		Path string `json:"path"`
+		Path   string `json:"path"`
+		Script string `json:"script"`
 	}
 	_ = json.Unmarshal(call.Args, &a)
+	// run_in_env names its script `script`; a skill build is told to run its script that
+	// way, so ignoring it left every such build nudged to the limit with script_ran=false.
+	if call.Name == "run_in_env" {
+		a.Path = a.Script
+	}
 	if !h.buildSpec().IsScript(a.Path) { // ignores non-.py, non-tools, and seeded helpers
 		return
 	}
@@ -494,7 +500,7 @@ func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isEr
 			h.authoredScripts = map[string]bool{}
 		}
 		h.authoredScripts[key] = true
-	case "run_script":
+	case "run_script", "run_in_env":
 		// The model executed an authored script this build (output tracked separately below).
 		h.ranAuthoredScript = true
 		// Only real stdout counts as "the script produced output". A run that printed

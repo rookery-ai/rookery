@@ -116,6 +116,24 @@ func TestRunInEnvIsRevertedInARehearsal(t *testing.T) {
 	}
 }
 
+// A skill build is told to run its script with run_in_env, so the build gate must
+// count that as running it. Counting only run_script left every such build nudged to
+// the limit and recorded as script_ran=false — the trading-consultant build.
+func TestRunInEnvSatisfiesTheBuildGate(t *testing.T) {
+	h := &hostToolSet{verifyBuild: true, workDir: t.TempDir(), spec: SkillBuildSpec}
+	h.trackScriptProgress(toolCall("write_file", `{"path":"scripts/run_analysis.py"}`), "ok: wrote", false)
+	if !h.needsScriptVerification() {
+		t.Fatal("an authored, never-run script must need verification")
+	}
+	h.trackScriptProgress(toolCall("run_in_env", `{"env":"x","script":"scripts/run_analysis.py","args":["--help"]}`), "usage: run_analysis.py [-h]", false)
+	if h.needsScriptVerification() {
+		t.Error("a run_in_env call with real stdout must satisfy the gate")
+	}
+	if !h.ranAuthoredScript {
+		t.Error("a run_in_env call must count as running the authored script")
+	}
+}
+
 func TestBashNoLongerForbidsInstallsOutright(t *testing.T) {
 	for _, tool := range (&hostToolSet{includeExecTools: true}).tools() {
 		if tool.Name == "bash" && strings.Contains(tool.Description, "Do NOT install packages") {
