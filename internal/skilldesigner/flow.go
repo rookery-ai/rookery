@@ -26,7 +26,9 @@ import (
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/mcp"
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/prompts"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
@@ -137,6 +139,46 @@ type Flow struct {
 	// feasibility block. See WithBrowser.
 	browser       browser.Renderer
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
+
+	// Research tools for a BUILD (API engine only; a CLI coder would need a shell to
+	// reach them, and a skill build has none). Read-only by the build-phase guard:
+	// connectors and MCP refuse anything that changes data during a build.
+	connReg   *connectors.Registry
+	connStore connectors.TokenStore
+	connsFor  func(ctx context.Context, workspaceID string) []connectors.BoundConn
+	mcpCaller mcp.Caller
+	mcpFor    func(ctx context.Context, workspaceID string) []mcp.BoundServer
+}
+
+// skillBuildAllowedTools is a CLI coder's grant during a skill build: research and
+// write, no shell. Running and installing during skill builds made them take 14-20
+// minutes; a skill's scripts are tested when the agent designer builds an agent that
+// uses the skill.
+const skillBuildAllowedTools = "Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
+
+// WithConnectors lets a skill BUILD read the workspace's connected accounts, so it can
+// research the real shape of a service's data. connsFor resolves them (a function, so
+// this package's store interface does not grow).
+func (f *Flow) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, connsFor func(ctx context.Context, workspaceID string) []connectors.BoundConn) *Flow {
+	f.connReg, f.connStore, f.connsFor = reg, store, connsFor
+	return f
+}
+
+// WithMCPBuild lets a skill BUILD call the workspace's MCP servers; the build guard
+// refuses any tool the owner has not marked read-only.
+func (f *Flow) WithMCPBuild(caller mcp.Caller, boundFor func(ctx context.Context, workspaceID string) []mcp.BoundServer) *Flow {
+	f.mcpCaller, f.mcpFor = caller, boundFor
+	return f
+}
+
+// hostPython is the `python3 --version` a skill's scripts will run under, so the
+// builder does not guess. Empty when python3 is absent.
+func hostPython() string {
+	out, err := exec.Command("python3", "--version").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // NewSkillFlow creates a Flow. coderResolver maps a workspaceID to the right coder.
@@ -534,6 +576,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		BackendType:        backendType,
+		HostPython:         hostPython(),
 	}
 
 	if sess.progressCh == nil {
@@ -588,11 +631,35 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	cleanupStaging := func() { _ = os.RemoveAll(stagingDir) }
 
 	skillCreatorBody, _ := skilllibrary.CoreSkillContent("skill-creator")
-	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
 
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
-	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read").
+	// Research tools for the API engine: connected accounts, MCP servers and the browser,
+	// all read-only during a build. A CLI coder gets none of them — reaching them needs a
+	// shell, and skillBuildAllowedTools grants none.
+	var bound []connectors.BoundConn
+	var boundMCP []mcp.BoundServer
+	if coderSvc.IsAPI() {
+		if f.connReg != nil && f.connStore != nil && f.connsFor != nil {
+			bound = f.connsFor(genCtx, workspaceID)
+		}
+		if f.mcpCaller != nil && f.mcpFor != nil {
+			boundMCP = f.mcpFor(genCtx, workspaceID)
+		}
+		for _, b := range bound {
+			paramsSnap.Connections = append(paramsSnap.Connections, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+		}
+	}
+	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
+	if len(boundMCP) > 0 {
+		var refs []prompts.MCPServerRef
+		for _, b := range boundMCP {
+			refs = append(refs, prompts.MCPServerRef{Name: b.Name})
+		}
+		prompt += "\n" + prompts.MCPBuildBlock(refs, mcp.ToolNames(boundMCP), backendType, "")
+	}
+
+	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools(skillBuildAllowedTools).
 		// This build produces SKILL.md, not AGENT.md. Without the spec the API engine's
 		// finish gate demands the agent definition and the build can never end correctly
 		// (SP10 spec §1.1). No-op for the CLI engine.
@@ -615,6 +682,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 	}
 	generationCoder = generationCoder.WithExtraEnv(extraEnv)
+	if len(bound) > 0 {
+		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
+	if len(boundMCP) > 0 {
+		generationCoder = generationCoder.WithMCP(f.mcpCaller, boundMCP)
+	}
+	// Reading pages only: a zero policy, and acting is refused during any build anyway.
+	if coderSvc.IsAPI() && f.browser != nil && f.browser.Available().OK {
+		generationCoder = generationCoder.WithBrowser(f.browser, browser.Policy{})
+	}
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 	if err != nil {
 		cleanupStaging()
@@ -785,7 +862,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// engine (Result.StopReason), never from the model remembering to emit a marker.
 	decide("ready")
 	return blockCaveat + caveatTruncatedBuild(fmt.Sprintf(
-		"Here's the generated skill and how it tested:\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
+		"Here's the generated skill. Its scripts were not run: a skill is tested when an agent that uses it is built, which installs its packages and runs its scripts for real.\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
 		testOut, vettingReportBlock(report),
 	), result.StopReason), false, "", nil
 }
