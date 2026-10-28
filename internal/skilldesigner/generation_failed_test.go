@@ -226,7 +226,12 @@ print("Reason: logs raw API responses that may contain sensitive data.")
 // false (reset at the top of every runGeneration attempt), so the UI banner
 // does not linger after a successful retry.
 func TestRunGeneration_SuccessLeavesGenerationFailedFalse(t *testing.T) {
-	fake := newFakeSkillCoder(t, `with open('SKILL.md', 'w') as f:
+	// The vetting call must return a verdict: a review with none now blocks the save.
+	fake := newFakeSkillCoder(t, `import sys
+if 'auditing a newly generated skill' in ' '.join(sys.argv):
+    print("Verdict: ✅ safe to save")
+    sys.exit(0)
+with open('SKILL.md', 'w') as f:
     f.write("---\nname: greeting\ndescription: Sends a daily greeting.\n---\n# Greeting\nBody.\n")
 print("[TEST_OUTPUT]Frontmatter parses cleanly.[/TEST_OUTPUT]")
 `)

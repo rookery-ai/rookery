@@ -26,7 +26,9 @@ import (
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/mcp"
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/prompts"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
@@ -137,6 +139,46 @@ type Flow struct {
 	// feasibility block. See WithBrowser.
 	browser       browser.Renderer
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
+
+	// Research tools for a BUILD (API engine only; a CLI coder would need a shell to
+	// reach them, and a skill build has none). Read-only by the build-phase guard:
+	// connectors and MCP refuse anything that changes data during a build.
+	connReg   *connectors.Registry
+	connStore connectors.TokenStore
+	connsFor  func(ctx context.Context, workspaceID string) []connectors.BoundConn
+	mcpCaller mcp.Caller
+	mcpFor    func(ctx context.Context, workspaceID string) []mcp.BoundServer
+}
+
+// skillBuildAllowedTools is a CLI coder's grant during a skill build: research and
+// write, no shell. Running and installing during skill builds made them take 14-20
+// minutes; a skill's scripts are tested when the agent designer builds an agent that
+// uses the skill.
+const skillBuildAllowedTools = "Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
+
+// WithConnectors lets a skill BUILD read the workspace's connected accounts, so it can
+// research the real shape of a service's data. connsFor resolves them (a function, so
+// this package's store interface does not grow).
+func (f *Flow) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, connsFor func(ctx context.Context, workspaceID string) []connectors.BoundConn) *Flow {
+	f.connReg, f.connStore, f.connsFor = reg, store, connsFor
+	return f
+}
+
+// WithMCPBuild lets a skill BUILD call the workspace's MCP servers; the build guard
+// refuses any tool the owner has not marked read-only.
+func (f *Flow) WithMCPBuild(caller mcp.Caller, boundFor func(ctx context.Context, workspaceID string) []mcp.BoundServer) *Flow {
+	f.mcpCaller, f.mcpFor = caller, boundFor
+	return f
+}
+
+// hostPython is the `python3 --version` a skill's scripts will run under, so the
+// builder does not guess. Empty when python3 is absent.
+func hostPython() string {
+	out, err := exec.Command("python3", "--version").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // NewSkillFlow creates a Flow. coderResolver maps a workspaceID to the right coder.
@@ -492,7 +534,7 @@ func (f *Flow) runGenerationLogged(ctx context.Context, workspaceID string) (str
 	f.mu.Unlock()
 	slog.Info("skilldesigner: build start", "build_id", buildID, "workspace_id", workspaceID, "skill", skill)
 	started := time.Now()
-	msg, done, id, err := f.runGeneration(ctx, workspaceID)
+	msg, done, id, err := f.runGeneration(context.WithValue(ctx, buildIDKey{}, buildID), workspaceID)
 	state := ""
 	f.mu.Lock()
 	if sess := f.sessions[workspaceID]; sess != nil {
@@ -504,7 +546,15 @@ func (f *Flow) runGenerationLogged(ctx context.Context, workspaceID string) (str
 	return msg, done, id, err
 }
 
+// buildIDKey carries runGenerationLogged's build id into runGeneration, so the lines
+// logged between start and finish (coder result, decision) share it.
+type buildIDKey struct{}
+
 func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
+	buildID, _ := ctx.Value(buildIDKey{}).(string)
+	decide := func(decision string) {
+		slog.Info("skilldesigner: build decision", "build_id", buildID, "workspace_id", workspaceID, "decision", decision)
+	}
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	// Reset the failure flag for this fresh attempt; a soft-fail below re-sets it
@@ -526,6 +576,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		BackendType:        backendType,
+		HostPython:         hostPython(),
 	}
 
 	if sess.progressCh == nil {
@@ -580,11 +631,35 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	cleanupStaging := func() { _ = os.RemoveAll(stagingDir) }
 
 	skillCreatorBody, _ := skilllibrary.CoreSkillContent("skill-creator")
-	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
 
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
-	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read").
+	// Research tools for the API engine: connected accounts, MCP servers and the browser,
+	// all read-only during a build. A CLI coder gets none of them — reaching them needs a
+	// shell, and skillBuildAllowedTools grants none.
+	var bound []connectors.BoundConn
+	var boundMCP []mcp.BoundServer
+	if coderSvc.IsAPI() {
+		if f.connReg != nil && f.connStore != nil && f.connsFor != nil {
+			bound = f.connsFor(genCtx, workspaceID)
+		}
+		if f.mcpCaller != nil && f.mcpFor != nil {
+			boundMCP = f.mcpFor(genCtx, workspaceID)
+		}
+		for _, b := range bound {
+			paramsSnap.Connections = append(paramsSnap.Connections, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+		}
+	}
+	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
+	if len(boundMCP) > 0 {
+		var refs []prompts.MCPServerRef
+		for _, b := range boundMCP {
+			refs = append(refs, prompts.MCPServerRef{Name: b.Name})
+		}
+		prompt += "\n" + prompts.MCPBuildBlock(refs, mcp.ToolNames(boundMCP), backendType, "")
+	}
+
+	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools(skillBuildAllowedTools).
 		// This build produces SKILL.md, not AGENT.md. Without the spec the API engine's
 		// finish gate demands the agent definition and the build can never end correctly
 		// (SP10 spec §1.1). No-op for the CLI engine.
@@ -596,7 +671,9 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker the connector build-guard checks for.
-	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
+	// KindSkill is what makes install_packages / `rookery deps install` refuse here: a
+	// skill is written for an agent to install at run time.
+	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation, buildphase.KindEnvVar: buildphase.KindSkill}
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {
 			for k, v := range env {
@@ -605,6 +682,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 	}
 	generationCoder = generationCoder.WithExtraEnv(extraEnv)
+	if len(bound) > 0 {
+		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
+	if len(boundMCP) > 0 {
+		generationCoder = generationCoder.WithMCP(f.mcpCaller, boundMCP)
+	}
+	// Reading pages only: a zero policy, and acting is refused during any build anyway.
+	if coderSvc.IsAPI() && f.browser != nil && f.browser.Available().OK {
+		generationCoder = generationCoder.WithBrowser(f.browser, browser.Policy{})
+	}
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 	if err != nil {
 		cleanupStaging()
@@ -624,11 +711,28 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "", false, "", fmt.Errorf("coder: %w", err)
 	}
 
-	if blocked := parseBlockedOutput(result.Text); blocked != "" {
-		cleanupStaging()
-		closeProgress()
-		f.markGenerationFailed(workspaceID, blocked)
-		return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
+	blocked := parseBlockedOutput(result.Text)
+	slog.Info("skilldesigner: coder returned", "build_id", buildID, "workspace_id", workspaceID,
+		"stop_reason", result.StopReason, "script_verified", result.ScriptVerified, "script_ran", result.ScriptRan,
+		"blocked", blocked != "",
+		// Which tools the build called, with counts and bytes: the live activity card is
+		// the only other record, and it is gone once the page closes.
+		"tools", coder.SummarizeToolTrace(result.ToolTrace))
+	// A [BLOCKED] reply is reconciled against what is on disk before anything is
+	// discarded (mirrors agentdesigner.reconcileBlockedOutcome): the turn-budget grace
+	// nudge asks every exhausted build for [BLOCKED], so a builder that finished its
+	// skill and then ran out of turns would otherwise lose the whole build.
+	blockCaveat := ""
+	if blocked != "" {
+		proceed, caveat := reconcileSkillBlock(stagingDir, blocked)
+		if !proceed {
+			decide("blocked")
+			cleanupStaging()
+			closeProgress()
+			f.markGenerationFailed(workspaceID, blocked)
+			return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
+		}
+		blockCaveat = caveat
 	}
 
 	notify("🔍 Validating skill safety checks…")
@@ -640,6 +744,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		decide("no_skill_md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMDBytes, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
@@ -647,6 +752,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		decide("no_skill_md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
@@ -666,6 +772,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		closeProgress()
 		slog.Warn("skilldesigner: skill failed safety checks", "workspace_id", workspaceID, "skill_name", skillNameSnap, "err", err)
 		f.markGenerationFailed(workspaceID, "the generated SKILL.md failed a safety check: "+err.Error())
+		decide("guardrails")
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
@@ -674,21 +781,50 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
 			f.markGenerationFailed(workspaceID, "the generated file "+filename+" failed an internal safety check: "+err.Error())
+			decide("guardrails")
 			return "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.", false, "", nil
 		}
 	}
 
-	notify("🧪 Testing scripts…")
+	// A syntax check only (py_compile / bash -n): skill builds never run their scripts.
+	notify("🔎 Checking script syntax…")
 	testOut := f.runTests(skillRoot, scripts, parseTestOutput(result.Text))
 
 	notify("🔒 Security vetting the skill…")
 	report := f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
+	if !vettingComplete(report) {
+		// An empty reply is often a one-off (a reasoning model spending its budget on
+		// thought); ask once more before treating the review as not having happened.
+		slog.Warn("skilldesigner: vetting returned no verdict, retrying", "build_id", buildID, "workspace_id", workspaceID, "report_bytes", len(report))
+		report = f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
+	}
 
 	closeProgress()
+
+	// Fail CLOSED on a review that did not happen. Vetting is the safety gate for skills
+	// that install and run third-party code; a skill once reached review with a 0-byte
+	// report because "no verdict" counted as "not blocked".
+	if !vettingComplete(report) {
+		decide("vetting_incomplete")
+		msg := "🔒 The security review did not complete, so the skill was not saved — the reviewer returned no verdict twice. Type **approve** to rebuild and review it again, or tell me what to change."
+		f.mu.Lock()
+		sess = f.sessions[workspaceID]
+		sess.State = StateDesigning
+		sess.PendingSkillMD = skillMD
+		sess.PendingScripts = scripts
+		sess.VettingReport = report
+		sess.GenerationFailed = true
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg, CreatedAt: time.Now().UTC()})
+		f.saveDraft(sess)
+		f.mu.Unlock()
+		cleanupStaging()
+		return msg, false, "", nil
+	}
 
 	// A blocked vetting verdict (🔴/⛔ or "do not save") keeps the user in the
 	// design state to revise — the skill is NOT saved.
 	if vettingBlocksSave(report) {
+		decide("vetting_blocked")
 		msg := fmt.Sprintf(
 			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
 			report,
@@ -728,8 +864,9 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// longer returns ErrMaxTurns, and the deterministic exhaustionSummary carries no
 	// [BLOCKED], so nothing below this point would notice. The reason comes from the
 	// engine (Result.StopReason), never from the model remembering to emit a marker.
-	return caveatTruncatedBuild(fmt.Sprintf(
-		"Here's the generated skill and how it tested:\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
+	decide("ready")
+	return blockCaveat + caveatTruncatedBuild(fmt.Sprintf(
+		"Here's the generated skill. Its scripts were not run: a skill is tested when an agent that uses it is built, which installs its packages and runs its scripts for real.\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
 		testOut, vettingReportBlock(report),
 	), result.StopReason), false, "", nil
 }
@@ -765,9 +902,8 @@ const truncatedBuildCaveat = "⚠️ Heads up — this build ran out of steps be
 // review, caveated when the engine cut the tool loop short. An empty stopReason is a
 // normal finish and passes through untouched.
 //
-// Two args, not agentdesigner's three: a [BLOCKED] reply already returns early above
-// (parseBlockedOutput), so this is never reached with one and a `blocked` parameter would
-// be dead code here.
+// Two args, not agentdesigner's three: a [BLOCKED] reply that reaches review is already
+// caveated by reconcileSkillBlock, so a `blocked` parameter here would say it twice.
 func caveatTruncatedBuild(message, stopReason string) string {
 	if strings.TrimSpace(stopReason) == "" {
 		return message
@@ -841,15 +977,27 @@ func (f *Flow) vetSkill(ctx context.Context, workspaceID string, coderSvc *coder
 	return strings.TrimSpace(result.Text)
 }
 
+// vettingComplete reports whether the vetter produced a verdict at all. A report with no
+// "Verdict:" line — empty, cut off, or vetSkill's own could-not-run message — means the
+// review did not happen, which runGeneration treats as a block (after one retry).
+func vettingComplete(report string) bool {
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "verdict:") {
+			return true
+		}
+	}
+	return false
+}
+
 // vettingBlocksSave returns true if the vetting report carries a blocking
 // verdict. It parses the authoritative "Verdict:" line rather than scanning the
 // whole report for emoji: the skill-vetter format offers verdict options as
 // "✅ safe to save | ⚠️ save with caution | ❌ do not save", and a literal model
 // could echo the whole alternation — scanning for ❌ would then falsely block a
 // safe skill. A pure block verdict ("Verdict: ❌ do not save") contains "do not
-// save" but NOT "safe to save"; an echoed alternation contains both. A missing or
-// ambiguous report does NOT block (the report is still shown to the user, who
-// can decline to approve).
+// save" but NOT "safe to save"; an echoed alternation contains both. This judges
+// a verdict that EXISTS; a report with no verdict at all is caught earlier by
+// vettingComplete, which blocks the save rather than letting it pass unreviewed.
 func vettingBlocksSave(report string) bool {
 	if strings.TrimSpace(report) == "" {
 		return false
@@ -1219,17 +1367,43 @@ func parseTestOutput(text string) string {
 	return strings.TrimSpace(text[start : start+end])
 }
 
+// reconcileSkillBlock decides whether a [BLOCKED] build still has a skill worth reviewing:
+// it does when staging holds a SKILL.md whose frontmatter names the skill. The caveat it
+// returns opens the review message, so the builder's reason is shown rather than lost.
+func reconcileSkillBlock(stagingDir, blocked string) (proceed bool, caveat string) {
+	root, err := LocateSkillRoot(stagingDir)
+	if err != nil {
+		return false, ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if err != nil {
+		return false, ""
+	}
+	if meta, _ := skilllibrary.ParseMeta(string(data)); strings.TrimSpace(meta.Name) == "" {
+		return false, ""
+	}
+	return true, "Note: the builder reported a problem it could not resolve: " + blocked + "\n\n"
+}
+
+// parseBlockedOutput extracts the coder's explanation from a [BLOCKED] block. Only a
+// line that OPENS with the marker counts: a model reasoning about whether to block
+// ("whether a `[BLOCKED]` block is warranted…") mentions the token mid-sentence, and a
+// substring match read that as a block and discarded a finished skill. Same
+// line-anchoring rule as chat.CleanReply; agentdesigner carries an identical copy.
 func parseBlockedOutput(text string) string {
-	start := strings.Index(text, "[BLOCKED]")
-	if start < 0 {
-		return ""
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[BLOCKED]") {
+			continue
+		}
+		rest := strings.Join(append([]string{strings.TrimPrefix(trimmed, "[BLOCKED]")}, lines[i+1:]...), "\n")
+		if end := strings.Index(rest, "[/BLOCKED]"); end >= 0 {
+			rest = rest[:end]
+		}
+		return strings.TrimSpace(rest)
 	}
-	start += len("[BLOCKED]")
-	end := strings.Index(text[start:], "[/BLOCKED]")
-	if end < 0 {
-		return strings.TrimSpace(text[start:])
-	}
-	return strings.TrimSpace(text[start : start+end])
+	return ""
 }
 
 func sortedScriptNames(scripts map[string]string) []string {

@@ -6,6 +6,7 @@ package prompts
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -645,6 +646,44 @@ func outputProtocolSection() string {
 // calls the host executes. basic-model: output markers the host system interprets (legacy,
 // for plain model invocations with no tool calls).
 func coderCapabilitiesBlock(backendType string) string {
+	return coderCapabilitiesBlockFor(backendType, InstallAtRuntime)
+}
+
+// InstallPolicy says what a coder is told about installing packages.
+type InstallPolicy int
+
+const (
+	// InstallAtRuntime: agent runs and agent builds install through install_packages /
+	// `rookery deps install`, into a contained environment.
+	InstallAtRuntime InstallPolicy = iota
+	// InstallNotDuringBuild: a skill build declares dependencies and writes the install
+	// step; the agent that uses the skill installs them.
+	InstallNotDuringBuild
+)
+
+// installAtRuntimeLine replaced three separate outright bans ("Do not install
+// packages", "Do not pip-install anything", "Do NOT pip install or add any new
+// package") that left agents unable to run a skill's install step. It names BOTH doors
+// because the capability block is not the only place a CLI coder reads it.
+const installAtRuntimeLine = "Install Python packages ONLY with install_packages (CLI: `rookery deps install --env <name> --package <spec>`) into a named environment, and run code that uses them with run_in_env (CLI: `rookery deps run --env <name> --secret <NAME> -- <script>`). Never pip install into your home or the system."
+
+const installNotDuringBuildLine = "Do NOT install packages during this build — the agent that uses this skill installs them at run time. Declare them and write the install step into SKILL.md instead."
+
+// installPolicyMarker is where coderCapabilitiesBlockFor writes the policy line.
+const installPolicyMarker = "{{INSTALL_POLICY}}"
+
+func (p InstallPolicy) line() string {
+	if p == InstallNotDuringBuild {
+		return installNotDuringBuildLine
+	}
+	return installAtRuntimeLine
+}
+
+func coderCapabilitiesBlockFor(backendType string, policy InstallPolicy) string {
+	return strings.ReplaceAll(coderCapabilitiesTemplate(backendType), installPolicyMarker, policy.line())
+}
+
+func coderCapabilitiesTemplate(backendType string) string {
 	if backendType == BackendToolCalling {
 		return `<coder_capabilities>
 You are running as a tool-calling LLM. You have no shell and no direct filesystem
@@ -698,7 +737,7 @@ text. The available tools are:
 - bash(command): run a shell command with your working directory as CWD, sandboxed, and get
   its stdout. Secrets are available as environment variables (e.g.
   curl -H "Authorization: Bearer $TOKEN" ...), so use bash or run_script for any call that
-  needs a secret. Do not install packages.
+  needs a secret. {{INSTALL_POLICY}}
 
 Choosing between them for FILE DISCOVERY: find a note by its CONTENT → search_files. Find
 files by NAME/pattern → glob. Browse one folder's contents → list_dir. All three are
@@ -742,7 +781,7 @@ express every filesystem action through these markers.
 	return `<coder_capabilities>
 You are running as a full coder with direct tool access:
 - File operations: read, write, and edit files directly in the vault and your agent dir.
-- Shell: run commands and execute helper scripts under tools/. Do not pip-install anything.
+- Shell: run commands and execute helper scripts under tools/. {{INSTALL_POLICY}}
 - Web fetch: retrieve URLs directly when the task needs live web data.
 Use these capabilities to execute the AGENT.md instructions directly on files and the
 shell — do not route routine file writes through output markers.
@@ -794,7 +833,8 @@ func agentArchitectureGateBlock(backendType string) string {
   of them byte-for-byte unchanged and add none. Fix the problem in AGENT.md. If the fix truly
   requires changing that code, change nothing and emit [BLOCKED] saying this edit needs a CLI
   coder.
-  Do NOT pip install or add any new package.
+  A Python package a declared skill needs: install it with install_packages and run the
+  skill's script with run_in_env. Never pip install with bash.
   During THIS build, actually CALL web_search/web_fetch/bash and confirm
   it returns the real data you expect BEFORE you finish — a plan you never executed is not a
   verified agent. Pure reasoning, text, and reading/writing the user's notes need no network →
@@ -2632,6 +2672,14 @@ type SkillDesignParams struct {
 	// coder types (it runs WithNoTools on every backend, so there is nothing
 	// mechanical to describe).
 	BackendType string
+
+	// Build-only research context (BuildSkillImplementationPrompt). Connections and
+	// ConnectionTools are the workspace's connected accounts and the tool names the
+	// build may call to READ them; HostPython is the `python3 --version` the skill's
+	// scripts will run under, so the builder does not guess.
+	Connections     []ConnectionRef
+	ConnectionTools []string
+	HostPython      string
 }
 
 // BuildSkillDesignSystemPrompt returns the system prompt for the conversational
@@ -2769,7 +2817,13 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	sb.WriteString(skillName)
 	sb.WriteString("\" for the Rookery platform.\n\n")
 
-	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
+	sb.WriteString(skillBuildCapabilitiesBlock(p.BackendType))
+	// Native connector tools exist only on the API engine; a CLI coder would need a shell
+	// for `rookery connector exec`, and a skill build has none.
+	if p.BackendType == BackendToolCalling {
+		sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, ""))
+	}
+	sb.WriteString(agentRuntimeBlock(p.HostPython))
 
 	if skillCreatorBody != "" {
 		sb.WriteString("<skill_creator_guide>\n")
@@ -2796,6 +2850,7 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	sb.WriteString("- references/<name>.md ← only if the skill needs on-demand reference docs\n")
 	sb.WriteString("A published skill lives at <name>/SKILL.md, but you are ALREADY inside that <name> folder. Creating another one nests the skill and the build cannot be saved.\n")
 	sb.WriteString("</output_layout>\n\n")
+	sb.WriteString(skillDependenciesBlock(skillName))
 
 	sb.WriteString(fmt.Sprintf(`<task>
 Follow these steps in EXACT order.
@@ -2818,14 +2873,14 @@ Follow these steps in EXACT order.
    with copy-pasteable examples. If scripts/ are needed, write them under
    scripts/ (minimal, robust).
 
-3. TEST — Run every script to confirm it does not crash:
-   `+"`python3 scripts/<file>.py --help`"+` or an import/smoke check against a sample.
-   For prompt-only skills, validate the frontmatter parses and the description
-   reads as a clear trigger. Report results inside:
-
-   [TEST_OUTPUT]
-   <what you tested, what passed, any errors you fixed>
-   [/TEST_OUTPUT]
+3. REVIEW — do not run anything. Re-read each script against the <agent_runtime>
+   above: imports, argument handling, paths, the one-line error on every failure,
+   and the exact output format SKILL.md promises. Fix what you find by editing the
+   file. Re-read SKILL.md as the agent will: every step must be doable with the
+   tools that agent has. A skill is tested when an agent that uses it is built —
+   the agent designer installs its packages and runs its scripts for real then —
+   so make that first run easy to get right. End with one short summary of what
+   the skill contains and what was not exercised.
 
 RULES:
 - Write tool names BARE in the body (pandoc ...). The runtime env block supplies the
@@ -2839,6 +2894,98 @@ RULES:
 </task>
 `, skillName))
 	return sb.String()
+}
+
+// skillBuildCapabilitiesBlock replaces the general capability block for a skill build,
+// which lists run_script and bash: a skill build researches and writes, and offering
+// tools in prose that the engine withholds sends a weak model chasing them. Running and
+// installing during skill builds made them take 14-20 minutes; the skill's scripts are
+// tested where they are used, when the agent designer builds an agent that uses it.
+func skillBuildCapabilitiesBlock(backendType string) string {
+	tools := "read_file, write_file, edit_file, list_dir, search_files, glob, kb_file_map, " +
+		"kb_table_query, web_search, web_fetch, browser_read (when available), and any " +
+		"connector or MCP tools listed below — call them as function tools"
+	if backendType != BackendToolCalling {
+		tools = "Read, Write, Edit, Glob, Grep, WebSearch and WebFetch"
+	}
+	return `<coder_capabilities>
+You are BUILDING A SKILL: you research, then write files. You do not run anything.
+Available: ` + tools + `.
+Use them to research how the thing really works — the user's knowledge base, the
+project's README, source and release notes, an API's documentation, a page in the
+browser, the user's connected accounts (read-only: anything that changes data is
+refused during a build).
+Not available, by design: shell commands, running or testing scripts, installing
+packages. Do not look for a way around this. ` + installNotDuringBuildLine + `
+</coder_capabilities>
+
+`
+}
+
+// agentRuntimeBlock tells a skill build what the AGENT that uses the skill will have,
+// so a skill never depends on something that agent cannot do. hostPython is the
+// version the skill's scripts will actually run under.
+func agentRuntimeBlock(hostPython string) string {
+	py := "the host's python3"
+	if strings.TrimSpace(hostPython) != "" {
+		py = strings.TrimSpace(hostPython) + " (the host's python3)"
+	}
+	return `<agent_runtime>
+The skill you write is used by an AGENT. Write SKILL.md for exactly what that agent can do:
+- Install declared Python packages: install_packages(env="<skill name>", packages=[...]),
+  or on a CLI coder ` + "`rookery deps install --env <skill name> --package <requirement>`" + `.
+  Each skill gets its own environment, kept between runs.
+- Run the skill's scripts with run_in_env(env, script, args, secrets=[NAMES]), or on a CLI
+  coder ` + "`rookery deps run --env <skill name> --secret <NAME> -- scripts/<file>.py`" + `.
+  A script sees ONLY the secrets named on the call, as environment variables, plus
+  $ROOKERY_VAULT_ROOT — the knowledge base root. A script that writes notes must build
+  its paths from $ROOKERY_VAULT_ROOT, never by searching for a notes/ folder (the
+  agent's own folder has one too). Run skill scripts ONLY this way:
+  never call an environment's python or pip from bash — bash refuses it, and it
+  would run the code with every secret instead of the ones named.
+- Other tools the agent has: bash and run_script (no installed packages there), web_fetch,
+  web_search, the browser (read pages, and click/fill where its owner allowed), the
+  workspace's connector and MCP tools, and read/write access to the knowledge base.
+- Sandbox: write temporary files under $TMPDIR, never /tmp. No system installs (no sudo,
+  apt, dnf). Network access is available. Python is ` + py + `: prefer packages with
+  ready-made wheels for it.
+- Scripts are NOT run in this build. Write them to be right the first time: import packages
+  lazily after argument parsing, print one clear error line and exit non-zero on any
+  failure, and never invent or guess a result.
+- The skill is tested when an agent that uses it is built: the agent designer installs its
+  packages and runs its scripts for real. Make SKILL.md tell that agent exactly what to call.
+</agent_runtime>
+
+`
+}
+
+// skillDependenciesBlock tells a skill build how to handle Python packages: declare them,
+// write the install step, test without them. A build that tried to prove a live run of a
+// heavy package (TradingAgents) spent its turns, got pushed to [BLOCKED] by the grace
+// nudge and lost a finished skill; this is what tells it that outcome is expected.
+func skillDependenciesBlock(skillName string) string {
+	return fmt.Sprintf(`<dependencies>
+If a script needs Python packages beyond the standard library:
+- Declare each one in SKILL.md frontmatter under metadata.install as
+  `+"`- kind: pip`"+` with `+"`package: <requirement>`"+` — a name pinned to a version
+  (requests==2.32.4) or a git+https URL pinned to a tag or commit. Declare every secret a
+  script reads under metadata.requires.env.
+- Do NOT install them during this build. In the SKILL.md body, tell the agent to call
+  install_packages with env "%s" and the declared packages before first use (CLI coders:
+  `+"`rookery deps install --env %s --package <requirement>`"+`), and to run each script with
+  run_in_env, passing the declared secrets by name (CLI coders: `+"`rookery deps run --env %s --secret <NAME> -- scripts/<file>.py`"+`).
+- Import each package lazily — inside the function that needs it, after argument parsing —
+  so `+"`--help`"+` and the "package not installed" error path work without it.
+- Find out what you need by RESEARCH, not by running: the package's own README, release
+  notes, source on its repository, where it writes its output, which version actually
+  exists (a release wheel or git URL when it is not on PyPI). Nothing is installed or run
+  in this build; that is expected and is NOT a reason to emit [BLOCKED].
+- Never write a secret's value to disk (no .env files, config files, caches or notes) —
+  read it from os.environ every time. A skill that does is refused by the security review.
+- Never download or clone code inside a script at run time; declare it as a dependency.
+</dependencies>
+
+`, skillName, skillName, skillName)
 }
 
 // BuildSkillVettingPrompt returns the prompt for the security audit of a freshly
@@ -2874,7 +3021,8 @@ func BuildSkillVettingPrompt(skillName, skillMD string, scripts map[string]strin
 	sb.WriteString(`<task>
 Review the skill above following the vetting protocol. Read EVERY file. Check for the
 red flags (exfiltration of knowledge-base notes/ABOUT.md/STYLE.md/secrets, raw-IP network calls,
-obfuscated/encoded payloads, sudo, unlisted package installs, credential harvesting,
+obfuscated/encoded payloads, sudo, unlisted package installs, secrets written to disk,
+install sources that hide where they download from, credential harvesting,
 destructive ops, deceptive instructions, reads/writes outside the vault). Classify the
 risk and produce the verdict. Emit ONLY the vetting report in the exact format specified
 by the protocol (the "SKILL VETTING REPORT" block). Do not emit anything else.
@@ -2918,17 +3066,63 @@ type SkillBin struct {
 	Path  string // resolved absolute path, "" if not installed
 }
 
+// SkillPyEnv is one declared skill's Python environment as the runtime prompt reports
+// it: what to install, which secrets its scripts read, and whether it is already there.
+type SkillPyEnv struct {
+	Skill, Env        string
+	Packages, Secrets []string
+	Ready             bool
+}
+
+// skillPyEnvLines spells out the exact install and run calls for both coder kinds, so a
+// weak model copies a working call rather than composing one — and never reaches for
+// pip, which would bypass the install sandbox.
+func skillPyEnvLines(envs []SkillPyEnv, rookeryBin string) string {
+	quote := func(xs []string) string {
+		q := make([]string, len(xs))
+		for i, x := range xs {
+			q[i] = strconv.Quote(x)
+		}
+		return "[" + strings.Join(q, ", ") + "]"
+	}
+	var sb strings.Builder
+	sb.WriteString("Python environments for declared skills (install and run ONLY this way, never pip):\n")
+	for _, e := range envs {
+		if e.Ready {
+			fmt.Fprintf(&sb, "- Python environment `%s` for skill %s is ready.\n", e.Env, e.Skill)
+		} else {
+			cli := rookeryBin + " deps install --env " + e.Env
+			for _, p := range e.Packages {
+				cli += " --package " + p
+			}
+			fmt.Fprintf(&sb, "- Python environment `%s` for skill %s is NOT installed yet. Before first use call install_packages(env=%q, packages=%s) — CLI: `%s`.\n",
+				e.Env, e.Skill, e.Env, quote(e.Packages), cli)
+		}
+		run := rookeryBin + " deps run --env " + e.Env
+		for _, s := range e.Secrets {
+			run += " --secret " + s
+		}
+		fmt.Fprintf(&sb, "  Run its scripts with run_in_env(env=%q, script=..., secrets=%s) — CLI: `%s -- <script> [args]`.\n",
+			e.Env, quote(e.Secrets), run)
+	}
+	return sb.String()
+}
+
 // SkillEnvBlock builds the <skill_environment> block injected into an agent run
 // alongside <skill_instructions>. For each declared tool it states the resolved
 // absolute path (or "missing — install via the cli-tool-installer skill") plus
 // the sandbox conventions: invoke tools by absolute path, use $TMPDIR not /tmp,
 // tools live at $HOME/.local/bin, secrets are env vars, vault root.
-func SkillEnvBlock(bins []SkillBin, homeDir, vaultRoot string) string {
-	if len(bins) == 0 && vaultRoot == "" {
+func SkillEnvBlock(bins []SkillBin, envs []SkillPyEnv, homeDir, vaultRoot, rookeryBin string) string {
+	if len(bins) == 0 && len(envs) == 0 && vaultRoot == "" {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("<skill_environment>\n")
+	if len(envs) > 0 {
+		sb.WriteString(skillPyEnvLines(envs, rookeryBin))
+		sb.WriteString("\n")
+	}
 	if len(bins) > 0 {
 		sb.WriteString("Declared skill tools and their resolved paths:\n")
 		seen := map[string]bool{}

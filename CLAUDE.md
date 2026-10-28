@@ -683,6 +683,7 @@ and every lookup is now scoped by workspace. Four things are load-bearing:
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.rkb` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `DefaultLocalDir(dataDir)` (the one definition of `<data_dir>/backups` — the local folder is not configurable), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
+| `internal/skilldeps` | Per-skill Python environments under `<workspace home>/.local/share/rookery/envs/<name>/`: `ValidateRequirement`/`EnvDir`, the `rookery-env.json` install manifest, the OSV `MAL-` check, and `Runner.Install`/`Runner.Run`, each in its own narrower Landlock sandbox. Reached by the API engine's `install_packages`/`run_in_env` and by `rookery deps install|run` — see "Skill dependencies" below. |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
 
@@ -2272,11 +2273,107 @@ At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content 
 
 **Conversational skill creator** (`internal/skilldesigner`, driven by the SPA via the `/api/v1/skills/design` FSM endpoints and by chat platforms via `/skill`): mirrors `agentdesigner.Flow`'s shape — FSM (`StateIdle → StateAwaitingResume → StateDescribing → StateDesigning → StateVerifying → StateDone`), SSE progress, 7-day drafts (`skill_drafts` table, one per user), strict/forgiving approval triggers (same split as the agent designer). Flow:
 1. Design conversation (text-only coder, `BuildSkillDesignSystemPrompt`) — focused Q&A, proposes a plan, asks for `approve`. Drafts are persisted on every turn so the conversation survives reloads/restarts (even on usage-limit).
-2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval), tests scripts, emits `[TEST_OUTPUT]`. Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
+2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval) after researching with read-only tools; it runs nothing (see "Skill dependencies"). Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
 3. Vetting (`vetSkill`, `BuildSkillVettingPrompt` with the `skill-vetter` core skill body as the system prompt) — a second text-only coder call audits the skill for malicious behaviour (exfil of vault notes/USER.md/SOUL.md/secrets, raw-IP network calls, obfuscated payloads, sudo, destructive ops, …) and emits a structured report. `vettingBlocksSave()` parses the authoritative `Verdict:` line (a pure `❌ do not save` blocks save; an echoed `✅ safe to save | ⚠️ … | ❌ do not save` alternation does NOT — guards against a literal model echoing the option list). A blocking verdict keeps the user in `StateDesigning` and the skill is NOT saved. Covered by `flow_test.go`.
 4. Approval → `SkillSaver.SaveSkill` writes SKILL.md+scripts/ to the vault, upserts the `skills` row (in-place overwrite if a skill of the same name exists; core-skill names are reserved and rejected), drops the draft + session, cleans up staging.
 
 Nightly GC (in `serve`) sweeps expired skill drafts and their orphaned `.staging-<name>/` dirs alongside agent drafts.
+
+**A `[BLOCKED]` reply no longer discards a skill that is on disk, and the marker is
+line-anchored in both designers.** A `trading-agents` build wrote its skill, ran out of
+turns, was told by `graceTurnBudgetNudge` to emit `[BLOCKED]`, and argued back in prose
+("whether a `[BLOCKED]` block is warranted…"). `parseBlockedOutput` was a bare
+`strings.Index`, so the mention counted, the "reason" swallowed the rest of the reply,
+and `cleanupStaging()` ran before anything read the staging dir. Now only a line that
+OPENS with the marker is a block (same rule as `chat.CleanReply`), and
+`reconcileSkillBlock` keeps a staged SKILL.md with parseable frontmatter, showing the
+block as a caveat — the skill designer's analogue of `reconcileBlockedOutcome`. The
+skill designer logs `coder returned` and `build decision` under the build's `build_id`.
+
+### Skill dependencies
+
+**A skill build never installs; the agent that uses the skill does, inside a narrower
+sandbox.** Skills declare Python packages as `metadata.install` `kind: pip` entries;
+`BuildSkillImplementationPrompt`'s `<dependencies>` block tells the builder to lazy-import
+them and to find the real package, version and output paths by research, and that a
+missing live run is NOT a reason for `[BLOCKED]`.
+
+**A skill build researches and writes; it runs NOTHING** (`SkillBuildSpec.NoExec`,
+`MaxTurns: 20`). Builds that installed, ran and re-tested took 14–20 minutes and grew
+their context until OpenRouter answered a 205 KB request with empty bodies. Now the API
+engine offers no exec tools (`bash`, `run_script`, `install_packages`, `run_in_env`,
+state) and skips the script-run gate; a CLI coder's grant is `skillBuildAllowedTools`
+(no `Bash`). Research stays: the knowledge base, web, and — API engine only, since a
+CLI coder would need a shell to reach them — the workspace's connections, MCP servers
+and browser reading, all read-only under the build guard. The build prompt's own
+capability block replaces the general one (which lists `run_script`/`bash`), and an
+`<agent_runtime>` block describes what the AGENT using the skill will have: the install
+and run doors, sandbox rules and the host's real `python3 --version`. **Testing moves to
+the agent designer**: building an agent that uses the skill installs its packages and
+runs its scripts for real, and the skill review says so instead of showing test output.
+Only `py_compile`/`bash -n` syntax checks still run at skill-build time. `ROOKERY_BUILD_KIND=skill` (alongside
+`buildphase.Generation`, which agent builds share) is the single source of truth both
+install doors read to refuse during a skill build; agent builds and dry runs may install.
+
+At run time `<skill_environment>` lists each declared skill's environment, whether its
+manifest already covers the declared packages, and the exact `install_packages` /
+`rookery deps install` and `run_in_env` / `rookery deps run` calls. Three prompt lines
+used to ban installing outright (tool-calling and full-coder capability blocks,
+`agentArchitectureGateBlock`); they now all route through `InstallPolicy`, and
+`TestNoPromptForbidsInstallingOutright` fails if any of the old wordings returns — one
+survivor leaves a coder kind unable to run a skill's install step.
+
+The home is persistent on purpose (it is the cache `cli-tool-installer` already uses), so
+the design is CONTAINMENT, not ephemerality. `internal/skilldeps` gives each step its own
+Landlock spec, nested inside a CLI coder's own sandbox (restrictions stack, so no bridge is
+needed):
+- **Install** writes only `envs/<name>/`, with an environment built from scratch (no
+  secrets, no bridge tokens, `PIP_CONFIG_FILE=/dev/null`, `--index-url` pinned to PyPI).
+  `ValidateRequirement` refuses anything pip would read as an option, which is how an extra
+  index (dependency confusion) would be smuggled in. pip resolves first (`--dry-run
+  --report`), the resolved set is checked against OSV `MAL-` advisories, and a hit refuses
+  the install. **OSV unreachable fails OPEN** (`MalwareCheck = "skipped: …"`, recorded in
+  the manifest) — failing closed would make installing impossible offline. Own 15-minute
+  deadline; the caller's cancel still stops it.
+- **Run** cannot see the workspace home (coder credentials, other environments), gets only
+  the secrets named on the call, and a private `TMPDIR` inside the env that is removed
+  afterwards. `TestRunIsConfinedUnderLandlock` runs this against the real kernel (the test
+  binary acts as the sandbox helper via `TestMain`) and was checked red with the sandbox off.
+- **Vetting** treats declared pip packages as the expected shape (🟡), and blocks a secret
+  written to disk, a source that hides where it downloads from, and typosquats.
+- **A review with no verdict blocks the save** (`vettingComplete`, one retry first). A
+  `trading-consultant` build reached review with a 0-byte report: the vetter returned no
+  text and "no verdict" counted as "not blocked". `vettingBlocksSave` still judges only a
+  verdict that exists; deciding whether a review HAPPENED is a separate question.
+- **`run_in_env` counts as running a script for the build gate** (`trackScriptProgress`
+  reads its `script` argument). The skill build is told to run scripts that way, so counting
+  only `run_script` nudged every such build to the limit with `script_ran=false`.
+- **A failed `install_packages` / `run_in_env` is logged on the server** (exit code and the
+  redacted tail of stderr/stdout). Before, the cause reached only the model, and a run
+  summarised as `run_in_env×4 (4 err)` could not be explained — it turned out to be the
+  skill's own script exiting 1 on a wrong output path, which the agent then worked around.
+
+**Scripts are told where the knowledge base is, and `bash` may not run an environment.**
+A 2026-10-27 run's skill script searched for the nearest `notes/` folder, found the agent's
+own `agents/<id>/notes/`, and the agent then ran the other two tickers with the
+environment's interpreter from `bash` — handing third-party code every workspace secret,
+the run's bridge tokens and the whole workspace home (coder login, every other skill's
+environment, where planted code would reach later agents). `run_in_env` and `rookery deps
+run` now set `ROOKERY_VAULT_ROOT` for the script, and the agent runtime prompt and
+`skill-creator` tell skills to build note paths from it. The API engine's `bash` refuses a
+command that executes an environment's `python`/`pip`/`activate` or points Python at its
+`lib/python*/` (`invokesSkillEnv`); reading an environment's files stays allowed. It is
+pattern matching — a command that `cd`s into an environment first gets past it — and it
+cannot see a CLI coder's own `Bash`. Checked before shipping: nothing on the install
+(agents, their tools, user or core skills, prompts) invoked an environment through the
+shell except that one run.
+
+Residual, stated rather than hidden: a model can still `pip install` in `bash` and bypass
+all of it; the agent's own process still holds every workspace secret (`runner.go` injects
+`GetAll`); a running script has the network and the knowledge base; environments are shared
+across a workspace's agents; off Linux there is no confinement. `rookery deps` reads
+`ROOKERY_SANDBOX` alone because `config.yaml` is unreadable inside the coder sandbox, so it
+confines even when the operator disabled the sandbox in the file — stricter, never looser.
 
 ### Conversational agent editing
 
@@ -2480,7 +2577,7 @@ run on a Mac.
 
 A workspace can run its coder as a **direct LLM provider API** instead of a host CLI binary. `Coder.runAPI`/`runToolLoop` (`internal/coder/api_engine.go`) drive an in-process loop: `Complete → execute host tools against the vault → feed results back → Complete`, until the model emits a final answer (no tool calls), the turn budget is spent, or the deadline passes. The model's final text carries the same `[CHAT]`/`[STATE]`/`[SILENT]` protocol markers, so the runner's parser is unchanged.
 
-- **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). `kb_file_map(path)` describes ONE file before it is read (kind, size, shape) and `kb_table_query(...)` filters/groups/aggregates a markdown table's rows — both added by PR #247, both **read-only pure functions of one vault file** and therefore also outside the exec gate. **Four** tools are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure, plus `get_state`/`set_state` (statetools.go), which only mean anything where workDir is a real agent's own dir. **`web_fetch` and `web_search` are NOT exec-gated** — this documentation claimed for a long time that they were and that chat could not reach them, while the code declared them above the gate and two tests (`hosttools_web_test.go`, `searchkey_wiring_test.go`) pinned them as available in chat. They are read-only, cannot carry secrets and cannot reach private address space, which is the reason they sit outside it. `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
+- **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). `kb_file_map(path)` describes ONE file before it is read (kind, size, shape) and `kb_table_query(...)` filters/groups/aggregates a markdown table's rows — both added by PR #247, both **read-only pure functions of one vault file** and therefore also outside the exec gate. **Six** tools are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure, plus `get_state`/`set_state` (statetools.go), which only mean anything where workDir is a real agent's own dir, plus `install_packages`/`run_in_env` (depstools.go — see "Skill dependencies"). **`web_fetch` and `web_search` are NOT exec-gated** — this documentation claimed for a long time that they were and that chat could not reach them, while the code declared them above the gate and two tests (`hosttools_web_test.go`, `searchkey_wiring_test.go`) pinned them as available in chat. They are read-only, cannot carry secrets and cannot reach private address space, which is the reason they sit outside it. `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
 - **Turn budgets are spent by UNPRODUCTIVE turns only** (`internal/coder/turnbudget.go`):
   base `maxAPITurns` (30) for runs/chat, `maxBuildAPITurns` (50) for builds, a
   `maxHardTurns` (150) ceiling never extended by anything, and a
@@ -2566,7 +2663,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
     gate still offers `run_script`/`bash` on runs, so a TIER 2 agent a CLI coder built keeps
     working after the workspace switches to an API coder. `TestRuntimePromptStillOffersScriptsOnTheAPIEngine`
     pins it, because "the ceiling should apply everywhere" is the tempting over-reach.
-- **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the always-on host tools, minus the exec-gated `run_script`/`bash`/`get_state`/`set_state`, for on-demand KB read/write — parity with the CLI chat's set).
+- **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the always-on host tools, minus the exec-gated `run_script`/`bash`/`get_state`/`set_state`/`install_packages`/`run_in_env`, for on-demand KB read/write — parity with the CLI chat's set).
 
 - **The design conversation runs a READ-ONLY tool profile** (`Coder.WithReadOnlyTools`,
   `hostToolSet.readOnly`). It was the only coder surface in the product offered NO tools

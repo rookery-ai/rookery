@@ -31,6 +31,15 @@ type BuildSpec struct {
 	// last is true on the final nudge, when the model must stop iterating and finish.
 	MissingDeliverableNudge func(last bool) string
 	UnverifiedScriptNudge   func(last bool) string
+
+	// NoExec withholds every tool that runs something (bash, run_script, install_packages,
+	// run_in_env, get_state/set_state) and turns gate 2 off, since a script that cannot be
+	// run can never satisfy it. Research and writing stay. Used by skill builds: a skill's
+	// scripts are tested where they are used, when the agent designer builds an agent.
+	NoExec bool
+
+	// MaxTurns overrides the build's base turn budget; 0 keeps maxBuildAPITurns.
+	MaxTurns int
 }
 
 // AgentBuildSpec is the historical behaviour and the default when no spec is set.
@@ -46,13 +55,14 @@ var AgentBuildSpec = BuildSpec{
 	},
 }
 
-// SkillBuildSpec is the skill-creator build. Gate 2 is KEPT: skill-creator already
-// mandates a smoke run (`python3 scripts/x.py --help`, or against a small fixture) and
-// such a run satisfies the gate, so the gate enforces the contract the skill format
-// already requires. What differs is the wording — the agent nudge talks about reaching a
-// live service, which would send a skill build chasing data its script was never meant to
-// fetch.
+// SkillBuildSpec is the skill-creator build: research and write, run nothing. Running
+// and installing during skill builds is what made them take 14-20 minutes and grow
+// their context until the provider returned empty bodies; a skill's scripts are tested
+// where they are actually used, by the agent designer's build of an agent that uses the
+// skill. Twenty turns covers research plus writing.
 var SkillBuildSpec = BuildSpec{
+	NoExec:       true,
+	MaxTurns:     20,
 	Deliverable:  "SKILL.md",
 	IsScript:     isSkillScriptPath,
 	ProgressNoun: "the skill's script",

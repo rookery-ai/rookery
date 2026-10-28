@@ -73,6 +73,7 @@ func main() {
 			mcpCmd(),
 			kbCmd(),
 			stateCmd(),
+			depsCmd(),
 			backupCommand(),
 			upgradeCmd(),
 			uninstallCmd(),
@@ -450,6 +451,26 @@ func serveCmd() *cli.Command {
 			skillFlow := skilldesigner.NewSkillFlow(coderFor, skillSaver).
 				WithDB(database).
 				WithMemory(memStore).
+				// Research tools for skill builds, read-only by the build guard — the
+				// same resolution the agent designer's builds use.
+				WithConnectors(connReg, connStore, func(ctx context.Context, workspaceID string) []connectors.BoundConn {
+					rows, err := database.ListServiceConnections(ctx, workspaceID)
+					if err != nil {
+						return nil
+					}
+					out := make([]connectors.BoundConn, 0, len(rows))
+					for _, c := range rows {
+						out = append(out, connectors.BoundConn{ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity, Extra: connectors.ParseExtra(c.Extra)})
+					}
+					return out
+				}).
+				WithMCPBuild(mcpClient, func(ctx context.Context, workspaceID string) []mcp.BoundServer {
+					bound, err := mcp.ActiveBoundServers(ctx, database, sysKey, workspaceID)
+					if err != nil {
+						return nil
+					}
+					return bound
+				}).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
 					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
