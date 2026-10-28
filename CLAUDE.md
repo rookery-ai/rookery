@@ -2353,6 +2353,21 @@ needed):
   summarised as `run_in_env×4 (4 err)` could not be explained — it turned out to be the
   skill's own script exiting 1 on a wrong output path, which the agent then worked around.
 
+**Scripts are told where the knowledge base is, and `bash` may not run an environment.**
+A 2026-10-27 run's skill script searched for the nearest `notes/` folder, found the agent's
+own `agents/<id>/notes/`, and the agent then ran the other two tickers with the
+environment's interpreter from `bash` — handing third-party code every workspace secret,
+the run's bridge tokens and the whole workspace home (coder login, every other skill's
+environment, where planted code would reach later agents). `run_in_env` and `rookery deps
+run` now set `ROOKERY_VAULT_ROOT` for the script, and the agent runtime prompt and
+`skill-creator` tell skills to build note paths from it. The API engine's `bash` refuses a
+command that executes an environment's `python`/`pip`/`activate` or points Python at its
+`lib/python*/` (`invokesSkillEnv`); reading an environment's files stays allowed. It is
+pattern matching — a command that `cd`s into an environment first gets past it — and it
+cannot see a CLI coder's own `Bash`. Checked before shipping: nothing on the install
+(agents, their tools, user or core skills, prompts) invoked an environment through the
+shell except that one run.
+
 Residual, stated rather than hidden: a model can still `pip install` in `bash` and bypass
 all of it; the agent's own process still holds every workspace secret (`runner.go` injects
 `GetAll`); a running script has the network and the knowledge base; environments are shared
