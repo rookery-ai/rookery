@@ -330,7 +330,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 				Name: "bash",
 				Description: "Run a bash command with your working directory as CWD, sandboxed, and return its stdout. " +
 					"Secrets are available as environment variables (e.g. curl -H \"Authorization: Bearer $MY_TOKEN\" ...), so use this (or run_script) for any call that needs a secret. " +
-					"On failure both stdout and stderr are returned so you can see what went wrong. Install Python packages with install_packages, never pip in bash; no system packages (apt) either.",
+					"On failure both stdout and stderr are returned so you can see what went wrong. Install Python packages with install_packages, never pip in bash; no system packages (apt) either. Run a skill's scripts with run_in_env — calling a skill environment's python or pip from bash is refused.",
 				Parameters: rawSchema(`{"type":"object","properties":{"command":{"type":"string","description":"the bash command line to run"}},"required":["command"]}`),
 			},
 			llm.Tool{
@@ -858,6 +858,11 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 	case "bash":
 		if !h.includeExecTools {
 			return "error: bash is not available"
+		}
+		// A skill environment's code runs through run_in_env, never through bash —
+		// bash would hand it every secret and the whole workspace home.
+		if invokesSkillEnv(args.Command) {
+			return skillEnvRefusal
 		}
 		out, err := h.runBash(ctx, args.Command)
 		if err != nil {
