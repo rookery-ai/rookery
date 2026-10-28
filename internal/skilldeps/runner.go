@@ -234,6 +234,11 @@ func (r Runner) Run(ctx context.Context, req RunRequest) (string, string, error)
 		"VIRTUAL_ENV=" + envDir,
 		"LANG=C.UTF-8",
 	}
+	// The knowledge base root is a path, not a secret. Without it a script searched for
+	// the nearest notes/ folder and found the agent's own agents/<id>/notes/.
+	if req.VaultRoot != "" {
+		env = append(env, "ROOKERY_VAULT_ROOT="+req.VaultRoot)
+	}
 	names := make([]string, 0, len(req.Secrets))
 	for k := range req.Secrets {
 		names = append(names, k)

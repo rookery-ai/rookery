@@ -189,6 +189,32 @@ func TestRunPassesOnlyNamedSecrets(t *testing.T) {
 	}
 }
 
+// A skill script was left to find the knowledge base by searching for a notes/ folder,
+// and found the agent's own agents/<id>/notes/ instead — the trading note landed in the
+// wrong place. The knowledge base root is a path, not a secret: hand it over.
+func TestRunTellsTheScriptWhereTheKnowledgeBaseIs(t *testing.T) {
+	work := t.TempDir()
+	script := filepath.Join(work, "s.py")
+	if err := os.WriteFile(script, []byte("import os\nprint(repr(os.environ.get('ROOKERY_VAULT_ROOT')))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{Python: fakePython(t, "{}")}
+	out, _, err := r.Run(context.Background(), RunRequest{Home: t.TempDir(), Env: "x", WorkDir: work, VaultRoot: "/kb", Script: script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "'/kb'" {
+		t.Errorf("script saw %s, want '/kb'", out)
+	}
+	out, _, err = r.Run(context.Background(), RunRequest{Home: t.TempDir(), Env: "x", WorkDir: work, Script: script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "None" {
+		t.Errorf("with no knowledge base known the variable must be absent, script saw %s", out)
+	}
+}
+
 func TestRunRemovesItsTmp(t *testing.T) {
 	home, work := t.TempDir(), t.TempDir()
 	script := filepath.Join(work, "s.py")

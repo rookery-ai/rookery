@@ -46,7 +46,11 @@ func TestSkillBuildPromptDescribesResearchNotExecution(t *testing.T) {
 // what that agent has — install and run doors, sandbox rules, the host's real Python.
 func TestSkillBuildPromptDescribesTheAgentRuntime(t *testing.T) {
 	p := skillBuildPrompt(BackendToolCalling)
-	for _, want := range []string{"<agent_runtime>", "install_packages", "run_in_env", "rookery deps run", "$TMPDIR", "never /tmp", "Python 3.14.7", "browser"} {
+	for _, want := range []string{"<agent_runtime>", "install_packages", "run_in_env", "rookery deps run", "$TMPDIR", "never /tmp", "Python 3.14.7", "browser",
+		// A script searching for "the nearest notes/ folder" found the agent's own one.
+		"$ROOKERY_VAULT_ROOT", "never by searching for a notes/ folder",
+		// The route the 2026-10-27 run took for ETH and SOL, which bypassed containment.
+		"never call an environment's python or pip from bash"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("agent runtime block lacks %q", want)
 		}

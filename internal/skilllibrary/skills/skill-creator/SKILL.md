@@ -111,6 +111,11 @@ the skill, which persists for later runs.
 - Import the package lazily, inside the function that needs it after argument
   parsing, so `--help` and a clear "not installed — run install_packages
   first" error work without it.
+- A script that writes into the knowledge base builds its paths from
+  `$ROOKERY_VAULT_ROOT` (set by `run_in_env` / `rookery deps run`). Never find the
+  knowledge base by searching for a `notes/` folder: the agent's own folder has one.
+- Tell the agent to run scripts ONLY through `run_in_env` — never by calling the
+  environment's `python` or `pip` from bash, which is refused.
 - Never write a secret's value to disk — no `.env` files, configs, caches or
   notes. Read it from `os.environ` each time; the security review refuses a
   skill that persists one.

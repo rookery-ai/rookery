@@ -2937,7 +2937,12 @@ The skill you write is used by an AGENT. Write SKILL.md for exactly what that ag
   Each skill gets its own environment, kept between runs.
 - Run the skill's scripts with run_in_env(env, script, args, secrets=[NAMES]), or on a CLI
   coder ` + "`rookery deps run --env <skill name> --secret <NAME> -- scripts/<file>.py`" + `.
-  A script sees ONLY the secrets named on the call, as environment variables.
+  A script sees ONLY the secrets named on the call, as environment variables, plus
+  $ROOKERY_VAULT_ROOT — the knowledge base root. A script that writes notes must build
+  its paths from $ROOKERY_VAULT_ROOT, never by searching for a notes/ folder (the
+  agent's own folder has one too). Run skill scripts ONLY this way:
+  never call an environment's python or pip from bash — bash refuses it, and it
+  would run the code with every secret instead of the ones named.
 - Other tools the agent has: bash and run_script (no installed packages there), web_fetch,
   web_search, the browser (read pages, and click/fill where its owner allowed), the
   workspace's connector and MCP tools, and read/write access to the knowledge base.
