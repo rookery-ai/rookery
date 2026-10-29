@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/rookery-ai/rookery/compare/v0.19.0...v0.20.0) (2026-10-28)
+
+
+### Features
+
+* **skills:** install skill dependencies at run time in a contained sandbox ([#393](https://github.com/rookery-ai/rookery/issues/393)) ([ae158f1](https://github.com/rookery-ai/rookery/commit/ae158f180dbf0378a0d37af238d7b93024d6bcd4))
+
 ## [0.19.0](https://github.com/rookery-ai/rookery/compare/v0.18.7...v0.19.0) (2026-10-26)
 
 
