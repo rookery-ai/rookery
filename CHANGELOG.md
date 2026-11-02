@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/rookery-ai/rookery/compare/v0.20.0...v0.20.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** batch Dependabot updates for the qs and fast-uri advisories ([#398](https://github.com/rookery-ai/rookery/issues/398)) ([6a4c0a1](https://github.com/rookery-ai/rookery/commit/6a4c0a18c4d8a6716802d25f451dd44c61cba9c6))
+
 ## [0.20.0](https://github.com/rookery-ai/rookery/compare/v0.19.0...v0.20.0) (2026-10-28)
 
 
