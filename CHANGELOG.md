@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/rookery-ai/rookery/compare/v0.20.1...v0.20.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** systeminformation, @hono/node-server and minimatch advisories ([#402](https://github.com/rookery-ai/rookery/issues/402)) ([9d6bd4c](https://github.com/rookery-ai/rookery/commit/9d6bd4c1e525475ef441ab7600e0e1b98a05d474))
+
 ## [0.20.1](https://github.com/rookery-ai/rookery/compare/v0.20.0...v0.20.1) (2026-11-02)
 
 
