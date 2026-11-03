@@ -933,12 +933,12 @@ func (d *DB) CreateChat(c *Chat) error {
 }
 
 func (d *DB) GetChat(id string) (*Chat, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen FROM chats WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason FROM chats WHERE id=?`, id)
 	return scanChat(row)
 }
 
 func (d *DB) ListChats(workspaceID string) ([]*Chat, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason
 		FROM chats WHERE workspace_id=? ORDER BY last_seen DESC`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -960,8 +960,24 @@ func (d *DB) TouchChat(id string) error {
 	return err
 }
 
+// Chat stop reasons, stored in chats.ended_reason.
+const (
+	ChatEndedByUser = "user"
+	ChatEndedIdle   = "idle"
+)
+
+// StopChat stops a chat the owner chose to end (web stop, /chat stop, or
+// /chat start replacing it).
 func (d *DB) StopChat(id string) error {
-	_, err := d.Exec(`UPDATE chats SET active=0 WHERE id=?`, id)
+	_, err := d.Exec(`UPDATE chats SET active=0, ended_reason=? WHERE id=?`, ChatEndedByUser, id)
+	return err
+}
+
+// StopIdleChat stops a chat that went quiet for the idle timeout. Recorded
+// separately from StopChat because only an idle-ended chat is announced to the
+// owner on their next chat-app message.
+func (d *DB) StopIdleChat(id string) error {
+	_, err := d.Exec(`UPDATE chats SET active=0, ended_reason=? WHERE id=?`, ChatEndedIdle, id)
 	return err
 }
 
@@ -971,7 +987,7 @@ func (d *DB) DeleteChat(id string) error {
 }
 
 func (d *DB) ListStaleChats(before time.Time) ([]*Chat, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason
 		FROM chats WHERE active=1 AND last_seen < ?`,
 		before.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
@@ -994,7 +1010,7 @@ func scanChat(s scanner) (*Chat, error) {
 	var agentID sql.NullString
 	var active int
 	var createdAt, lastSeen string
-	err := s.Scan(&c.ID, &c.WorkspaceID, &agentID, &c.Name, &c.Platform, &active, &createdAt, &lastSeen)
+	err := s.Scan(&c.ID, &c.WorkspaceID, &agentID, &c.Name, &c.Platform, &active, &createdAt, &lastSeen, &c.EndedReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1047,7 +1063,7 @@ func (d *DB) ListChatMessages(chatID string) ([]ChatMessage, error) {
 // GetActiveChatForPlatform returns the most-recently-touched active chat
 // for the given user on the given platform, or nil if none exists.
 func (d *DB) GetActiveChatForPlatform(workspaceID, platform string) (*Chat, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason
 		FROM chats WHERE workspace_id=? AND platform=? AND active=1
 		ORDER BY last_seen DESC LIMIT 1`, workspaceID, platform)
 	c, err := scanChat(row)
@@ -1057,9 +1073,23 @@ func (d *DB) GetActiveChatForPlatform(workspaceID, platform string) (*Chat, erro
 	return c, err
 }
 
+// GetLatestChatForPlatform returns the most recently seen chat on the given
+// platform, active or not, or nil if the workspace has none there. The router
+// reads it to decide whether the previous conversation ended from inactivity.
+func (d *DB) GetLatestChatForPlatform(workspaceID, platform string) (*Chat, error) {
+	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason
+		FROM chats WHERE workspace_id=? AND platform=?
+		ORDER BY last_seen DESC, created_at DESC LIMIT 1`, workspaceID, platform)
+	c, err := scanChat(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	return c, err
+}
+
 // FindChatByPrefix returns the first chat whose ID starts with the given prefix.
 func (d *DB) FindChatByPrefix(workspaceID, prefix string) (*Chat, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen,ended_reason
 		FROM chats WHERE workspace_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
 		workspaceID, prefix+"%")
 	if err != nil {
@@ -1074,7 +1104,16 @@ func (d *DB) FindChatByPrefix(workspaceID, prefix string) (*Chat, error) {
 
 // ResumeChat sets a chat active again.
 func (d *DB) ResumeChat(id string) error {
-	_, err := d.Exec(`UPDATE chats SET active=1, last_seen=datetime('now') WHERE id=?`, id)
+	_, err := d.Exec(`UPDATE chats SET active=1, ended_reason='', last_seen=datetime('now') WHERE id=?`, id)
+	return err
+}
+
+// ResumeChatOnPlatform sets a chat active again AND moves it to platform. A
+// chat app finds its live chat by platform, so resuming a chat started on the
+// web (or another app) without moving it would leave it invisible there: the
+// next message would open a new chat and the resume would silently do nothing.
+func (d *DB) ResumeChatOnPlatform(id, platform string) error {
+	_, err := d.Exec(`UPDATE chats SET active=1, ended_reason='', platform=?, last_seen=datetime('now') WHERE id=?`, platform, id)
 	return err
 }
 

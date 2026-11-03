@@ -132,7 +132,7 @@ func (s *Server) apiCreateChat(c echo.Context) error {
 	name := req.Name
 	if name == "" {
 		loc := profile.LoadLocation(s.db, u.ID)
-		name = "Chat " + time.Now().In(loc).Format("2006-01-02 15:04")
+		name = chat.DefaultName(time.Now().In(loc))
 	}
 	ch := &db.Chat{
 		ID:          uuid.New().String(),

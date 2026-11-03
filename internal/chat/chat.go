@@ -1,6 +1,6 @@
 // Package chat provides the background auto-stop service for chats and the
-// shared user-context builder used by both the Telegram gateway and the web
-// chat composer when invoking the coder for one-off conversational turns.
+// shared user-context builder used by both the chat-app gateway and the web
+// chat composer when invoking the coder for conversational turns.
 // Chats that have been inactive for more than 30 minutes are automatically
 // stopped and their transcript mirrored into the user's vault.
 package chat
@@ -17,10 +17,19 @@ import (
 	"github.com/rookery-ai/rookery/internal/vault"
 )
 
-const (
-	pollInterval = time.Minute
-	idleTimeout  = 30 * time.Minute
-)
+const pollInterval = time.Minute
+
+// IdleTimeout is how long a chat may go quiet before it ends. The sweeper
+// enforces it once a minute; the chat-app router also checks it when a message
+// arrives, so a message at 30m30s cannot land in a chat that is about to end.
+const IdleTimeout = 30 * time.Minute
+
+// DefaultName is the name a chat gets when nobody named it — the shape
+// isDefaultChatName recognises, so MaybeAutoTitle later replaces it with a
+// content-derived title.
+func DefaultName(now time.Time) string {
+	return "Chat " + now.Format("2006-01-02 15:04")
+}
 
 // Service polls for stale chats and stops them.
 type Service struct {
@@ -58,27 +67,40 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) tick() {
-	stale, err := s.db.ListStaleChats(time.Now().Add(-idleTimeout))
+	stale, err := s.db.ListStaleChats(time.Now().Add(-IdleTimeout))
 	if err != nil {
 		slog.Error("chat service: list stale chats", "err", err)
 		return
 	}
 	for _, c := range stale {
-		if err := s.db.StopChat(c.ID); err != nil {
+		if err := EndIdleChat(s.db, s.reflector, c); err != nil {
 			slog.Error("chat service: stop chat", "id", c.ID, "err", err)
 			continue
 		}
 		slog.Info("chat service: auto-stopped idle chat", "id", c.ID, "user", c.WorkspaceID)
-		s.reflectTranscript(c)
 	}
 }
 
+// EndIdleChat stops a chat that went quiet for IdleTimeout and mirrors its
+// transcript into the vault. Shared by the sweeper and the chat-app router, so
+// a chat ended when a message arrives is recorded exactly like one the sweeper
+// ended. reflector may be nil.
+func EndIdleChat(database *db.DB, reflector *vault.Reflector, c *db.Chat) error {
+	if err := database.StopIdleChat(c.ID); err != nil {
+		return err
+	}
+	c.Active = false
+	c.EndedReason = db.ChatEndedIdle
+	reflectTranscript(database, reflector, c)
+	return nil
+}
+
 // reflectTranscript mirrors a stopped chat's full transcript into the vault.
-func (s *Service) reflectTranscript(c *db.Chat) {
-	if s.reflector == nil {
+func reflectTranscript(database *db.DB, reflector *vault.Reflector, c *db.Chat) {
+	if reflector == nil {
 		return
 	}
-	msgs, err := s.db.ListChatMessages(c.ID)
+	msgs, err := database.ListChatMessages(c.ID)
 	if err != nil {
 		slog.Warn("chat service: list messages for reflection", "id", c.ID, "err", err)
 		return
@@ -91,7 +113,7 @@ func (s *Service) reflectTranscript(c *db.Chat) {
 			Role: m.Role, Content: m.Content, CreatedAt: m.CreatedAt,
 		})
 	}
-	if err := s.reflector.ReflectChat(c.WorkspaceID, note); err != nil {
+	if err := reflector.ReflectChat(c.WorkspaceID, note); err != nil {
 		slog.Warn("chat service: reflect transcript", "id", c.ID, "err", err)
 	}
 }
