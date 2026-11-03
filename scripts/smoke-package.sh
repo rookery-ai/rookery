@@ -83,8 +83,13 @@ smoke_in_container() {
 	echo "==> $label OK"
 }
 
+# --nosignature: a goreleaser SNAPSHOT rpm is unsigned by design (release
+# artifacts are verified via cosign + checksums.txt, not an rpm GPG key), and
+# current Fedora images enforce rpm signatures by default — `rpm -i` failed
+# with "does not verify: no signature" the day the image changed. This gate
+# checks that the package installs and runs, not how it is signed.
 smoke_in_container "rpm on fedora" "fedora:latest" "$RPM" \
-	'rpm -i /artifact'
+	'rpm -i --nosignature /artifact'
 
 smoke_in_container "deb on debian" "debian:stable-slim" "$DEB" \
 	'dpkg -i /artifact'
