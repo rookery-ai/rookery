@@ -610,7 +610,7 @@ Per-workspace chat adapter (Telegram, Discord, Slack) — stamps msg.WorkspaceID
       → /remind → reminder.Service (create/list/delete)
       → /chat → db.Chat (start/list/stop/resume/delete)
       → /memory → memory.Store (add/list/delete bullets in GENERAL.md)
-      → plain text → one-off chat (coder.Coder with read+write KB tools + the workspace's connector tools; see "Chat knowledge-base access" + "Chat connector access")
+      → plain text → a saved chat, opened on demand (coder.Coder with read+write KB tools + the workspace's connector tools; see "Chat knowledge-base access" + "Chat connector access")
 ```
 
 **A workspace is bound to its BOT, never to the person's chat account.** `dispatch`
@@ -1327,7 +1327,36 @@ your first agent"**. Four things are load-bearing:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
-**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
+**Chat apps have no one-off path: every plain message belongs to a saved chat.** It used to be
+that a Telegram/Discord/Slack message with no `/chat start` behind it was answered with no history
+and stored nowhere, so the next message had no idea what the previous one said — while every web
+message has always belonged to a chat. `Router.conversationFor` now returns the live chat for
+(workspace, platform) or opens one named `chat.DefaultName` (the shape the auto-titler
+recognises, which `/chat start` with no name now uses too — an empty name was never titled).
+Four things are load-bearing:
+
+- **`chats.ended_reason` (migration 022) exists because the stop reason cannot be inferred.**
+  The next reply after an inactivity ending opens with *"your previous chat X ended… /chat resume
+  <id>"*, and that must not fire for a chat the owner stopped with `/chat stop` (they already got a
+  confirmation). `last_seen` cannot tell "went quiet" from "stopped, came back two hours later", so
+  `db.StopChat` records `user`, `db.StopIdleChat` records `idle`, `ResumeChat` clears it. Opening
+  the new chat makes it the latest on the platform, which is what limits the notice to once; an
+  empty idle chat is not announced.
+- **Idle is checked when a message ARRIVES, not only by the sweeper.** The sweeper polls once a
+  minute, so a message at 30m30s would otherwise land in a chat about to end. Both go through
+  `chat.EndIdleChat`, so a chat ended either way is stopped and reflected into the vault the same.
+- **The notice is prepended to the delivered reply and never stored.** It is about the
+  conversation, not part of it; storing it would feed it back as a prior turn.
+- **`/chat resume` MOVES the chat to the current platform** (`ResumeChatOnPlatform`). The live chat
+  is looked up by platform, so resuming a web chat from Telegram without moving it left it invisible
+  there and the next message silently opened a new chat.
+
+The user message is stored before the turn runs (web parity: a failed turn keeps it). `/start` is
+dispatched before any of this and never opens a chat — `TestStartCommandOpensNoChat` pins it.
+Known edge: the default coder timeout is also 30 minutes, so a turn longer than the idle window can
+be swept mid-turn; its reply lands in the stopped chat and the next message announces it.
+
+**Chat connector access.** Chat (both web `handleChatMessage` and the chat apps) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
 
 **Chat must never show the output-protocol markers, and the prompt gate alone does not
 guarantee it.** `[CHAT]`, `[/CHAT]`, `[SILENT]` and `[STATE]` blocks belong to an agent RUN,

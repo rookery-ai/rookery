@@ -30,8 +30,9 @@ import (
 // cap (web/api_kb.go's maxUploadBytes) so the two doors behave identically.
 const maxAttachmentBytes = 25 << 20
 
-// TextHandler is called for non-command messages (one-off chat or within a chat).
-// history contains prior turns when an active chat is present; empty for stateless chat.
+// TextHandler is called for non-command messages. Every such message belongs to
+// a saved chat (there is no one-off path); history holds that chat's prior
+// turns and is empty on a chat's first message.
 type TextHandler func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error
 
 // AgentRunHandler is called when /run <name> is issued.
@@ -67,6 +68,11 @@ type Router struct {
 	challenges         map[string]*secretChallenge // workspaceID → pending master-password challenge
 	pendingCancel      map[string]cancelKind       // workspaceID → which flow is waiting for a save/discard reply
 	pendingReminderMsg map[string]string           // workspaceID → reminder message waiting for a "when" reply
+
+	// chatMu serialises "find the live chat, or end the idle one and open a
+	// new one", so two messages arriving together cannot open two chats. It
+	// never covers the coder call.
+	chatMu sync.Mutex
 }
 
 // cancelKind records WHICH design flow asked for a save/discard choice, so the
@@ -1167,18 +1173,32 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		return nil
 	}
 
-	// Look up an active chat for this user+platform and load its history.
-	var history []db.ChatMessage
-	var activeChat *db.Chat
-	if c, err := r.db.GetActiveChatForPlatform(msg.WorkspaceID, msg.Platform); err == nil && c != nil {
-		activeChat = c
-		history, _ = r.db.ListChatMessages(c.ID)
+	// Every message belongs to a saved chat, as on the web: the live one, or a
+	// new one when there is none or the last went quiet.
+	activeChat, notice, err := r.conversationFor(msg)
+	if err != nil {
+		return fmt.Errorf("open chat: %w", err)
 	}
 
+	// History is read BEFORE this message is stored, or the turn would see its
+	// own text twice — once as a prior turn and once as the message.
+	history, _ := r.db.ListChatMessages(activeChat.ID)
+
+	// Stored before the turn runs, matching the web: a turn that fails keeps
+	// the owner's message, which is the retry's context.
+	_ = r.db.AddChatMessage(activeChat.ID, "user", msg.Text)
+	_ = r.db.TouchChat(activeChat.ID)
+
 	// Intercept send so we can capture the assistant reply for chat storage.
+	// The "previous chat ended" notice rides on the FIRST delivered message and
+	// is never stored — it is about the conversation, not part of it.
 	var assistantReply string
 	wrappedSend := func(text string) {
 		assistantReply = text
+		if notice != "" {
+			text = notice + "\n\n" + text
+			notice = ""
+		}
 		send(text)
 	}
 
@@ -1186,14 +1206,78 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		return err
 	}
 
-	// Persist messages and touch the chat.
-	if activeChat != nil && assistantReply != "" {
-		_ = r.db.AddChatMessage(activeChat.ID, "user", msg.Text)
+	if assistantReply != "" {
 		_ = r.db.AddChatMessage(activeChat.ID, "assistant", assistantReply)
 		_ = r.db.TouchChat(activeChat.ID)
 		chat.MaybeAutoTitle(r.db, r.titleGen, activeChat, msg.Text, assistantReply)
 	}
 	return nil
+}
+
+// conversationFor returns the chat this message belongs to, opening one when
+// needed, plus a notice to show when the previous chat ended from inactivity
+// ("" otherwise).
+//
+// The idle timeout is checked HERE as well as in the once-a-minute sweeper, so
+// a message at 30m30s starts a new chat rather than landing in one the sweeper
+// has not reached yet. Only an IDLE ending is announced: a chat stopped with
+// /chat stop already got its confirmation. Opening the new chat makes it the
+// latest on this platform, which is what keeps the notice to exactly one.
+func (r *Router) conversationFor(msg Message) (*db.Chat, string, error) {
+	r.chatMu.Lock()
+	defer r.chatMu.Unlock()
+
+	var previous *db.Chat
+	cur, err := r.db.GetActiveChatForPlatform(msg.WorkspaceID, msg.Platform)
+	if err != nil {
+		return nil, "", err
+	}
+	if cur != nil {
+		if time.Since(cur.LastSeen) < chat.IdleTimeout {
+			return cur, "", nil
+		}
+		var reflector *vault.Reflector
+		if r.vault != nil {
+			reflector = r.vault.Reflector()
+		}
+		if err := chat.EndIdleChat(r.db, reflector, cur); err != nil {
+			return nil, "", err
+		}
+		previous = cur
+	} else if last, err := r.db.GetLatestChatForPlatform(msg.WorkspaceID, msg.Platform); err == nil && last != nil && last.EndedReason == db.ChatEndedIdle {
+		previous = last
+	}
+
+	c := &db.Chat{
+		ID:          uuid.New().String(),
+		WorkspaceID: msg.WorkspaceID,
+		Name:        chat.DefaultName(time.Now().In(profile.LoadLocation(r.db, msg.WorkspaceID))),
+		Platform:    msg.Platform,
+		Active:      true,
+	}
+	if err := r.db.CreateChat(c); err != nil {
+		return nil, "", err
+	}
+
+	notice := ""
+	if previous != nil {
+		// An empty chat (a turn that never got a reply stored) is not worth
+		// announcing — there is nothing to go back to.
+		if msgs, _ := r.db.ListChatMessages(previous.ID); len(msgs) > 0 {
+			notice = fmt.Sprintf("💬 Your previous chat **%s** ended after %d minutes of inactivity, so this is a new one. Send /chat resume %s to go back to it.",
+				chatLabel(previous), int(chat.IdleTimeout/time.Minute), previous.ID[:8])
+		}
+	}
+	return c, notice, nil
+}
+
+// chatLabel is how a chat is named in chat-app replies: its name, or the short
+// id when it has none.
+func chatLabel(c *db.Chat) string {
+	if strings.TrimSpace(c.Name) != "" {
+		return c.Name
+	}
+	return c.ID[:8]
 }
 
 func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send func(string)) error {
@@ -1213,21 +1297,23 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 		if cur, err := r.db.GetActiveChatForPlatform(msg.WorkspaceID, msg.Platform); err == nil && cur != nil {
 			_ = r.db.StopChat(cur.ID)
 		}
+		// An unnamed chat gets the default name so it is auto-titled from its
+		// first exchange — an empty name is never matched by the auto-titler.
+		name := rest
+		if name == "" {
+			name = chat.DefaultName(time.Now().In(profile.LoadLocation(r.db, msg.WorkspaceID)))
+		}
 		c := &db.Chat{
 			ID:          uuid.New().String(),
 			WorkspaceID: msg.WorkspaceID,
-			Name:        rest,
+			Name:        name,
 			Platform:    msg.Platform,
 			Active:      true,
 		}
 		if err := r.db.CreateChat(c); err != nil {
 			return fmt.Errorf("create chat: %w", err)
 		}
-		label := rest
-		if label == "" {
-			label = c.ID[:8]
-		}
-		send(fmt.Sprintf("💬 Chat **%s** started (`%s`). Send /chat stop to end it.", label, c.ID[:8]))
+		send(fmt.Sprintf("💬 New chat **%s** started (`%s`). Just keep talking — everything you send is part of it.", chatLabel(c), c.ID[:8]))
 
 	case "list":
 		chats, err := r.db.ListChats(msg.WorkspaceID)
@@ -1261,13 +1347,9 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 	case "stop":
 		if cur, err := r.db.GetActiveChatForPlatform(msg.WorkspaceID, msg.Platform); err == nil && cur != nil {
 			_ = r.db.StopChat(cur.ID)
-			label := cur.Name
-			if label == "" {
-				label = cur.ID[:8]
-			}
-			send(fmt.Sprintf("Chat **%s** stopped.", label))
+			send(fmt.Sprintf("Chat **%s** stopped. Your next message starts a new chat.", chatLabel(cur)))
 		} else {
-			send("No active chat to stop.")
+			send("No active chat to stop — your next message starts a new one.")
 		}
 
 	case "resume":
@@ -1284,7 +1366,7 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 		if cur, err := r.db.GetActiveChatForPlatform(msg.WorkspaceID, msg.Platform); err == nil && cur != nil && cur.ID != c.ID {
 			_ = r.db.StopChat(cur.ID)
 		}
-		if err := r.db.ResumeChat(c.ID); err != nil {
+		if err := r.db.ResumeChatOnPlatform(c.ID, msg.Platform); err != nil {
 			return fmt.Errorf("resume chat: %w", err)
 		}
 		label := c.Name

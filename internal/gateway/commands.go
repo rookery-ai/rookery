@@ -102,12 +102,12 @@ var Commands = []Command{
 	},
 	{
 		Name:        "chat",
-		Description: "Start, resume and manage saved chats",
+		Description: "Start a new chat, or resume and manage saved ones",
 		UsageHint:   "start [name] | list | stop | resume <id> | delete <id>",
 		Help: []HelpLine{
-			{"start [name]", "start a chat (saves history)"},
+			{"start [name]", "start a new chat now (otherwise one starts after 30 min of silence)"},
 			{"list", "list all chats with IDs"},
-			{"stop", "stop current chat"},
+			{"stop", "end the current chat"},
 			{"resume <id>", "resume a previous chat"},
 			{"delete <id>", "delete a chat and its history"},
 		},

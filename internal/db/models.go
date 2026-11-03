@@ -170,6 +170,9 @@ type Chat struct {
 	Active      bool
 	CreatedAt   time.Time
 	LastSeen    time.Time
+	// EndedReason is why an inactive chat stopped: ChatEndedIdle,
+	// ChatEndedByUser, or "" (active, or stopped before the column existed).
+	EndedReason string
 }
 
 type ChatMessage struct {
