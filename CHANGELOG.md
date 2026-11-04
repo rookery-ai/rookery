@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/rookery-ai/rookery/compare/v0.20.2...v0.21.0) (2026-11-04)
+
+
+### Features
+
+* **gateway:** chat apps open saved chats instead of one-off turns ([#404](https://github.com/rookery-ai/rookery/issues/404)) ([3e68eff](https://github.com/rookery-ai/rookery/commit/3e68eff4fcc4474d429b92981cbaa182c6b3758c))
+
+
+### Bug Fixes
+
+* **browser:** resilient form filling with secret-safe typing ([#406](https://github.com/rookery-ai/rookery/issues/406)) ([3b6958c](https://github.com/rookery-ai/rookery/commit/3b6958c3741fca16a2b31cbe8e1b56714edeb77b))
+
 ## [0.20.2](https://github.com/rookery-ai/rookery/compare/v0.20.1...v0.20.2) (2026-11-02)
 
 
