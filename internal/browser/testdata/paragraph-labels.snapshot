@@ -1,0 +1,12 @@
+- generic [ref=f3e239]:
+  - generic [ref=f3e241]:
+    - heading "Payment confirmation" [level=2] [ref=f3e244]
+    - button "close" [ref=f3e249] [cursor=pointer]
+  - generic [ref=f3e254]:
+    - paragraph [ref=f3e255]: Enter an e-mail for the payment confirmation *
+    - textbox [ref=f3e260]: user@example.com
+    - paragraph [ref=f3e261]: Enter a phone number for SMS confirmation
+    - generic [ref=f3e262]:
+      - spinbutton [ref=f3e279]
+    - paragraph [ref=f3e280]: "* The e-mail is required to continue"
+    - button "Continue to payment" [ref=f3e282] [cursor=pointer]

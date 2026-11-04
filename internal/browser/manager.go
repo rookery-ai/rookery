@@ -130,15 +130,16 @@ func (m *Manager) RenderHTML(ctx context.Context, url string) (string, error) {
 // Act performs one acting verb in an open session.
 func (m *Manager) Act(ctx context.Context, req ActRequest) (Result, error) {
 	facts, err := m.post(ctx, "/act", actReq{
-		Session:   req.Session,
-		Action:    req.Action,
-		Ref:       req.Ref,
-		Value:     req.Value,
-		Key:       req.Key,
-		WaitFor:   req.WaitFor,
-		TimeoutMS: req.TimeoutMS,
-		Elements:  true,
-		Secret:    req.ValueIsSecret,
+		Session:     req.Session,
+		Action:      req.Action,
+		Ref:         req.Ref,
+		Value:       req.Value,
+		Key:         req.Key,
+		WaitFor:     req.WaitFor,
+		TimeoutMS:   req.TimeoutMS,
+		Elements:    true,
+		Secret:      req.ValueIsSecret,
+		SecretLabel: req.SecretLabel,
 	})
 	if err != nil {
 		return Result{}, err
@@ -161,6 +162,10 @@ type ActRequest struct {
 	// from this session. Set by the caller that resolved the placeholder, since
 	// the helper has no database and cannot recognise a secret on its own.
 	ValueIsSecret bool
+	// SecretLabel is the placeholder text the model wrote, e.g. "${CARD}". The
+	// helper shows it instead of the value — in the filled field's note, in a
+	// dropdown choice, and in the fixed error a failed secret fill returns.
+	SecretLabel string
 }
 
 // ContextCount reports how many browser contexts the helper currently holds.
@@ -215,6 +220,9 @@ func (m *Manager) WaitFor(ctx context.Context, session, condition string, total 
 		total = MaxWaitFor
 	}
 	deadline := time.Now().Add(total)
+	if condition == WaitChange {
+		return m.waitForChange(ctx, session, deadline)
+	}
 	var last Result
 	for {
 		remaining := time.Until(deadline)
@@ -247,6 +255,58 @@ func (m *Manager) WaitFor(ctx context.Context, session, condition string, total 
 			return last, false, err
 		}
 	}
+}
+
+// WaitChange waits for the page itself to change — its address, title or controls.
+//
+// It exists for the wait that depends on someone else, such as an approval in a
+// phone app. "networkidle" is what a model reaches for, and an idle page is
+// exactly what a page waiting on a phone looks like, so that wait returns at
+// once, every time. What the approval actually produces is the page moving on.
+const WaitChange = "change"
+
+// changePoll is how often waitForChange re-reads the page.
+const changePoll = 3 * time.Second
+
+func (m *Manager) waitForChange(ctx context.Context, session string, deadline time.Time) (Result, bool, error) {
+	base, err := m.Act(ctx, ActRequest{Session: session, Action: ActionRead})
+	if err != nil {
+		return base, false, err
+	}
+	// Address, title and the set of controls — NOT the raw text: payment
+	// confirmation pages commonly run a countdown ("time remaining 4:59"), which
+	// would end the wait within a second, every time.
+	sig := func(r Result) string {
+		var b strings.Builder
+		b.WriteString(r.FinalURL + "\x00" + r.Title)
+		for _, e := range r.Elements {
+			b.WriteString("\x00" + e.Role + ":" + e.Name)
+		}
+		return b.String()
+	}
+	want := sig(base)
+	last := base
+	for time.Now().Before(deadline) {
+		t := time.NewTimer(min(changePoll, time.Until(deadline)))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return last, false, ctx.Err()
+		case <-t.C:
+		}
+		res, err := m.Act(ctx, ActRequest{Session: session, Action: ActionRead})
+		if err != nil {
+			if isFatalWaitErr(err) {
+				return last, false, err
+			}
+			continue
+		}
+		last = res
+		if sig(res) != want {
+			return res, true, nil
+		}
+	}
+	return last, false, nil
 }
 
 // isFatalWaitErr separates "the condition has not appeared yet" from "there is
@@ -288,6 +348,7 @@ func resultFrom(f PageFacts, offset, limit int) Result {
 		Blocked:     kind,
 		BlockedNote: note,
 		Elements:    els,
+		ActNote:     f.ActNote,
 	}
 	if f.Note != "" && r.BlockedNote == "" {
 		r.BlockedNote = f.Note

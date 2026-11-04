@@ -83,6 +83,8 @@ type Result struct {
 	// Elements is the interactive-element list used by the acting tools. It is
 	// empty for a plain read.
 	Elements []Element
+	// ActNote is the acting call's own report — see PageFacts.ActNote.
+	ActNote string
 }
 
 // Element is one interactive control, addressed by the ref Playwright's

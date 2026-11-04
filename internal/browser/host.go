@@ -54,10 +54,52 @@ type hostSession struct {
 	ctx      playwright.BrowserContext
 	page     playwright.Page
 	lastUsed time.Time
-	// secretValues are the resolved secret strings typed into this session's
-	// pages. They are held ONLY to redact them back out of results — see
-	// redact. They are never logged and never returned.
-	secretValues []string
+	// red holds the resolved secret strings typed into this session's pages.
+	// They are held ONLY to redact them back out of results — see redactor.
+	// They are never logged and never returned.
+	red redactor
+	// secretRefs maps a ref the helper filled from a secret to the placeholder
+	// the model wrote (${CARD_NUMBER}). See labelSecretFields.
+	secretRefs map[string]string
+
+	// opMu serialises every operation on this session's page. A CLI coder can
+	// issue calls concurrently, and secretRefs is a plain map written while
+	// acting and read while collecting: two writes at once are a fatal Go
+	// runtime error, which would kill the helper and the logged-in page with it.
+	// One page cannot usefully do two things at once anyway.
+	opMu sync.Mutex
+
+	// navMu guards navFail, which the page's request-failed callback writes
+	// from Playwright's event goroutine.
+	navMu   sync.Mutex
+	navFail string
+}
+
+// noteNavFailure records a failed main-frame navigation. A redirect that fails
+// leaves the page on chrome-error:// with no text, so without this the model sees
+// a blank page with no address and no reason.
+func (s *hostSession) noteNavFailure(r playwright.Request) {
+	if !r.IsNavigationRequest() {
+		return
+	}
+	if f := r.Frame(); f == nil || f.ParentFrame() != nil {
+		return
+	}
+	reason := "unknown error"
+	if fe := r.Failure(); fe != nil {
+		reason = fe.Error()
+	}
+	s.navMu.Lock()
+	s.navFail = fmt.Sprintf("the page failed to load %s (%s) — you can retry with browser_open on that URL", r.URL(), reason)
+	s.navMu.Unlock()
+}
+
+func (s *hostSession) takeNavFailure() string {
+	s.navMu.Lock()
+	defer s.navMu.Unlock()
+	f := s.navFail
+	s.navFail = ""
+	return f
 }
 
 type browserHost struct {
@@ -177,6 +219,8 @@ func (h *browserHost) handleRender(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	sess.opMu.Lock()
+	defer sess.opMu.Unlock()
 	// An ephemeral context (no session key) belongs to this call alone and must
 	// be closed here. It is never stored in h.sess, so reapIdle cannot see it —
 	// without this every browser_read leaks a Chromium context for as long as the
@@ -251,6 +295,7 @@ func (h *browserHost) session(key string) (*hostSession, error) {
 		return nil, fmt.Errorf("new page: %w", err)
 	}
 	s := &hostSession{ctx: bctx, page: page, lastUsed: time.Now()}
+	page.OnRequestFailed(s.noteNavFailure)
 	if key != "" {
 		h.sess[key] = s
 	}
@@ -323,6 +368,7 @@ func (h *browserHost) collect(s *hostSession, resp playwright.Response, o collec
 			Mode: playwright.AriaSnapshotModeAi,
 		}); err == nil {
 			f.Elements = ParseAriaSnapshot(snap)
+			s.labelSecretFields(f.Elements)
 		}
 	}
 
@@ -332,7 +378,19 @@ func (h *browserHost) collect(s *hostSession, resp playwright.Response, o collec
 		}
 	}
 
+	// Two conditions the model cannot see from the page itself: a modal that
+	// hides the names of everything behind it, and a navigation that failed and
+	// left a blank error page.
+	f.Note = joinNotes(f.Note, openDialogNote(s.page))
+	if nav := s.takeNavFailure(); nav != "" || strings.HasPrefix(f.FinalURL, "chrome-error://") {
+		if nav == "" {
+			nav = "the last navigation failed and the browser is showing an error page — re-open the address you were going to"
+		}
+		f.Note = joinNotes(f.Note, nav)
+	}
+
 	f.Title = s.redact(f.Title)
+	f.Note = s.redact(f.Note)
 	f.Text = s.redact(f.Text)
 	f.FinalURL = s.redact(f.FinalURL)
 	for i := range f.Elements {
@@ -349,34 +407,12 @@ func (h *browserHost) collect(s *hostSession, resp playwright.Response, o collec
 // own text, a field's rendered value in the element list, the final URL (a GET
 // form puts it in the query string) and Playwright's error messages, several of
 // which quote the value that failed to match.
-func (s *hostSession) redact(in string) string {
-	if in == "" {
-		return in
-	}
-	out := in
-	for _, v := range s.secretValues {
-		if len(v) < 3 {
-			// Refuse to redact a very short value: it would match unrelated
-			// substrings across the whole page and hand back mangled text that
-			// reads as a rendering fault.
-			continue
-		}
-		out = strings.ReplaceAll(out, v, "[redacted]")
-	}
-	return out
-}
+//
+// Matching is separator-tolerant and mask-aware — see redactor for why exact
+// matching leaked.
+func (s *hostSession) redact(in string) string { return s.red.apply(in) }
 
-func (s *hostSession) rememberSecret(v string) {
-	if v == "" {
-		return
-	}
-	for _, existing := range s.secretValues {
-		if existing == v {
-			return
-		}
-	}
-	s.secretValues = append(s.secretValues, v)
-}
+func (s *hostSession) rememberSecret(v string) { s.red.remember(v) }
 
 func waitUntil(waitFor string) *playwright.WaitUntilState {
 	switch {

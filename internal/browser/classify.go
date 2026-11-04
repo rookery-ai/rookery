@@ -22,6 +22,10 @@ type PageFacts struct {
 	// Note carries a non-fatal caveat, e.g. a wait condition that timed out
 	// while the page still rendered something worth returning.
 	Note string `json:"note,omitempty"`
+	// ActNote is what the last action reported about itself: a fill's verdict
+	// ("fill: matched") or why it was not taken ("ref e4 is covered by …").
+	// Never a field's value.
+	ActNote string `json:"act_note,omitempty"`
 	// Error is set when the page could not be produced at all. It is carried in
 	// the body rather than as an HTTP status because a navigation failure is
 	// DATA the model should see and react to, not a transport fault.
@@ -163,21 +167,37 @@ var interactiveRoles = map[string]bool{
 }
 
 // FilterInteractive keeps the elements a model can act on and drops the rest.
-// An element with no accessible name is dropped even when its role qualifies:
-// the model chooses by name, and "button (no name)" is not a choice it can make
-// sensibly — it would be picking blind.
+//
+// An unnamed BUTTON or LINK is still dropped: the model chooses by name, and
+// "button (no name)" is not a choice it can make sensibly. An unnamed FIELD is
+// kept, as "(unlabelled <role>)": hiding it was worse, because the form still
+// needs it filled and the model then hunts for it with Tab — or, in one real
+// run, typed an email address into the only control that carried the label's
+// wording, which was a button.
 func FilterInteractive(in []Element) []Element {
 	out := make([]Element, 0, len(in))
 	for _, e := range in {
-		if !interactiveRoles[strings.ToLower(e.Role)] {
+		role := strings.ToLower(e.Role)
+		if !interactiveRoles[role] {
 			continue
 		}
 		if strings.TrimSpace(e.Name) == "" {
-			continue
+			if !keptWhenUnnamed[role] {
+				continue
+			}
+			e.Name = "(unlabelled " + role + ")"
+			e.Note = joinNote("no visible label", e.Note)
 		}
 		out = append(out, e)
 	}
 	return out
+}
+
+// keptWhenUnnamed are the roles a form needs operated whether or not the page
+// labelled them.
+var keptWhenUnnamed = map[string]bool{
+	"textbox": true, "searchbox": true, "textarea": true, "combobox": true,
+	"spinbutton": true, "checkbox": true, "radio": true, "switch": true, "slider": true,
 }
 
 // RenderElements formats the interactive list for a tool result, capping it and

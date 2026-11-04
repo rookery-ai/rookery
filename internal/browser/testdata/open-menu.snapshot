@@ -1,0 +1,29 @@
+- generic [ref=f5e40]:
+  - button "Month" [active] [ref=f5e43] [cursor=pointer]
+  - menu [ref=f5e45]:
+    - listitem [ref=f5e46]:
+      - generic [ref=f5e47]: "01"
+    - listitem [ref=f5e48]:
+      - generic [ref=f5e49]: "02"
+    - listitem [ref=f5e50]:
+      - generic [ref=f5e51]: "03"
+    - listitem [ref=f5e52]:
+      - generic [ref=f5e53]: "04"
+    - listitem [ref=f5e54]:
+      - generic [ref=f5e55]: "05"
+    - listitem [ref=f5e56]:
+      - generic [ref=f5e57]: "06"
+    - listitem [ref=f5e58]:
+      - generic [ref=f5e59]: "07"
+    - listitem [ref=f5e60]:
+      - generic [ref=f5e61]: "08"
+    - listitem [ref=f5e62]:
+      - generic [ref=f5e63]: "09"
+    - listitem [ref=f5e64]:
+      - generic [ref=f5e65]: "10"
+    - listitem [ref=f5e66]:
+      - generic [ref=f5e67]: "11"
+    - listitem [ref=f5e68]:
+      - generic [ref=f5e69]: "12"
+  - button "Year" [ref=f5e70] [cursor=pointer]
+- button "Confirm" [ref=f5e90] [cursor=pointer]
