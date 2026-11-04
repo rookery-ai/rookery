@@ -1,0 +1,6 @@
+- generic [ref=f3e151]:
+  - generic [ref=f3e153]:
+    - generic [ref=f3e154]: "Selected items:"
+    - generic [ref=f3e155]: "0"
+  - button [ref=f3e160] [cursor=pointer]:
+    - generic [ref=f3e161]: Submit order

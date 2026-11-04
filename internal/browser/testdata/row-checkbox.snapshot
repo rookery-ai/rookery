@@ -1,0 +1,16 @@
+- table [ref=f2e66]:
+  - rowgroup [ref=f2e67]:
+    - row [ref=f2e68]:
+      - columnheader "Pay" [ref=f2e69]
+      - columnheader "Description" [ref=f2e70]
+      - columnheader "Status" [ref=f2e71]
+      - columnheader "Number" [ref=f2e72]
+      - columnheader "Due" [ref=f2e79]
+    - row [ref=f2e80]:
+      - cell [ref=f2e81]:
+        - checkbox [disabled] [ref=f2e83]
+      - cell "Invoice" [ref=f2e84]
+      - cell "Open" [ref=f2e85]
+      - cell "1000000001" [ref=f2e86]
+      - cell "120.00" [ref=f2e91]
+- button "Continue to payment" [ref=f2e101] [cursor=pointer]

@@ -52,6 +52,21 @@ type hostToolSet struct {
 	// (browserMilestone). Replaced wholesale on each listing: refs are per-page.
 	refNames map[string]string
 
+	// lastElemSig and lastTextSig fingerprint the most recent browser listing,
+	// so an act that changed nothing is answered with "unchanged" instead of the
+	// same full listing again (renderActResult).
+	lastElemSig, lastTextSig string
+	// pressKey and pressStreak count identical consecutive browser_press calls
+	// (notePress).
+	pressKey    string
+	pressStreak int
+	// browserRedact holds every secret value this toolset typed into a page,
+	// to redact it from browser results before the model sees them.
+	browserRedact browser.Redactor
+	// lastNotifyAt is when browser_wait last sent the owner a mid-run notice
+	// (recentlyNotified throttles repeats).
+	lastNotifyAt time.Time
+
 	workspaceID   string
 	vlt           *vault.Vault
 	workDir       string            // agent dir (runs) or vault root (chat); CWD for run_script

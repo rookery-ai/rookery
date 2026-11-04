@@ -47,6 +47,30 @@ type bridgeSession struct {
 	// creates.
 	contextKey string
 	policy     Policy
+	// red is the host-side redaction layer for this run — the same second layer
+	// the API engine applies in internal/coder. Guarded by mu: a CLI coder may
+	// issue calls concurrently.
+	mu  sync.Mutex
+	red redactor
+}
+
+// redactResult applies the session's redaction to everything a result carries
+// back to the CLI coder.
+func (s *bridgeSession) redactResult(r Result) Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r.Text = s.red.apply(r.Text)
+	r.Title = s.red.apply(r.Title)
+	r.FinalURL = s.red.apply(r.FinalURL)
+	r.BlockedNote = s.red.apply(r.BlockedNote)
+	r.ActNote = s.red.apply(r.ActNote)
+	els := make([]Element, len(r.Elements))
+	for i, e := range r.Elements {
+		e.Name, e.Note = s.red.apply(e.Name), s.red.apply(e.Note)
+		els[i] = e
+	}
+	r.Elements = els
+	return r
 }
 
 func NewBridge(mgr *Manager, resolve SecretResolver) *Bridge {
@@ -142,7 +166,7 @@ func (b *Bridge) handleRead(ctx context.Context, sess *bridgeSession, p map[stri
 	if err != nil {
 		return nil, err
 	}
-	return res, nil
+	return sess.redactResult(res), nil
 }
 
 func (b *Bridge) handleAct(ctx context.Context, sess *bridgeSession, p map[string]any) (any, error) {
@@ -168,11 +192,20 @@ func (b *Bridge) handleAct(ctx context.Context, sess *bridgeSession, p map[strin
 		return nil, err
 	}
 
-	value, isSecret, err := ResolveSecretValue(ctx, b.resolve, sess.workspaceID, str(p, "value"))
+	raw := str(p, "value")
+	value, isSecret, err := ResolveSecretValue(ctx, b.resolve, sess.workspaceID, raw)
 	if err != nil {
 		return nil, err
 	}
-	return b.mgr.Act(ctx, ActRequest{
+	label := ""
+	if isSecret {
+		label = raw // the placeholder text, never the value
+		sess.mu.Lock()
+		sess.red.remember(value)
+		sess.mu.Unlock()
+	}
+	res, err := b.mgr.Act(ctx, ActRequest{
+		SecretLabel:   label,
 		Session:       sess.contextKey,
 		Action:        action,
 		Ref:           ref,
@@ -181,6 +214,12 @@ func (b *Bridge) handleAct(ctx context.Context, sess *bridgeSession, p map[strin
 		WaitFor:       str(p, "wait_for"),
 		ValueIsSecret: isSecret,
 	})
+	if err != nil {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return nil, fmt.Errorf("%s", sess.red.apply(err.Error()))
+	}
+	return sess.redactResult(res), nil
 }
 
 // currentElementName reads the LIVE page to find what a ref currently points

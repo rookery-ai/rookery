@@ -1,0 +1,18 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - text: Holder
+    - textbox "Holder" [ref=e3]:
+      - /placeholder: Name on card
+      - text: TEST HOLDER
+  - generic [ref=e4]:
+    - text: Plain
+    - textbox "Plain" [active] [ref=e5]: plain value
+  - generic [ref=e6]:
+    - text: Next
+    - textbox "Next" [ref=e7]:
+      - /placeholder: MM/YY
+  - generic [ref=e8]:
+    - textbox [ref=e9]:
+      - /placeholder: Amount
+      - text: "250"
+    - textbox [ref=e10]

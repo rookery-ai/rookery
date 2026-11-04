@@ -23,7 +23,19 @@ func (h *hostToolSet) execBrowserWait(ctx context.Context, session string, a bro
 	}
 
 	notified := ""
-	if msg := strings.TrimSpace(a.Notify); msg != "" {
+	condition := a.WaitFor
+	if msg := strings.TrimSpace(a.Notify); msg != "" && isLoadState(condition) {
+		// A wait that needs the USER (an approval on their phone) cannot be answered by
+		// "is the page quiet?": a page waiting on a phone IS quiet, so the wait
+		// returned at once and the model waited — and notified — again. Wait
+		// for the page to move on instead.
+		condition = browser.WaitChange
+	}
+	if msg := strings.TrimSpace(a.Notify); msg != "" && h.recentlyNotified() {
+		// Once is the message; repeating it every few seconds is spam, and it
+		// tells the user nothing new.
+		notified = "\n(the user was already told a moment ago — not sent again; do not repeat it)"
+	} else if msg != "" {
 		if h.notifyUser == nil {
 			// Say so rather than swallowing it. A model told its message was sent
 			// will not repeat it at the end of the run, and the user would then
@@ -31,6 +43,7 @@ func (h *hostToolSet) execBrowserWait(ctx context.Context, session string, a bro
 			notified = "\n(could not notify the user on this surface — say what you were waiting for in your final message instead)"
 		} else {
 			h.notifyUser(msg)
+			h.lastNotifyAt = time.Now()
 			notified = "\n(the user has been told: " + msg + ")"
 		}
 	}
@@ -44,10 +57,16 @@ func (h *hostToolSet) execBrowserWait(ctx context.Context, session string, a bro
 		}, "", browser.PageContext{}) + notified
 	}
 
-	res, matched, err := waiter.WaitFor(ctx, session, a.WaitFor,
+	res, matched, err := waiter.WaitFor(ctx, session, condition,
 		time.Duration(a.TimeoutMS)*time.Millisecond)
 	if err != nil {
 		return browserErrorResult(err)
+	}
+	if !matched && condition == browser.WaitChange {
+		return "the page did not change while you waited." + notified +
+			"\nIf no approval reached the user, the bank is probably waiting for something ON the page: a button that " +
+			"sends the notification, a choice of method, or a code field. Read the page (browser_page) and look for one " +
+			"before waiting again — and do not send the user another notice."
 	}
 	if !matched {
 		// NOT an "error:" — a wait that ends without the thing happening is a
@@ -59,6 +78,23 @@ func (h *hostToolSet) execBrowserWait(ctx context.Context, session string, a bro
 	}
 	h.rememberRefs(res.Elements)
 	return renderBrowserResult(res, true) + notified
+}
+
+// notifyInterval is the minimum gap between two mid-run notices.
+const notifyInterval = 5 * time.Minute
+
+func (h *hostToolSet) recentlyNotified() bool {
+	return !h.lastNotifyAt.IsZero() && time.Since(h.lastNotifyAt) < notifyInterval
+}
+
+// isLoadState reports whether a wait condition only asks whether the page has
+// finished loading — which says nothing about something happening elsewhere.
+func isLoadState(c string) bool {
+	switch strings.TrimSpace(c) {
+	case "", "load", "domcontentloaded", "networkidle", "commit":
+		return true
+	}
+	return false
 }
 
 // browserWaiter is the polling wait, kept as its own interface so the narrow

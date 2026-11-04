@@ -198,7 +198,10 @@ func TestParseAriaSnapshotInfersNamesNarrowly(t *testing.T) {
 		if e.Ref == "e1" {
 			t.Errorf("an unnamed BUTTON borrowed a name: %+v", e)
 		}
-		if e.Ref == "e3" {
+		// An unlabelled field is now LISTED (as "(unlabelled textbox)") rather
+		// than hidden; what must still hold is that it does not borrow text a
+		// control sits between.
+		if e.Ref == "e3" && e.Name == "Notes" {
 			t.Errorf("text separated from the field by another control was used as its label: %+v", e)
 		}
 		if e.Ref == "e4" && e.Name != "Email" {

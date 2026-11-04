@@ -3040,7 +3040,17 @@ parser would only prove it agrees with itself.
 **`browser_fill` on a `<select>` chooses an option, because nothing else could.** Playwright's `Fill` rejects a select, and pressing keys one tool call at a time cannot drive the browser's type-ahead — the calls are seconds apart — so a real checkout run pressed `ArrowDown` 105 times on a country field and gave up, while a weaker run abandoned the browser for the shop's API. The helper now detects a `<select>` and resolves the model's text with `matchOption` (exact label, exact value, case-insensitive label, then a UNIQUE substring), selecting by value so the page's `change` event fires as a user's choice does. An ambiguous or missing match is an error listing the options, bounded in size: silently picking "United States Minor Outlying Islands" for "United States" on a checkout form is worse than an error the model can correct. Not a new tool, deliberately — the model already writes "Portugal" into a field; a separate select tool is one more choice for a weak model to get wrong.
 **An unnamed form field borrows the visible text directly before it as its name** (`inferFieldName`, `parse.go`). `FilterInteractive` drops controls with no accessible name, which is right for a button and wrong for an input whose `<label>` simply is not linked to it — a common markup mistake. demoblaze.com's login (`label for="log-name"` on `id="loginusername"`) made both fields vanish from the agent's view; a run clicked "Log in" 24 times and pressed Tab ~100 times looking for them. It is narrow on purpose: field roles only, text with no other control in between (wrapper lines like `generic` do not break the association), and the element's note says the name was inferred.
 
+**"Text before it" means any static text, and some names come from the structure around a control** (`ParseAriaSnapshot` now tracks indentation; `nameFromSurroundings`). Three common form shapes lost controls the parser could see: fields labelled with `paragraph` nodes, which the `text:`-only inference ignored; a checkbox in a table row whose meaning is the cells AFTER it; and a scripted picker whose open menu is `listitem > generic "01"`, neither an interactive role, so every option was filtered out. A model that cannot see a control walks the page with Tab or arrow keys, or types into the wrong one. Now `paragraph`/`heading`/`cell`/`generic`… text counts as a label; a `/placeholder:` property names a nameless field and is noted as a format hint (`placeholder MM/YY`) on every field; an unnamed checkbox/radio in a `row` is named from the row's other cells; an unnamed button takes its child text (what a page behind an open modal looks like); text items under an open `menu`/`listbox` are listed as `option`; and `FilterInteractive` keeps an unnamed FIELD as `(unlabelled <role>)` — an unnamed button is still dropped. **A field with a placeholder carries its value on a child `- text:` line**, not inline (Playwright writes `textbox …:` with `/placeholder:` and `text:` children), so `setFieldValue` reads it as the VALUE; read as a label it listed every such field as `empty` and named the next field after what had been typed. The fixtures in `testdata/` (`row-checkbox`, `paragraph-labels`, `open-menu`, `modal-hidden-names`, `placeholder-value`) are invented, deliberately: **no fixture, test, comment or document in this repository may carry wording, amounts or identifiers captured from a real install.**
+
 **A click or fill step names its element** (`browserMilestone`, `coder/browsermilestone.go`). The step line used to come from the arguments alone, so an owner reading what their agent did saw `browser_fill({"ref": "f16e211", "value": "${CARD_NUMBER}"})` — the ref is an internal handle. `hostToolSet` remembers the latest listing's ref→name map and the step reads `browser_fill "Credit Card Number" ← ${CARD_NUMBER}`. An unknown ref falls back to the generic line rather than a guessed name: a wrong name in a run log is worse than an opaque one.
+
+**`browser_fill` types key by key, and that is the default, not a fallback** (`internal/browser/fill.go`). A card form's `MM/YY` box can write its hidden `month`/`year` inputs from an `onkeyup` handler; `Locator.Fill` fires no key events, so the visible box reads back as correct while the form submits nothing — which is why a "fill, read back, then type if it didn't stick" design could never catch it. The helper clears, `PressSequentially`s (25 ms/key; over 256 runes uses `Fill`), BLURS so change/blur handlers run, then reads the field back inside the helper and returns only a verdict in `Result.ActNote`: `fill: matched` / `partial: N of M characters` / `did not take the value` (letters and digits only, case-folded, so a field that formats `4111 1111 …` matched). `did not take the value` retries once with `Fill` — the opposite case, a key filter rejecting a legitimate character. A partial fill into a `maxlength` box names the fix: a `${NAME[-2:]}` slice (`sliceSecret`, Python-style, runes; the only operation on a secret there is, so it can never become a way to compute something about one). `isTextEditable` is our own check because `Locator.IsEditable` THROWS on a button instead of answering false — and a fill aimed at a non-field is refused with a note, not typed.
+
+**A scripted dropdown is chosen from by `browser_fill` too** (`dropdown.go`). A trigger (`data-toggle`/`data-bs-toggle="dropdown"`, `aria-haspopup`, `aria-expanded`, `aria-controls`, or role combobox — when not text-editable) is clicked, and only option-like elements that became visible BECAUSE of that click, inside the controlled popup or beside the trigger, are candidates; `matchOption` decides, and the option is clicked with a real element-handle click. "Newly visible, inside the popup" is the guarantee that a match can never land on a "Confirm" button sitting under the picker. If the trigger's text did not change, the note says the choice did not visibly register.
+
+**What blocks an action is named, never timed out** (`obstruct.go`). Before a click or fill, `elementFromPoint` at the element's centre (after scrolling it to the middle once) decides whether the pointer would land on it; when it would not, the nearest fixed/sticky/dialog ancestor is described with its first 80 characters and up to four button names, and the action is NOT taken. Otherwise a control under a cookie banner only ever shows Playwright's 15-second timeout. An overlay's empty backdrop defers to `bestOverlay`, the largest fixed panel with text and a button that is not a full-width strip, which is also how a modal declaring no role is detected. The element's OWN `<label>` is not an obstruction (the custom-checkbox pattern), and that click is forced at the same point, because Playwright refuses "label intercepts pointer events" though a user's click toggles the box. A disabled target, an open modal (`a dialog is open: "…"`), and a failed main-frame navigation (a redirect that left a `chrome-error://` page with no address) are each reported in the result. After a click or fill the helper waits up to 2.5 s for network idle so the listing reflects what the page did.
+
+**Results that changed nothing say so** (`renderActResult`, `internal/coder`). An act whose control list or text is identical to the previous listing renders `unchanged (N)`; `browser_open`/`browser_page` are always full. A key press reports `focus: <role> "<label>"` (never a value), and eight identical presses in a row add a nudge to re-read the page. A click or key press that leaves controls and text exactly as they were sets `lastFruitless`, so a streak of them ends the run through the unproductive-streak guard instead of counting as progress.
 
 **A ref is re-resolved against the LIVE page before any mutating call.** The
 irreversibility check is only as good as the name it judges, and a name from the
@@ -3061,6 +3071,27 @@ back: page text, a field's rendered value, the final URL (a GET form puts it in
 the query string) and Playwright's own error messages. **Screenshots are never
 returned to the model** — redaction cannot touch pixels — and that is a permanent
 non-goal, not a deferral.
+
+**Exact-match redaction leaked, and the fix is three layers.** A payment field that
+reformats what it is given echoes `4111 1111 1111 4242` or `•••• 4242`, which is not
+the secret byte-for-byte, and the element list carries every field's rendered value —
+iframes included, which is where hosted card fields live. So: (1) **by field** — the
+helper records which ref it filled from a secret (and sets a `data-rk-secret` DOM
+marker holding the PLACEHOLDER, so a re-rendered node with a new ref is still
+recognised), and every later listing shows that field as `filled from ${NAME}`
+whatever the page renders; a secret dropdown choice renames its trigger `chosen from
+${NAME}`; the placeholder travels as `ActRequest.SecretLabel` and on the bridge.
+(2) **`redactor`** (`redact.go`) matches a remembered secret case-insensitively with
+any separators between its characters, a 3-character secret exactly, and a
+card-shaped secret's first 6 / last 4 digits ONLY beside a mask character —
+redacting every last-4 run would wipe ordinary amounts and years off a page. A secret's own punctuation also counts as a separator, so an email echoed by a later page is caught. Under 3
+characters nothing is matched; layer 1 covers those fields. (3) **The host redacts
+again** what it hands the model — `hostToolSet.browserRedact` for the API engine,
+`bridgeSession.redactResult` for CLI coders — so a channel the helper misses is
+still caught. A failed secret fill returns a fixed sentence
+(`secretFillError`), never Playwright's error, which can quote the typed text.
+The guarantee is the BROWSER path's: a shell with the secret in its environment can
+still print it, as before.
 
 **Refusals are not shaped like failures.** A refusal returns WITHOUT the `error:`
 prefix, because the API engine's oscillation guard counts that prefix as a
@@ -3108,6 +3139,14 @@ context underneath it; and a timed-out wait returns an `error:` result, which
 `noteCall` records as a failed call against `maxUnproductiveStreak` (6), so
 polling by hand would end the run. An unmet wait therefore returns a NON-error
 result that also tells the model not to simply wait again.
+
+**A wait carrying `notify` must not be answered by "is the page quiet?"**, because a
+page waiting on a phone IS quiet: the wait returned at once, and the model waited and
+notified again. With `notify` and a load-state condition, `browser_wait` uses
+`browser.WaitChange`, which polls the address, title and controls and deliberately not
+the raw text, since a confirmation page's countdown would end it within a second. A
+notice goes out at most once per `notifyInterval` (5 min), and an unchanged page points
+the model at the page: a button that sends the notification, a method choice, a code.
 
 **`browser_wait`'s `notify` exists because [CHAT] cannot reach the user in
 time.** `[CHAT]` is delivered durably only when a run ENDS, and the scheduler

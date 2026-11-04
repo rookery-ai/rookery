@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -13,7 +14,11 @@ import (
 // dependency pointing one way and lets a test drive it without a database.
 type SecretResolver func(ctx context.Context, workspaceID, name string) (string, error)
 
-var secretPlaceholder = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+// secretPlaceholder matches ${NAME} and the slice form ${NAME[a:b]}. The bracket
+// body is captured loosely and validated in sliceSecret, so a malformed slice
+// fails closed with an explanation instead of being typed into the page
+// literally.
+var secretPlaceholder = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?\}`)
 
 // ResolveSecretValue substitutes ${NAME} placeholders in a value about to be
 // typed into a page, and reports whether anything was substituted.
@@ -48,9 +53,56 @@ func ResolveSecretValue(ctx context.Context, resolve SecretResolver, workspaceID
 			return "", false, fmt.Errorf("no secret named %s is available to this agent — "+
 				"ask the user to add it, and do not type the placeholder or a guess into the page", name)
 		}
+		if m[2] != "" {
+			if v, err = sliceSecret(name, v, m[2]); err != nil {
+				return "", false, err
+			}
+		}
 		out = strings.ReplaceAll(out, m[0], v)
 	}
 	return out, true, nil
+}
+
+// sliceSecret applies a Python-style [start:end] slice, counted in runes.
+//
+// It exists because the agent never sees a secret's value and therefore cannot
+// shorten one: a card expiry stored as a 4-digit year cannot otherwise go into
+// an MM/YY box. The set of operations is deliberately closed — a slice and
+// nothing else — so this never grows into a way to compute something about a
+// secret and print it. The result is still a secret: callers mark the whole
+// resolved value as one.
+func sliceSecret(name, v, bracket string) (string, error) {
+	bad := fmt.Errorf("secret slice in ${%s%s} must be [start:end] with whole numbers, e.g. ${%s[-2:]}", name, bracket, name)
+	body := strings.TrimSuffix(strings.TrimPrefix(bracket, "["), "]")
+	lo, hi, ok := strings.Cut(body, ":")
+	if !ok {
+		return "", bad
+	}
+	runes := []rune(v)
+	n := len(runes)
+	bound := func(s string, def int) (int, bool) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return def, true
+		}
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, false
+		}
+		if i < 0 {
+			i += n
+		}
+		return min(max(i, 0), n), true
+	}
+	start, ok1 := bound(lo, 0)
+	end, ok2 := bound(hi, n)
+	if !ok1 || !ok2 {
+		return "", bad
+	}
+	if start >= end {
+		return "", nil
+	}
+	return string(runes[start:end]), nil
 }
 
 // MentionsSecret reports whether a value carries a placeholder, without

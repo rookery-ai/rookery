@@ -2,6 +2,8 @@ package coder
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -59,16 +61,24 @@ func (h *hostToolSet) browserTools() []llm.Tool {
 			Name: "browser_click",
 			Description: "Click one control on the open page, by the ref from the last listing. " +
 				"Returns the page's controls again afterwards, so you can see what changed. " +
-				"Refs change whenever the page re-renders — always use one from the MOST RECENT listing.",
+				"Refs change whenever the page re-renders — always use one from the MOST RECENT listing. " +
+				"If the control is covered (a cookie banner, a pop-up) or disabled, it is NOT clicked and the result says " +
+				"what is in the way and which of its buttons you can use — deal with that first.",
 			Parameters: rawSchema(`{"type":"object","properties":{"ref":{"type":"string","description":"element ref, e.g. e12"}},"required":["ref"]}`),
 		},
 		llm.Tool{
 			Name: "browser_fill",
-			Description: "Type into one field on the open page, by ref. " +
-				`For a dropdown (a combobox / <select>), pass the visible text of the option you want, e.g. value "Portugal" — it is chosen for you; do not press arrow keys. ` +
+			Description: "Type into one field on the open page, by ref. The value is typed key by key, the way a person types, " +
+				`and the result starts with whether the field took it ("fill: matched", "partial: N of M characters", or "did not take the value"). ` +
+				`For a dropdown — a <select> OR a button that opens a list (an expiry month, a country) — pass the visible text of the option you want, ` +
+				`e.g. value "Portugal" or "12": it is opened and chosen for you; do not press arrow keys. ` +
+				"It refuses a target that is not a field (a button or link is not a field — use browser_click). " +
 				"To enter a password, card number or any other stored credential, pass the SECRET NAME in ${...} form — " +
 				`e.g. value "${ELECTRIC_BILL_PASSWORD}". The server substitutes the real value directly into the page; ` +
-				"you never see it and must never guess or invent one. If the secret does not exist, say so and stop.",
+				"you never see it and must never guess or invent one. If the secret does not exist, say so and stop. " +
+				`When a box is shorter than the stored value (a 2-digit year box and a 4-digit year), take part of it with a slice: ` +
+				`${NAME[-2:]} is the last two characters, ${NAME[0:2]} the first two. ` +
+				`Several can be combined: "${CARD_EXPIRY_MONTH}/${CARD_EXPIRY_YEAR[-2:]}".`,
 			Parameters: rawSchema(`{"type":"object","properties":{"ref":{"type":"string"},"value":{"type":"string","description":"text to type, or ${SECRET_NAME}"}},"required":["ref","value"]}`),
 		},
 		llm.Tool{
@@ -83,8 +93,11 @@ func (h *hostToolSet) browserTools() []llm.Tool {
 				"Pass \"networkidle\", \"selector:<css>\", or \"text:<words>\". " +
 				"timeout_ms may be up to 15 minutes, which is what makes it usable for a step that needs the USER to do " +
 				"something — approving a payment in their banking app, for example. " +
-				"When you are waiting on the user like that, ALWAYS set notify to a short sentence telling them what to do " +
-				"(\"Approve the payment in your banking app\"); it is sent to them immediately, before the wait starts. " +
+				"BEFORE waiting on the user, read the page: a bank confirmation page often needs YOU to click something first " +
+				"(\"Send notification\", \"Confirm in app\", a choice of method) or has a code field — no approval reaches the user until that is done. " +
+				"When you are waiting on the user, ALWAYS set notify to a short sentence telling them what to do " +
+				"(\"Approve the payment in your banking app\"); it is sent to them immediately, before the wait starts, and only ONCE — " +
+				"repeating it is not sent. With notify set, a wait for \"networkidle\" waits for the page to change instead. " +
 				"Without it they have no idea you are waiting, and on a scheduled run nobody is watching. " +
 				"Returns whether the condition appeared, so a wait that ends without it is an answer, not a failure.",
 			Parameters: rawSchema(`{"type":"object","properties":{"wait_for":{"type":"string"},"timeout_ms":{"type":"integer","description":"up to 900000 (15 minutes)"},"notify":{"type":"string","description":"message sent to the user immediately, before waiting — use whenever the wait depends on them doing something"}},"required":["wait_for"]}`),
@@ -145,7 +158,102 @@ func (h *hostToolSet) execBrowserAct(ctx context.Context, req browser.ActRequest
 		return browserErrorResult(err)
 	}
 	h.rememberRefs(res.Elements)
-	return renderBrowserResult(res, true)
+	// browser_page is the model asking to SEE the page, so it is always full;
+	// any other act shows only what changed.
+	prevElems, prevText := h.lastElemSig, h.lastTextSig
+	out, es, ts := renderActResult(res, prevElems, prevText, req.Action == browser.ActionRead)
+	h.lastElemSig, h.lastTextSig = es, ts
+	// A click or key press that left the page exactly as it was did nothing.
+	// It "succeeded" as a call, so without this the turn budget counted it as
+	// progress and a run could click an unresponsive button up to the hard
+	// ceiling. Counted as fruitless, a streak of
+	// them ends the run through the unproductive-streak guard.
+	if (req.Action == browser.ActionClick || req.Action == browser.ActionPress) &&
+		prevElems != "" && es == prevElems && ts == prevText && res.ActNote == "" {
+		h.lastFruitless = true
+		out += "\nnothing on the page changed after this — doing it again will not help. " +
+			"If this was a submit or pay button, the page is not responding to it: report exactly that to the user " +
+			"instead of retrying, and do not describe the page's standing hint text as errors it raised.\n"
+	}
+	return out
+}
+
+// renderActResult renders an acting call's result, replacing a control list or
+// page text that is identical to the previous one with a one-line "unchanged".
+//
+// Repeating an identical listing on every key press tells the model nothing new
+// and pushes what it has learned out of its context. full forces the whole page regardless.
+func renderActResult(res browser.Result, prevElems, prevText string, full bool) (out, elemSig, textSig string) {
+	elemSig, textSig = elementsSig(res.Elements), textSigOf(res.Text)
+	if full {
+		return renderBrowserResult(res, true), elemSig, textSig
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[browser %s]\n", res.FinalURL)
+	if res.Title != "" {
+		fmt.Fprintf(&b, "title: %s\n", res.Title)
+	}
+	if res.ActNote != "" {
+		fmt.Fprintf(&b, "%s\n", res.ActNote)
+	}
+	if res.Blocked != "" {
+		// A block is never compacted away: it is the one thing the model must read.
+		return renderBrowserResult(res, true), elemSig, textSig
+	}
+	if res.BlockedNote != "" {
+		fmt.Fprintf(&b, "note: %s\n", res.BlockedNote)
+	}
+	if elemSig == prevElems && prevElems != "" {
+		fmt.Fprintf(&b, "\ninteractive controls: unchanged (%d) — call browser_page to see them again\n", len(res.Elements))
+	} else {
+		b.WriteString("\ninteractive controls:\n")
+		b.WriteString(browser.RenderElements(res.Elements, browser.DefaultMaxElements))
+	}
+	switch txt := strings.TrimSpace(res.Text); {
+	case textSig == prevText && prevText != "":
+		b.WriteString("\npage text: unchanged\n")
+	case txt != "":
+		b.WriteString("\n" + txt + "\n")
+	default:
+		b.WriteString("\n(the page rendered no readable text)\n")
+	}
+	if res.Truncated {
+		fmt.Fprintf(&b, "\n… more text remains. Call browser_page with offset %d to continue.\n", res.NextOffset)
+	}
+	return b.String(), elemSig, textSig
+}
+
+func elementsSig(els []browser.Element) string {
+	h := sha256.New()
+	for _, e := range els {
+		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\n", e.Ref, e.Role, e.Name, e.Note)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func textSigOf(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// pressStreakNudge is how many identical key presses in a row earn a nudge.
+const pressStreakNudge = 8
+
+// notePress counts identical consecutive key presses and, at the threshold,
+// returns a line telling the model to stop walking the page with the keyboard.
+// Tab-walking is what a model does when it cannot see the control it wants; the
+// listing now names far more of them, so the useful move is to read it.
+func (h *hostToolSet) notePress(key string) string {
+	if key == h.pressKey {
+		h.pressStreak++
+	} else {
+		h.pressKey, h.pressStreak = key, 1
+	}
+	if h.pressStreak > 0 && h.pressStreak%pressStreakNudge == 0 {
+		return fmt.Sprintf("you have pressed %s %d times in a row — stop and call browser_page; "+
+			"if you are looking for a control, it is probably listed by name now, and a dropdown can be set with browser_fill", key, h.pressStreak)
+	}
+	return ""
 }
 
 // browserErrorResult keeps the "runtime missing" case distinguishable from an
@@ -165,6 +273,10 @@ func renderBrowserResult(res browser.Result, withElements bool) string {
 	fmt.Fprintf(&b, "[browser %s]\n", res.FinalURL)
 	if res.Title != "" {
 		fmt.Fprintf(&b, "title: %s\n", res.Title)
+	}
+	if res.ActNote != "" {
+		// First, because it answers the question the call asked: did it work.
+		fmt.Fprintf(&b, "%s\n", res.ActNote)
 	}
 	if res.Blocked != "" {
 		// Stated plainly and once. A model told only "no content" will retry;
@@ -205,13 +317,24 @@ type browserCallArgs struct {
 	Notify string
 }
 
-// dispatchBrowserAct maps one browser tool name onto the acting choke point.
+// dispatchBrowserAct maps one browser tool name onto the acting choke point, and
+// redacts every secret this toolset has typed out of the result before the
+// model sees it — the second of two layers (the helper redacts what it
+// collects). A secret typed in one call stays redacted in every later call's
+// result, for the life of the run.
 func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a browserCallArgs) string {
+	return h.browserRedact.Apply(h.dispatchBrowserActInner(ctx, name, a))
+}
+
+func (h *hostToolSet) dispatchBrowserActInner(ctx context.Context, name string, a browserCallArgs) string {
 	if h.browser == nil {
 		return "error: the browser is not available on this server"
 	}
 	session := h.browserSessionKey()
 
+	if name != "browser_press" {
+		h.pressKey, h.pressStreak = "", 0
+	}
 	switch name {
 	case "browser_open":
 		// Opening a page is navigation, not acting, so it is not gated by
@@ -224,6 +347,7 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 			return browserErrorResult(err)
 		}
 		h.rememberRefs(res.Elements)
+		h.lastElemSig, h.lastTextSig = elementsSig(res.Elements), textSigOf(res.Text)
 		return renderBrowserResult(res, true)
 
 	case "browser_page":
@@ -237,7 +361,11 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 		// is the call that would otherwise submit a focused payment form with
 		// Enter and never meet a check at all.
 		_, page, _ := h.browserTarget(ctx, session, "")
-		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionPress, Key: a.Key}, "", page)
+		out := h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionPress, Key: a.Key}, "", page)
+		if nudge := h.notePress(a.Key); nudge != "" {
+			out += "\n" + nudge + "\n"
+		}
+		return out
 
 	case "browser_click":
 		name, page, ok := h.browserTarget(ctx, session, a.Ref)
@@ -257,8 +385,13 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 			// model must report, not a call to retry with different arguments.
 			return err.Error()
 		}
+		label := ""
+		if isSecret {
+			label = a.Value // the placeholder the model wrote, never the value
+			h.browserRedact.Remember(value)
+		}
 		return h.execBrowserAct(ctx, browser.ActRequest{
-			Action: browser.ActionFill, Ref: a.Ref, Value: value, ValueIsSecret: isSecret,
+			Action: browser.ActionFill, Ref: a.Ref, Value: value, ValueIsSecret: isSecret, SecretLabel: label,
 		}, elName, page)
 	}
 	return "error: unknown browser action " + name

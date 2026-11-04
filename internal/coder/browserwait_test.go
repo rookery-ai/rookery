@@ -15,11 +15,13 @@ type waitingBrowser struct {
 	fakeBrowser
 	matched   bool
 	waitCalls int
+	lastCond  string
 	events    *[]string
 }
 
-func (w *waitingBrowser) WaitFor(_ context.Context, _, _ string, _ time.Duration) (browser.Result, bool, error) {
+func (w *waitingBrowser) WaitFor(_ context.Context, _, cond string, _ time.Duration) (browser.Result, bool, error) {
 	w.waitCalls++
+	w.lastCond = cond
 	*w.events = append(*w.events, "waited")
 	return browser.Result{Title: "Payment confirmed"}, w.matched, nil
 }
@@ -54,6 +56,44 @@ func TestTheUserIsNotifiedBeforeTheWaitBegins(t *testing.T) {
 	}
 	if (*events)[1] != "waited" {
 		t.Errorf("no wait happened: %v", *events)
+	}
+}
+
+// Waiting on "networkidle" for an outside approval: an idle page is what a page
+// waiting on a phone looks like, so each wait would return at once and the owner
+// would get a notice every few seconds.
+func TestApprovalWaitIsNotSpamAndWaitsForTheThingThatMatters(t *testing.T) {
+	h, events := newWaitingSet(false)
+	args := browserCallArgs{WaitFor: "networkidle", Notify: "Approve the payment in your banking app", TimeoutMS: 600000}
+	first := h.execBrowserWait(context.Background(), "s1", args)
+	second := h.execBrowserWait(context.Background(), "s1", args)
+
+	var sent int
+	for _, e := range *events {
+		if strings.HasPrefix(e, "notified:") {
+			sent++
+		}
+	}
+	if sent != 1 {
+		t.Fatalf("the user was notified %d times, want once: %v", sent, *events)
+	}
+	if !strings.Contains(second, "not sent again") {
+		t.Errorf("the model was not told the repeat was suppressed:\n%s", second)
+	}
+	if got := h.browser.(*waitingBrowser).lastCond; got != browser.WaitChange {
+		t.Errorf("approval wait used condition %q, want %q", got, browser.WaitChange)
+	}
+	if !strings.Contains(first, "button that sends the notification") {
+		t.Errorf("an unchanged page must point at the page, not at more waiting:\n%s", first)
+	}
+}
+
+// A specific condition the model chose is respected, notice or not.
+func TestApprovalWaitKeepsASpecificCondition(t *testing.T) {
+	h, _ := newWaitingSet(true)
+	h.execBrowserWait(context.Background(), "s1", browserCallArgs{WaitFor: "text:Payment successful", Notify: "Approve it"})
+	if got := h.browser.(*waitingBrowser).lastCond; got != "text:Payment successful" {
+		t.Errorf("condition rewritten to %q", got)
 	}
 }
 

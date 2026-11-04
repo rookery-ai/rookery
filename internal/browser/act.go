@@ -156,6 +156,9 @@ func matchesHint(s string, hints []string) bool {
 	return false
 }
 
+// settleMS bounds the post-action wait for network idle.
+const settleMS = 2500
+
 type actReq struct {
 	Session   string `json:"session"`
 	Action    Action `json:"action"`
@@ -170,6 +173,9 @@ type actReq struct {
 	// guessing, because it has no database and cannot know what a secret looks
 	// like.
 	Secret bool `json:"secret"`
+	// SecretLabel is the placeholder the model wrote (e.g. "${CARD_NUMBER}").
+	// It is what the helper says instead of the value, everywhere.
+	SecretLabel string `json:"secret_label,omitempty"`
 }
 
 func (h *browserHost) handleAct(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +191,8 @@ func (h *browserHost) handleAct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fmt.Errorf("no open page for this run — call browser_open first"))
 		return
 	}
+	sess.opMu.Lock()
+	defer sess.opMu.Unlock()
 
 	timeout := float64(req.TimeoutMS)
 	if timeout <= 0 {
@@ -194,38 +202,67 @@ func (h *browserHost) handleAct(w http.ResponseWriter, r *http.Request) {
 		sess.rememberSecret(req.Value)
 	}
 
-	if err := h.perform(sess, req, timeout); err != nil {
+	note, err := h.perform(sess, req, timeout)
+	if err != nil {
+		if req.Secret {
+			// Replaced, not redacted: see secretFillError.
+			writeErr(w, secretFillError(req.SecretLabel, req.Ref))
+			return
+		}
 		writeErr(w, fmt.Errorf("%s failed: %s", req.Action, sess.redact(err.Error())))
 		return
 	}
-	writeFacts(w, h.collect(sess, nil, collectOpts{elements: req.Elements}))
+	if req.Action == ActionClick || req.Action == ActionFill {
+		// Let what the action started settle before reading the page back. A
+		// form that validates or recalculates on change can answer a click made
+		// straight after ticking a box as if the box were unticked — the state the
+		// next call would read has simply not landed yet. A timeout here is
+		// normal (long-polling pages never go idle) and is ignored.
+		_ = sess.page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State: playwright.LoadStateNetworkidle, Timeout: playwright.Float(settleMS),
+		})
+	}
+	facts := h.collect(sess, nil, collectOpts{elements: req.Elements})
+	facts.ActNote = sess.redact(note)
+	writeFacts(w, facts)
 }
 
-func (h *browserHost) perform(sess *hostSession, req actReq, timeout float64) error {
+// perform runs one action and returns a note for the model: a fill's verdict,
+// or the reason an action was NOT taken (covered, disabled, not a field). A
+// refusal is a note rather than an error because the model must change course,
+// not retry the same call.
+func (h *browserHost) perform(sess *hostSession, req actReq, timeout float64) (string, error) {
 	switch req.Action {
 	case ActionRead:
-		return nil
+		return "", nil
 	case ActionWait:
-		return applyExtraWait(sess.page, req.WaitFor, timeout)
+		return "", applyExtraWait(sess.page, req.WaitFor, timeout)
 	case ActionPress:
-		return sess.page.Keyboard().Press(req.Key)
+		if err := sess.page.Keyboard().Press(req.Key); err != nil {
+			return "", err
+		}
+		return focusNote(sess.page), nil
 	case ActionClick:
 		loc, err := h.locate(sess, req.Ref)
 		if err != nil {
-			return err
+			return "", err
 		}
-		return loc.Click(playwright.LocatorClickOptions{Timeout: playwright.Float(timeout)})
+		r, err := reach(loc, req.Ref, timeout)
+		if err != nil || r.refusal != "" {
+			return r.refusal, err
+		}
+		return "", loc.Click(playwright.LocatorClickOptions{Timeout: playwright.Float(timeout), Force: playwright.Bool(r.viaLabel)})
 	case ActionFill:
 		loc, err := h.locate(sess, req.Ref)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if isSelect(loc, timeout) {
-			return selectByText(loc, req.Value, timeout)
+		if req.Secret && req.SecretLabel == "" {
+			req.SecretLabel = "a stored secret"
 		}
-		return loc.Fill(req.Value, playwright.LocatorFillOptions{Timeout: playwright.Float(timeout)})
+		return h.fillText(sess, loc, req, timeout)
 	}
-	return fmt.Errorf("unknown action %q", req.Action)
+	return "", fmt.Errorf("unknown action %q", req.Action)
 }
 
 // locate resolves a [ref=eN] handle through Playwright's aria-ref selector
