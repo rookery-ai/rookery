@@ -603,7 +603,7 @@ Per-workspace chat adapter (Telegram, Discord, Slack) — stamps msg.WorkspaceID
   → GatewayManager.dispatch()
     → is this chat linked to THIS workspace? (platform_identities, scoped by workspace_id)
     → Router.Handle()
-      → /agent  → agentdesigner.Flow (conversational FSM)
+      → /agent  → agentdesigner.Flow (conversational FSM); /agent stop → agentrunner.Runner
       → /skill  → skilldesigner.Flow (conversational FSM; list/create/cancel)
       → /run    → agentrunner.Runner
       → /secret → SecretStore
@@ -3592,7 +3592,7 @@ duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
-- **agents + design** — CRUD, run + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
 - **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test

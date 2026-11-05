@@ -21,8 +21,8 @@ import (
 
 // stopHarness drives real runs through a real subprocess, so a Stop has to kill an
 // actual process. The fake coder records every prompt it receives, then:
-//   - HANG in the prompt: reports it started and sleeps until killed;
-//   - CALLCHILD in the prompt: asks to call the agent named "Child";
+//   - __STOPTEST_HANG__ in the prompt: reports it started and sleeps until killed;
+//   - __STOPTEST_CALLCHILD__ in the prompt: asks to call the agent named "Child";
 //   - otherwise: answers with one [CHAT] line.
 type stopHarness struct {
 	t           *testing.T
@@ -51,10 +51,10 @@ func newStopHarness(t *testing.T) *stopHarness {
 prompt="$2"
 printf '%%s' "$prompt" > %[1]q/prompt.$$
 case "$prompt" in
-  *HANG*) touch %[1]q/started; exec sleep 300 ;;
+  *__STOPTEST_HANG__*) touch %[1]q/started; exec sleep 300 ;;
 esac
 case "$prompt" in
-  *CALLCHILD*) echo '[CALL: Child]'; exit 0 ;;
+  *__STOPTEST_CALLCHILD__*) echo '[CALL: Child]'; exit 0 ;;
 esac
 echo '[CHAT] all done'
 `, dir)
@@ -152,7 +152,7 @@ func (h *stopHarness) latest(a *db.Agent) *db.AgentRun {
 
 func TestStopEndsARunAndRecordsItAsStopped(t *testing.T) {
 	h := newStopHarness(t)
-	a := h.agent("Looper", "HANG")
+	a := h.agent("Looper", "__STOPTEST_HANG__")
 	sent, progress := &collector{}, &collector{}
 	done := h.start(context.Background(), a, sent, progress)
 	h.waitForHang()
@@ -195,8 +195,8 @@ func TestStopEndsARunAndRecordsItAsStopped(t *testing.T) {
 
 func TestStoppingAParentStopsItsChild(t *testing.T) {
 	h := newStopHarness(t)
-	parent := h.agent("Parent", "CALLCHILD")
-	child := h.agent("Child", "HANG")
+	parent := h.agent("Parent", "__STOPTEST_CALLCHILD__")
+	child := h.agent("Child", "__STOPTEST_HANG__")
 	done := h.start(context.Background(), parent, &collector{}, &collector{})
 	h.waitForHang()
 
@@ -220,8 +220,8 @@ func TestStoppingAParentStopsItsChild(t *testing.T) {
 
 func TestStoppingOnlyAChildLeavesItsParentRunning(t *testing.T) {
 	h := newStopHarness(t)
-	parent := h.agent("Parent", "CALLCHILD")
-	child := h.agent("Child", "HANG")
+	parent := h.agent("Parent", "__STOPTEST_CALLCHILD__")
+	child := h.agent("Child", "__STOPTEST_HANG__")
 	done := h.start(context.Background(), parent, &collector{}, &collector{})
 	h.waitForHang()
 
@@ -244,7 +244,7 @@ func TestStoppingOnlyAChildLeavesItsParentRunning(t *testing.T) {
 // which the boot path retries, and never read as the owner's decision.
 func TestShutdownIsNotAStop(t *testing.T) {
 	h := newStopHarness(t)
-	a := h.agent("Looper", "HANG")
+	a := h.agent("Looper", "__STOPTEST_HANG__")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := h.start(ctx, a, &collector{}, &collector{})
@@ -260,7 +260,7 @@ func TestShutdownIsNotAStop(t *testing.T) {
 
 func TestStopIsScopedToTheWorkspace(t *testing.T) {
 	h := newStopHarness(t)
-	a := h.agent("Looper", "HANG")
+	a := h.agent("Looper", "__STOPTEST_HANG__")
 	done := h.start(context.Background(), a, &collector{}, &collector{})
 	h.waitForHang()
 	defer func() {
@@ -282,7 +282,7 @@ func TestStopIsScopedToTheWorkspace(t *testing.T) {
 // Only the run straight after a stop hears about it.
 func TestNextRunIsToldOnce(t *testing.T) {
 	h := newStopHarness(t)
-	a := h.agent("Looper", "HANG")
+	a := h.agent("Looper", "__STOPTEST_HANG__")
 	done := h.start(context.Background(), a, &collector{}, &collector{})
 	h.waitForHang()
 	h.runner.StopAgent(h.workspaceID, a.ID)
@@ -350,7 +350,7 @@ func TestUnstoppedRunIsUnchanged(t *testing.T) {
 // A note's text is what a later run can read, so the stop has to be on disk too.
 func TestStoppedRunWritesItsNote(t *testing.T) {
 	h := newStopHarness(t)
-	a := h.agent("Looper", "HANG")
+	a := h.agent("Looper", "__STOPTEST_HANG__")
 	done := h.start(context.Background(), a, &collector{}, &collector{})
 	h.waitForHang()
 	h.runner.StopAgent(h.workspaceID, a.ID)
