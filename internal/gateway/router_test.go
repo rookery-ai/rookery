@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -441,5 +442,23 @@ func TestHandleStartNamesTheActualPlatform(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An active design session captures plain text. /agent stop has to get past it, or an
+// owner in the middle of building one agent could not stop another that is looping.
+func TestAgentStopReachesTheCommandDuringADesignSession(t *testing.T) {
+	r, _, _, _ := newTestRouter(t)
+	var replies []string
+	send := func(s string) { replies = append(replies, s) }
+	if err := r.Handle(context.Background(), testMsg("/agent create looper"), send, func() {}, send, send); err != nil {
+		t.Fatalf("/agent create: %v", err)
+	}
+	replies = nil
+	if err := r.Handle(context.Background(), testMsg("/agent stop"), send, func() {}, send, send); err != nil {
+		t.Fatalf("/agent stop: %v", err)
+	}
+	if got := strings.Join(replies, " "); !strings.Contains(got, "not available") {
+		t.Errorf("/agent stop should reach its handler, replied %q", got)
 	}
 }

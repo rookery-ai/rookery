@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/convert"
 	"github.com/rookery-ai/rookery/internal/db"
@@ -45,8 +46,16 @@ type secretChallenge struct {
 	name   string // secret name
 }
 
+// RunStopper stops in-flight agent runs. Satisfied by *agentrunner.Runner.
+type RunStopper interface {
+	RunningAgentNames(workspaceID string) []string
+	StopAgentByName(workspaceID, name string) bool
+}
+
 // Router dispatches incoming messages to the appropriate handler.
 type Router struct {
+	runStopper RunStopper
+
 	db         *db.DB
 	onText     TextHandler
 	onAgentRun AgentRunHandler
@@ -105,6 +114,12 @@ func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRu
 // panicking — the same contract designFlow has.
 func (r *Router) WithSkillFlow(f *skilldesigner.Flow) *Router {
 	r.skillFlow = f
+	return r
+}
+
+// WithRunStopper enables /agent stop. Left nil, the command says it is unavailable.
+func (r *Router) WithRunStopper(s RunStopper) *Router {
+	r.runStopper = s
 	return r
 }
 
@@ -432,8 +447,11 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			draft.AgentName,
 		))
 
+	case "stop":
+		r.handleAgentStop(msg, rest, send)
+
 	default:
-		send("Usage: /agent list · /agent create <name> · /agent edit <name> · /agent cancel")
+		send("Usage: /agent list · /agent create <name> · /agent edit <name> · /agent cancel · /agent stop [name]")
 	}
 	return nil
 }
@@ -555,6 +573,35 @@ func (r *Router) handleSkill(ctx context.Context, msg Message, arg string, send 
 	return nil
 }
 
+// handleAgentStop ends a running agent's current run. A bare command is only a
+// shortcut when it cannot pick the wrong agent, so several running agents are listed
+// rather than guessed between.
+func (r *Router) handleAgentStop(msg Message, name string, send func(string)) {
+	if r.runStopper == nil {
+		send("Stopping agents is not available.")
+		return
+	}
+	if name == "" {
+		running := r.runStopper.RunningAgentNames(msg.WorkspaceID)
+		switch len(running) {
+		case 0:
+			send("No agent is running right now.")
+			return
+		case 1:
+			name = running[0]
+		default:
+			send(fmt.Sprintf("Several agents are running: **%s**. Send `/agent stop <name>` to stop one.",
+				strings.Join(running, "**, **")))
+			return
+		}
+	}
+	if !r.runStopper.StopAgentByName(msg.WorkspaceID, name) {
+		send(fmt.Sprintf("**%s** isn't running.", name))
+		return
+	}
+	send(fmt.Sprintf("⏹ Stopping **%s**. What it already did stays as it is.", name))
+}
+
 func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send func(string), sendProgress func(string)) error {
 	name := strings.TrimSpace(arg)
 	if name == "" {
@@ -594,6 +641,11 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 	}
 
 	if err := r.onAgentRun(ctx, msg.WorkspaceID, name, track); err != nil {
+		// Edits the "Running agent…" line rather than letting it read as finished.
+		if errors.Is(err, agentrunner.ErrRunStopped) {
+			sendProgress(fmt.Sprintf("⏹ **%s** was stopped.", name))
+			return nil
+		}
 		// The runner already delivered FriendlyRunError through SendOutput.
 		// Returning the error as well would make GatewayManager.dispatch append
 		// "An error occurred: …" — the same failure posted to the user twice.

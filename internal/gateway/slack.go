@@ -293,7 +293,12 @@ func (g *SlackGateway) readLoop(ctx context.Context) {
 			// whole server process. This is the same guarantee dispatchFunc gives
 			// the synchronous path — extended to the one goroutine that does work
 			// before reaching it.
-			g.handleEvent(evt)
+			//
+			// Each event gets its own goroutine, as Telegram and Discord already do.
+			// Dispatch blocks for as long as a /run takes, so handling events inline
+			// meant that run's own /agent stop could not arrive until it had ended.
+			// Every event is acked inside handleEvent before dispatch.
+			go g.handleEvent(evt)
 		}
 	}
 }

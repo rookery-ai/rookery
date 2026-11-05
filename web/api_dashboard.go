@@ -41,6 +41,10 @@ func toAPIDashboardRun(r *db.AgentRunWithName) apiDashboardRun {
 			status = "failed"
 		}
 	}
+	// Checked last: a stopped run also has exit_code -1, and it did not fail.
+	if r.Stopped {
+		status = "stopped"
+	}
 	// RecentAgentRunsWithNames LEFT JOINs agents and COALESCEs a missing name to
 	// "", so a run whose agent is gone arrives nameless and renders as a blank
 	// line — the reported symptom. Migration 015 sweeps the rows the pre-#214
