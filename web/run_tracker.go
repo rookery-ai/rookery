@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -182,7 +183,8 @@ func (s *Server) startManualRun(workspaceID string, agent *db.Agent, masterPw st
 			SendOutput:  send,
 		})
 
-		if runErr != nil {
+		// A stop already closed the stream with its own notice, and it is not a failure.
+		if runErr != nil && !errors.Is(runErr, agentrunner.ErrRunStopped) {
 			// Surface the failure on the live stream too (SendOutput already delivered
 			// the friendly message to the chat platform). Appended BEFORE finish, or a
 			// reader can observe done and stop before the line it most needs arrives.

@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -279,7 +280,9 @@ func (s *Scheduler) execute(ctx context.Context, agentID, workspaceID, trigger s
 		Trigger:     trigger,
 		MasterPw:    masterPw,
 		SendOutput:  sendFn,
-	}); err != nil {
+	}); errors.Is(err, agentrunner.ErrRunStopped) {
+		slog.Info("scheduler: agent run stopped by the owner", "agent_id", agentID, "trigger", trigger)
+	} else if err != nil {
 		slog.Error("scheduler: agent run failed", "agent_id", agentID, "trigger", trigger, "err", err)
 	}
 }

@@ -2109,6 +2109,9 @@ type CoderPromptParams struct {
 	// only reading rendered pages. Described separately because the refusals are
 	// worded to be reported to the user rather than retried.
 	BrowserActing bool
+	// PreviousRunStopped reports that the owner stopped this agent's latest run. It
+	// adds one generic instruction and deliberately carries no detail about that run.
+	PreviousRunStopped bool
 }
 
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
@@ -2225,6 +2228,19 @@ your job is to DO the task, never to (re)construct or verify the agent itself.
 `
 }
 
+// previousRunStoppedBlock is what an agent's next run hears about a stop. It names no
+// time, steps or outcome on purpose: this run has its own job, and the only thing it
+// needs to know is that what it inherited may be half-finished. A run stopped before
+// the end of its reply never saved that reply's [STATE], which is why state is named.
+const previousRunStoppedBlock = `<previous_run>
+The previous run of this agent was stopped before it finished, so your state or files
+it was working on may be incomplete. If anything it left behind interferes with this
+run, fix it. Otherwise ignore this and do your normal work. Do not mention this in
+your messages.
+</previous_run>
+
+`
+
 func BuildCoderPrompt(p CoderPromptParams) string {
 	var sb strings.Builder
 
@@ -2249,6 +2265,10 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	sb.WriteString("<state>\n")
 	sb.WriteString(p.StateJSON)
 	sb.WriteString("\n</state>\n\n")
+
+	if p.PreviousRunStopped {
+		sb.WriteString(previousRunStoppedBlock)
+	}
 
 	// Its own block, NOT folded into <user_memory>: the prompt tells the model
 	// <user_memory> IS the memory/ folder, and the date is not a file in there.

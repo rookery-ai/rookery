@@ -80,11 +80,14 @@ func (r *Reflector) ReflectChat(workspaceID string, n ChatNote) error {
 
 // RunNote is the reflected view of an agent run.
 type RunNote struct {
-	RunID      string
-	AgentID    string
-	AgentName  string
-	Trigger    string
-	ExitCode   int
+	RunID     string
+	AgentID   string
+	AgentName string
+	Trigger   string
+	ExitCode  int
+	// Stopped records that the owner ended the run early. Whatever it had not yet
+	// delivered never reached anyone, and the note says so.
+	Stopped    bool
 	StartedAt  time.Time
 	FinishedAt time.Time
 	Output     string   // raw coder output
@@ -139,6 +142,9 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	if n.ExitCode != 0 {
 		status = fmt.Sprintf("failed (exit %d)", n.ExitCode)
 	}
+	if n.Stopped {
+		status = "stopped"
+	}
 	kv := map[string]string{
 		"type":        "agent-run",
 		"run_id":      n.RunID,
@@ -170,7 +176,11 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 		b.WriteString(usageBlock(n))
 	}
 	if len(n.ChatLines) > 0 {
-		b.WriteString("## Output sent to user\n\n")
+		if n.Stopped {
+			b.WriteString("## Output not sent\n\n")
+		} else {
+			b.WriteString("## Output sent to user\n\n")
+		}
 		for _, l := range n.ChatLines {
 			b.WriteString("> " + l + "\n")
 		}
@@ -192,6 +202,9 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	b.WriteString("## Raw output\n\n```\n")
 	b.WriteString(strings.TrimRight(n.Output, "\n"))
 	b.WriteString("\n```\n")
+	if n.Stopped {
+		b.WriteString("\n## Stopped\n\nThis run was stopped by the owner before it finished. What it had already done was left as it was.\n")
+	}
 	return r.write(workspaceID, rel, b.String(), "agent_runs", n.RunID, n)
 }
 

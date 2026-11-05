@@ -134,6 +134,9 @@ type AgentRun struct {
 	// quiet run and a broken one are identically shaped here (exit 0, empty
 	// stdout) and the interface can only render the same nothing for both.
 	Silent bool
+	// Stopped records that the owner ended this run early. exit_code is -1 as for
+	// a failure, so this is the only thing telling the two apart.
+	Stopped bool
 	// Token usage, populated by the API coder (direct LLM provider). Zero for
 	// CLI coders (claude-code/opencode/codex/cursor), which don't report it.
 	PromptTokens     int
