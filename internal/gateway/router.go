@@ -33,12 +33,14 @@ const maxAttachmentBytes = 25 << 20
 
 // TextHandler is called for non-command messages. Every such message belongs to
 // a saved chat (there is no one-off path); history holds that chat's prior
-// turns and is empty on a chat's first message.
-type TextHandler func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error
+// turns and is empty on a chat's first message. onStep receives the coder's tool
+// milestones as they happen and is never nil.
+type TextHandler func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send, onStep func(string)) error
 
 // AgentRunHandler is called when /run <name> is issued.
-// Implemented in Phase 6 (AgentRunner).
-type AgentRunHandler func(ctx context.Context, workspaceID, agentName string, send func(string)) error
+// Implemented in Phase 6 (AgentRunner). onStep receives the run's tool milestones
+// as they happen and is never nil.
+type AgentRunHandler func(ctx context.Context, workspaceID, agentName string, send, onStep func(string)) error
 
 // secretChallenge holds a pending master-password request for a secret operation.
 type secretChallenge struct {
@@ -632,18 +634,22 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 	// creates a placeholder whose message id is retained. That lets the
 	// finished state EDIT this line instead of leaving "Running agent…"
 	// stranded above (or, on a silent run, alone in) the conversation.
-	sendProgress(fmt.Sprintf("Running agent **%s**...", name))
+	header := fmt.Sprintf("Running agent **%s**...", name)
+	sendProgress(header)
+
+	trace := newStepTrace(header, sendProgress)
+	defer trace.Close()
 
 	delivered := false
 	track := func(text string) {
 		delivered = true
-		send(text)
+		send(trace.withSummary(text))
 	}
 
-	if err := r.onAgentRun(ctx, msg.WorkspaceID, name, track); err != nil {
+	if err := r.onAgentRun(ctx, msg.WorkspaceID, name, track, trace.Step); err != nil {
 		// Edits the "Running agent…" line rather than letting it read as finished.
 		if errors.Is(err, agentrunner.ErrRunStopped) {
-			sendProgress(fmt.Sprintf("⏹ **%s** was stopped.", name))
+			sendProgress(trace.withSummary(fmt.Sprintf("⏹ **%s** was stopped.", name)))
 			return nil
 		}
 		// The runner already delivered FriendlyRunError through SendOutput.
@@ -658,7 +664,7 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 		// A [SILENT] run never reaches a SendOutput site — runCoderAgent's
 		// switch has no matching case — so without this the user is left
 		// looking at "Running agent…" forever with no idea the run finished.
-		sendProgress(fmt.Sprintf("✅ **%s** finished — no notification.", name))
+		sendProgress(trace.withSummary(fmt.Sprintf("✅ **%s** finished — no notification.", name)))
 	}
 	return nil
 }
@@ -1244,6 +1250,12 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	// Intercept send so we can capture the assistant reply for chat storage.
 	// The "previous chat ended" notice rides on the FIRST delivered message and
 	// is never stored — it is about the conversation, not part of it.
+	//
+	// The trace's summary is added after assistantReply is captured for the same
+	// reason: stored text feeds later turns, the vault note and the auto-title.
+	trace := newStepTrace("", sendProgress)
+	defer trace.Close()
+
 	var assistantReply string
 	wrappedSend := func(text string) {
 		assistantReply = text
@@ -1251,10 +1263,10 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 			text = notice + "\n\n" + text
 			notice = ""
 		}
-		send(text)
+		send(trace.withSummary(text))
 	}
 
-	if err := r.onText(ctx, msg.WorkspaceID, history, msg.Text, wrappedSend); err != nil {
+	if err := r.onText(ctx, msg.WorkspaceID, history, msg.Text, wrappedSend, trace.Step); err != nil {
 		return err
 	}
 

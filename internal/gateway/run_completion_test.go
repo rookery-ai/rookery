@@ -33,7 +33,7 @@ func (h *runHarness) all() string {
 // was left on "Running agent…" forever with no signal the run had finished.
 func TestSilentRunReportsCompletion(t *testing.T) {
 	h := &runHarness{}
-	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send, _ func(string)) error {
 		return nil // silent: delivers nothing, returns no error
 	})
 
@@ -63,7 +63,7 @@ func TestSilentRunReportsCompletion(t *testing.T) {
 // error handleRun returned.
 func TestFailedRunIsReportedOnlyOnce(t *testing.T) {
 	h := &runHarness{}
-	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send, _ func(string)) error {
 		send("⚠️ This agent run failed: quota exhausted.")
 		return errors.New("⚠️ This agent run failed: quota exhausted.")
 	})
@@ -82,7 +82,7 @@ func TestFailedRunIsReportedOnlyOnce(t *testing.T) {
 // swallowed entirely.
 func TestUndeliveredFailurePropagates(t *testing.T) {
 	h := &runHarness{}
-	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send, _ func(string)) error {
 		return errors.New("boom")
 	})
 
@@ -96,7 +96,7 @@ func TestUndeliveredFailurePropagates(t *testing.T) {
 // line, and must not leave a second stray notice behind.
 func TestProducingRunDoesNotReportSilence(t *testing.T) {
 	h := &runHarness{}
-	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+	r := newRunRouter(func(ctx context.Context, workspaceID, agentName string, send, _ func(string)) error {
 		send("25°C, clear sky")
 		return nil
 	})

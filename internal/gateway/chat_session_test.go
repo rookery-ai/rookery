@@ -17,7 +17,7 @@ type fakeCoder struct {
 }
 
 func (f *fakeCoder) handler() gateway.TextHandler {
-	return func(_ context.Context, _ string, history []db.ChatMessage, text string, send func(string)) error {
+	return func(_ context.Context, _ string, history []db.ChatMessage, text string, send, _ func(string)) error {
 		f.histories = append(f.histories, history)
 		send("reply to " + text)
 		return nil

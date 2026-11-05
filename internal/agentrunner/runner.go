@@ -56,8 +56,12 @@ type RunInput struct {
 	// the run is still in flight. SendOutput is still called once at the end with the
 	// full joined output for durable delivery (Telegram, run history). Optional.
 	OnProgress SendFunc
-	depth      int             // internal: recursion depth (0 = top-level)
-	visited    map[string]bool // internal: cycle detection for agent-to-agent calls
+	// OnStep, if set, receives only the coder's tool milestones. OnProgress is not
+	// usable for this: it also carries [CHAT] lines and the final output, which a
+	// list of steps would then present as steps. Optional.
+	OnStep  SendFunc
+	depth   int             // internal: recursion depth (0 = top-level)
+	visited map[string]bool // internal: cycle detection for agent-to-agent calls
 }
 
 // memoryStore is satisfied by *memory.Store — kept local to avoid the import.
@@ -252,7 +256,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) error {
 }
 
 // RunByName looks up an agent by name and runs it.
-func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw string, send SendFunc) error {
+func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw string, send, onStep SendFunc) error {
 	agent, err := r.db.GetAgentByName(workspaceID, agentName)
 	if err != nil {
 		return fmt.Errorf("agent %q not found", agentName)
@@ -263,7 +267,22 @@ func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw
 		Trigger:     "chat",
 		MasterPw:    masterPw,
 		SendOutput:  send,
+		OnStep:      onStep,
 	})
+}
+
+// teeProgress sends a milestone to both sinks, either of which may be nil.
+func teeProgress(a, b SendFunc) SendFunc {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return func(msg string) {
+		a(msg)
+		b(msg)
+	}
 }
 
 // ─── Coder agent execution ────────────────────────────────────────────────────
@@ -510,7 +529,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// so the ones most in need of a record — with nothing captured.
 	rctx := &coderRunContext{transcript: &transcriptCollector{}}
 
-	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(rctx.transcript.wrap(input.OnProgress))
+	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(rctx.transcript.wrap(teeProgress(input.OnProgress, input.OnStep)))
 
 	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
 	// secrets + the connector-bridge vars. Injected for every coder type.
@@ -997,6 +1016,7 @@ func (r *Runner) runCoderTurns(
 				SendOutput: func(msg string) {
 					childChat = append(childChat, msg)
 				},
+				OnStep:  input.OnStep,
 				depth:   input.depth + 1,
 				visited: newVisited,
 			}
