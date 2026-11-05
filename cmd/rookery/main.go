@@ -668,7 +668,8 @@ func serveCmd() *cli.Command {
 				WithSkillFlow(skillFlow).
 				WithVault(vlt).
 				WithTitleGenerator(titleGen).
-				WithApproval(approvalSvc)
+				WithApproval(approvalSvc).
+				WithRunStopper(runner)
 			gwManager := gateway.New(database, sysKey, router)
 
 			// Chat delivery for park/outcome notices. Set after the manager exists

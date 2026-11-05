@@ -605,7 +605,9 @@ type RunOutcome struct {
 	Transcript string
 	// Silent records that the run emitted [SILENT] — it chose to say nothing,
 	// as distinct from having nothing to say because it broke.
-	Silent           bool
+	Silent bool
+	// Stopped records that the owner ended the run early.
+	Stopped          bool
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
@@ -622,8 +624,8 @@ type RunOutcome struct {
 }
 
 func (d *DB) FinishAgentRun(id string, out RunOutcome) error {
-	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, transcript=?, silent=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, cached_tokens=?, cache_reported=?, cost_usd=?, cost_reported=?, finished_at=datetime('now') WHERE id=?`,
-		out.ExitCode, out.Stdout, out.Stderr, out.Transcript, out.Silent,
+	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, transcript=?, silent=?, stopped=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, cached_tokens=?, cache_reported=?, cost_usd=?, cost_reported=?, finished_at=datetime('now') WHERE id=?`,
+		out.ExitCode, out.Stdout, out.Stderr, out.Transcript, out.Silent, out.Stopped,
 		out.PromptTokens, out.CompletionTokens, out.TotalTokens,
 		out.CachedTokens, out.CacheReported, out.CostUSD, out.CostReported, id)
 	return err
@@ -636,7 +638,7 @@ func (d *DB) FinishAgentRun(id string, out RunOutcome) error {
 // transcript on every page load would pay for a panel that is collapsed by
 // default. This is the lazy read behind expanding a single row.
 func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
-	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,transcript,silent,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,transcript,silent,stopped,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
 		FROM agent_runs WHERE id=?`, runID)
 	var r AgentRun
 	var exitCode sql.NullInt64
@@ -644,7 +646,7 @@ func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
 	var startedAt string
 	var finishedAt sql.NullString
 	if err := row.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr,
-		&transcript, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
+		&transcript, &r.Silent, &r.Stopped, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
 		&r.CachedTokens, &r.CacheReported, &r.CostUSD, &r.CostReported, &startedAt, &finishedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -670,7 +672,7 @@ func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
 // selected, because the list renders a chip for it and a per-row transcript
 // fetch just to decide whether to draw a chip would defeat the split.
 func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,silent,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
+	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,silent,stopped,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
 		FROM agent_runs WHERE agent_id=? ORDER BY started_at DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -685,7 +687,7 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.Silent,
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.Silent, &r.Stopped,
 			&r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
 			&r.CachedTokens, &r.CacheReported, &r.CostUSD, &r.CostReported, &startedAt, &finishedAt); err != nil {
 			return nil, err
@@ -704,6 +706,19 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		runs = append(runs, &r)
 	}
 	return runs, rows.Err()
+}
+
+// LatestRunStopped reports whether the agent's most recent run was stopped by the
+// owner. started_at has one-second granularity and a stop is often followed by an
+// immediate re-run, so rowid breaks the tie: insertion order is the true order.
+func (d *DB) LatestRunStopped(agentID string) (bool, error) {
+	var stopped bool
+	err := d.QueryRow(`SELECT stopped FROM agent_runs WHERE agent_id=?
+		ORDER BY started_at DESC, rowid DESC LIMIT 1`, agentID).Scan(&stopped)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return stopped, err
 }
 
 // LastRunTimes returns, per agent in the workspace, when that agent last
@@ -1498,7 +1513,7 @@ type AgentRunWithName struct {
 
 // RecentAgentRunsWithNames returns the N most recent runs with the agent name joined in.
 func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRunWithName, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at, COALESCE(a.name,'')
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.stopped,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at, COALESCE(a.name,'')
 		FROM agent_runs r LEFT JOIN agents a ON a.id=r.agent_id
 		WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
@@ -1511,7 +1526,7 @@ func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRu
 		var exitCode sql.NullInt64
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &rn.PromptTokens, &rn.CompletionTokens, &rn.TotalTokens, &startedAt, &finishedAt, &rn.AgentName); err != nil {
+		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &rn.Stopped, &rn.PromptTokens, &rn.CompletionTokens, &rn.TotalTokens, &startedAt, &finishedAt, &rn.AgentName); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {

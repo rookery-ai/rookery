@@ -32,6 +32,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.GET("/agents/:id", s.apiGetAgent)
 	g.DELETE("/agents/:id", s.apiDeleteAgent)
 	g.POST("/agents/:id/run", s.apiRunAgent)
+	g.POST("/agents/:id/run/stop", s.apiStopAgentRun)
 	g.PUT("/agents/:id/schedule", s.apiSaveSchedule)
 	g.DELETE("/agents/:id/schedule", s.apiDeleteSchedule)
 	g.PUT("/agents/:id/agent-md", s.apiSaveAgentMD)
@@ -115,6 +116,10 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 		} else {
 			status = "failed"
 		}
+	}
+	// Checked last: a stopped run also has exit_code -1, and it did not fail.
+	if r.Stopped {
+		status = "stopped"
 	}
 	return map[string]any{
 		"id":      r.ID,
@@ -403,6 +408,24 @@ func (s *Server) apiRunAgent(c echo.Context) error {
 		return c.JSON(http.StatusAccepted, map[string]any{"status": "already_running"})
 	}
 	return c.JSON(http.StatusAccepted, map[string]any{"status": "started"})
+}
+
+// apiStopAgentRun ends the agent's in-flight run, whatever started it. 204 when a run
+// was stopped, 404 when none was running (already finished), which the browser treats
+// as harmless.
+//
+// POST /api/v1/agents/:id/run/stop
+func (s *Server) apiStopAgentRun(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	agent, err := s.getOwnedAgent(u.ID, c.Param("id"))
+	if err != nil {
+		return jsonErr(c, http.StatusNotFound, "not_found", "agent not found")
+	}
+	if s.runner == nil || !s.runner.StopAgent(u.ID, agent.ID) {
+		return jsonErr(c, http.StatusNotFound, "not_running", "no active run")
+	}
+	s.audit.Log(u.ID, "stop_agent_run", "agent:"+agent.ID, agent.Name, c.RealIP())
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (s *Server) apiSaveSchedule(c echo.Context) error {

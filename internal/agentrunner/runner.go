@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,6 +113,10 @@ type Runner struct {
 	mcpClient    *mcp.Client
 	mcpBridge    *mcp.Bridge
 	mcpParkerFor MCPParkerFactory
+
+	// active holds the in-flight runs the owner can stop. See stop.go.
+	activeMu sync.Mutex
+	active   map[*activeRun]struct{}
 }
 
 // MCPParkerFactory returns the approval gate for one agent's MCP calls, or nil when
@@ -285,6 +290,8 @@ type coderRunContext struct {
 	// the outside whatever produced it — which is how a truncating reasoning model
 	// was diagnosed as a large-file problem four times over.
 	stopReason string
+	// stopped is true once the owner has ended this run early.
+	stopped bool
 	// transcript interleaves progress milestones (tool calls, verification
 	// nudges, delivered [CHAT] output) with the coder's own raw turns, in the
 	// order they happened, and is persisted with the run.
@@ -310,6 +317,7 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 		Stdout:           stdout,
 		Stderr:           stderr,
 		Silent:           rctx.silentSignaled,
+		Stopped:          rctx.stopped,
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,
@@ -326,12 +334,20 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 		if s := coder.SummarizeToolTrace(rctx.toolTrace); s != "" {
 			rctx.transcript.add(EventSummary, s)
 		}
+		// After the summary, so the notice is the last thing the record says.
+		if rctx.stopped {
+			rctx.transcript.add(EventProgress, runStoppedNotice)
+		}
 		out.Transcript = rctx.transcript.encode()
 	}
 	return out
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
+	ctx, untrack, release := r.trackRun(ctx, agent, input)
+	defer release()
+	defer untrack()
+
 	agentDir := agentdesigner.AgentDir(r.agentsDir, input.WorkspaceID, input.AgentID)
 
 	// Read AGENT.md instructions (fall back to CLAUDE.md for legacy agents).
@@ -420,22 +436,30 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		connToolNames = append(connToolNames, d.Name)
 	}
 
+	// Asked before this run creates its own row, which would otherwise be the
+	// latest. A read failure only costs the notice, so it must not cost the run.
+	previousRunStopped, err := r.db.LatestRunStopped(input.AgentID)
+	if err != nil {
+		slog.Warn("agentrunner: could not check the previous run", "agent_id", input.AgentID, "err", err)
+	}
+
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
-		AgentMD:         string(agentMD),
-		StateJSON:       string(stateJSON),
-		RuntimeContext:  runtimeCtx,
-		UserMemory:      userMemory,
-		AllSkills:       skillRefs,
-		DeclaredSkills:  declaredSkills,
-		DeclaredContent: declaredContent,
-		SkillEnv:        skillEnv,
-		VaultRoot:       vaultRoot,
-		AgentDir:        agentDir,
-		ChatApps:        r.loadChatApps(input.WorkspaceID),
-		BackendType:     backendTypeOf(baseCoder),
-		Connections:     boundRefs,
-		ConnectionTools: connToolNames,
-		ConnectorBin:    connectorBinPath(),
+		PreviousRunStopped: previousRunStopped,
+		AgentMD:            string(agentMD),
+		StateJSON:          string(stateJSON),
+		RuntimeContext:     runtimeCtx,
+		UserMemory:         userMemory,
+		AllSkills:          skillRefs,
+		DeclaredSkills:     declaredSkills,
+		DeclaredContent:    declaredContent,
+		SkillEnv:           skillEnv,
+		VaultRoot:          vaultRoot,
+		AgentDir:           agentDir,
+		ChatApps:           r.loadChatApps(input.WorkspaceID),
+		BackendType:        backendTypeOf(baseCoder),
+		Connections:        boundRefs,
+		ConnectionTools:    connToolNames,
+		ConnectorBin:       connectorBinPath(),
 		// Described only when the runtime is actually present, so an install
 		// without it never promises the model a tool that would then fail. The
 		// acting half follows the agent's own grant: an agent that may only read
@@ -620,6 +644,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
+	// Untracked before the cause is read, so any Stop that reported success is seen
+	// here. Requiring runErr too means a run that finished in the same instant keeps
+	// its normal result. A server shutdown cancels with a different cause and stays
+	// an interrupted run, retried on the next boot.
+	untrack()
+	rctx.stopped = runErr != nil && errors.Is(context.Cause(ctx), ErrRunStopped)
+
 	// A coder that returned zero bytes did not run quietly — it did not run. Treat
 	// it as a failure so the run shows as failed, the message says what actually
 	// happened, and the next scheduled run is not preceded by a green tick.
@@ -655,7 +686,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"run_id", runID, "agent_id", input.AgentID, "agent", agent.Name,
 			"trigger", input.Trigger, "exit", exitCode,
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
-			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
+			"silent", rctx.silentSignaled, "stopped", rctx.stopped, "produced_nothing", producedNothing,
 			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
 			// "n/a" rather than 0 when the provider reported nothing: a zero
 			// would read as "caching is broken", which is a finding, when the
@@ -665,6 +696,20 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"stop_reason", rctx.stopReason,
 			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
+
+	if rctx.stopped {
+		// "Just stop it and nothing else": recorded in the run's history and log, with
+		// no chat message and no inbox row. Whatever [CHAT] it had not delivered stays
+		// undelivered and is kept in the record. The caller confirms the stop where it
+		// was asked for.
+		_ = r.db.FinishAgentRun(runID, rctx.outcome(-1,
+			strings.Join(rctx.chatLines, "\n"),
+			strings.Join(rctx.warnings, "\n")))
+		if input.OnProgress != nil {
+			input.OnProgress(runStoppedNotice)
+		}
+		return ErrRunStopped
+	}
 
 	if runErr != nil {
 		_ = r.db.FinishAgentRun(runID, rctx.outcome(-1,
@@ -770,6 +815,7 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 		AgentName:        agent.Name,
 		Trigger:          input.Trigger,
 		ExitCode:         exitCode,
+		Stopped:          rctx.stopped,
 		StartedAt:        startedAt,
 		FinishedAt:       time.Now().UTC(),
 		Output:           strings.Join(rctx.rawChunks, "\n\n———\n\n"),
@@ -844,6 +890,12 @@ func (r *Runner) runCoderTurns(
 		result, err := coderSvc.Generate(ctx, input.WorkspaceID, prompt)
 		rctx.turnsUsed++
 		if err != nil {
+			// A stopped API turn hands back what it had spent and done so far; what a
+			// looping agent cost is exactly what its owner wants to see.
+			if result != nil {
+				rctx.usage = addUsage(rctx.usage, result.Usage)
+				rctx.toolTrace = append(rctx.toolTrace, result.ToolTrace...)
+			}
 			return fmt.Errorf("coder generate: %w", err)
 		}
 		rctx.usage = addUsage(rctx.usage, result.Usage)
@@ -953,6 +1005,11 @@ func (r *Runner) runCoderTurns(
 			if err := r.Run(ctx, childInput); err != nil {
 				warn := fmt.Sprintf("child agent %s failed: %v", callName, err)
 				rctx.warnings = append(rctx.warnings, warn)
+			}
+			// Stopped while waiting on the child. Without this a child that said
+			// nothing ends the loop normally and this run reports success.
+			if errors.Is(context.Cause(ctx), ErrRunStopped) {
+				return ErrRunStopped
 			}
 
 			if len(childChat) > 0 {

@@ -54,12 +54,13 @@ var Commands = []Command{
 	{
 		Name:        "agent",
 		Description: "Create, edit and list your agents",
-		UsageHint:   "list | create <name> | edit <name> | cancel",
+		UsageHint:   "list | create <name> | edit <name> | cancel | stop [name]",
 		Help: []HelpLine{
 			{"list", "list your agents"},
 			{"create <name>", "build a new agent with AI wizard"},
 			{"edit <name>", "change an existing agent with AI wizard"},
 			{"cancel", "cancel active agent creation or edit"},
+			{"stop [name]", "stop a running agent, leaving what it already did as it is"},
 		},
 	},
 	{

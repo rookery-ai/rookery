@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Play } from "lucide-react";
+import { AlertTriangle, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ActivityCard,
@@ -17,6 +17,9 @@ type RunPanelProps = {
   // manual-run POST that kicked this one off) is already streaming; attach
   // to it on mount instead of waiting for a click.
   liveRun: boolean;
+  // AgentDetail.running — true for ANY run in flight, including a scheduled one
+  // that has no stream to attach to. This, not the stream, is what offers Stop.
+  running?: boolean;
 };
 
 // "▶ Run now" + the live SSE activity card for a manual run. useAgentActions'
@@ -24,8 +27,9 @@ type RunPanelProps = {
 // (run just started, status flipped to running); this component invalidates
 // again when the SSE stream reports done so the run-history list picks up
 // the finished run without a manual refresh.
-export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
-  const { run } = useAgentActions();
+export function RunPanel({ agentId, agentName, liveRun, running = false }: RunPanelProps) {
+  const { run, stopRun } = useAgentActions();
+  const [stopping, setStopping] = useState(false);
   const qc = useQueryClient();
   const [isRunning, setIsRunning] = useState(false);
   const [sse, setSse] = useState<{
@@ -146,16 +150,41 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
     }
   }
 
-  const busy = isRunning || sse?.status === "live";
+  async function handleStop() {
+    setError(null);
+    setStopping(true);
+    try {
+      // False means the run had already ended. True keeps showing "Stopping…" until
+      // the run actually finishes, which the stream or the detail poll reports.
+      if (!(await stopRun(agentId)) && !unmountedRef.current) setStopping(false);
+    } catch (err) {
+      if (unmountedRef.current) return;
+      setStopping(false);
+      setError(err instanceof ApiError ? err.message : "Something went wrong");
+    }
+  }
+
+  const busy = isRunning || sse?.status === "live" || running;
+
+  useEffect(() => {
+    if (!busy) setStopping(false);
+  }, [busy]);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Run</h2>
-        <Button size="sm" onClick={() => void handleRun()} disabled={busy}>
-          <Play />
-          Run now
-        </Button>
+        {busy ? (
+          <Button size="sm" variant="outline" onClick={() => void handleStop()} disabled={stopping}>
+            <Square />
+            {stopping ? "Stopping…" : "Stop"}
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => void handleRun()}>
+            <Play />
+            Run now
+          </Button>
+        )}
       </div>
 
       {error && (

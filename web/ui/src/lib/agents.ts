@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 
 // Mirrors web/api_agents.go's apiAgent struct (toAPIAgent).
 export type Agent = {
@@ -37,7 +37,7 @@ export type AgentSchedule = {
 export type AgentRun = {
   id: string;
   trigger: string;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "stopped";
   // The run emitted [SILENT] — it chose to say nothing, as distinct from
   // having nothing to say because it broke. Optional because a run recorded
   // before the column existed reports nothing here.
@@ -141,10 +141,16 @@ export type AgentBrowserGrants = {
   needs_irreversible: boolean;
 };
 
+const RUNNING_POLL_MS = 5000;
+
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],
     queryFn: () => api.get<{ agents: Agent[]; draft: AgentDraft }>("/api/v1/agents"),
+    // A scheduled run has no stream to report through, so a running agent is polled
+    // until it stops. That is also what clears the Stop button after pressing it.
+    refetchInterval: (query) =>
+      query.state.data?.agents?.some((a) => a.running) ? RUNNING_POLL_MS : false,
   });
 }
 
@@ -176,6 +182,7 @@ export function useAgentDetail(id: string | null) {
     queryKey: ["agent", id],
     queryFn: () => api.get<AgentDetail>(`/api/v1/agents/${id}`).then(normalizeAgentDetail),
     enabled: !!id,
+    refetchInterval: (query) => (query.state.data?.running ? RUNNING_POLL_MS : false),
   });
 }
 
@@ -195,6 +202,20 @@ export function useAgentActions() {
   const runMut = useMutation({
     mutationFn: (id: string) => api.post<{ status: string }>(`/api/v1/agents/${id}/run`),
     onSuccess: (_data, id) => invalidateAgent(id),
+  });
+
+  // Resolves false on 404: the run had already ended, which is not an error.
+  const stopRunMut = useMutation({
+    mutationFn: async (id: string) => {
+      try {
+        await api.post(`/api/v1/agents/${id}/run/stop`);
+        return true;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return false;
+        throw err;
+      }
+    },
+    onSettled: (_data, _err, id) => invalidateAgent(id),
   });
 
   const saveScheduleMut = useMutation({
@@ -240,6 +261,7 @@ export function useAgentActions() {
   return {
     del: (id: string) => delMut.mutateAsync(id),
     run: (id: string) => runMut.mutateAsync(id),
+    stopRun: (id: string) => stopRunMut.mutateAsync(id),
     saveSchedule: (id: string, cron: string) => saveScheduleMut.mutateAsync({ id, cron }),
     deleteSchedule: (id: string) => deleteScheduleMut.mutateAsync(id),
     saveAgentMD: (id: string, content: string) => saveAgentMDMut.mutateAsync({ id, content }),

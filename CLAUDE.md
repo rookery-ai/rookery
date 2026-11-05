@@ -603,7 +603,7 @@ Per-workspace chat adapter (Telegram, Discord, Slack) — stamps msg.WorkspaceID
   → GatewayManager.dispatch()
     → is this chat linked to THIS workspace? (platform_identities, scoped by workspace_id)
     → Router.Handle()
-      → /agent  → agentdesigner.Flow (conversational FSM)
+      → /agent  → agentdesigner.Flow (conversational FSM); /agent stop → agentrunner.Runner
       → /skill  → skilldesigner.Flow (conversational FSM; list/create/cancel)
       → /run    → agentrunner.Runner
       → /secret → SecretStore
@@ -2525,6 +2525,49 @@ only for `undefined`.
 The vault run note gains a `## Tool calls` section from the same collector
 (`progressLines`), since that note is the durable copy an agent can read.
 
+### Stopping a run
+
+**A run registers its cancel in the runner, because that is the one layer every
+trigger passes through** (`internal/agentrunner/stop.go`). The web tracker cannot own
+it: a cron or chat run has no entry there. `POST /api/v1/agents/:id/run/stop` and
+`/agent stop [name]` both land on the registry. Stop ends the current run and nothing
+else: the schedule is untouched, nothing is rolled back, and no chat or inbox message
+is sent. Four things are load-bearing:
+
+- **Stopped is read from the cancel's CAUSE, never from the error.** A cancelled API
+  turn can report `ErrTimeout` and a killed CLI coder reports `signal: killed`.
+  `Stop` cancels with `ErrRunStopped`, and children inherit it through their context.
+  A server shutdown cancels with a different cause, so it stays an interrupted run and
+  `ReconcileStaleRuns` still retries it on boot. A stopped run has `finished_at` set,
+  so it is never retried.
+- **`stopped` also requires `runErr != nil`, and the run untracks before reading the
+  cause.** A run that finished in the same instant keeps its normal result, and any
+  `Stop` that returned true is visible to the run. The loop returns `ErrRunStopped`
+  after a child call, or a child that said nothing would end the loop normally and a
+  stopped parent would record success.
+- **`exit_code` stays -1, so `stopped` is checked FIRST by every status mapper**
+  (`toAPIRun`, `toAPIDashboardRun`). A mapper that forgets shows a stopped run as
+  failed. The note's "Output sent to user" heading becomes "Output not sent" for the
+  same reason: that text never reached anyone.
+- **The next run gets one generic line and no details** (`previousRunStoppedBlock`).
+  `LatestRunStopped` is asked before the run creates its own row, which would
+  otherwise be the latest. `rowid` breaks the `started_at` tie, since a stop followed
+  by an immediate re-run shares a second. It is told about state in particular because
+  a `[STATE]` at the end of a reply never saves if the run is stopped first.
+
+**A cancelled API turn hands back a partial `Result` alongside its error**
+(`cancelledResult`): what a looping agent cost is exactly what its owner wants to see.
+Only a caller's cancel does this, so nothing else has to reason about a partial result.
+
+**Slack events each get their own goroutine**, as Telegram and Discord already do.
+Dispatch blocks for as long as a `/run` takes, so handling events inline meant that
+run's own `/agent stop` could not arrive until it had ended. A side effect shared with
+the other two adapters: two quick messages are no longer strictly ordered.
+
+**The SPA offers Stop from `agent.running`, not from the live stream**, because a cron
+run has no stream, and both agent pages poll while an agent is running. The list card
+is a link, so Stop sits beside it rather than inside it.
+
 ### Live run progress is retained, not piped
 
 **`agentRunState` holds `lines []string` and readers follow by index.** It used to
@@ -3549,7 +3592,7 @@ duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
-- **agents + design** — CRUD, run + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
 - **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test

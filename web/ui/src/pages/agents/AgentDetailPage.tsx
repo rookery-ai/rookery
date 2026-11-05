@@ -40,6 +40,14 @@ function RunStatusChip({ status }: { status: AgentRun["status"] }) {
       </span>
     );
   }
+  // Neutral, not red: the owner chose this, and nothing went wrong.
+  if (status === "stopped") {
+    return (
+      <span className="shrink-0 rounded-full bg-muted-surface px-2 py-0.5 text-xs font-medium text-foreground">
+        Stopped
+      </span>
+    );
+  }
   return (
     <span
       className={cn(
@@ -231,6 +239,7 @@ export default function AgentDetailPage() {
     agent_md,
     missing_secrets,
     live_run,
+    running,
     attached_skills,
     core_skills,
     all_skills,
@@ -291,7 +300,7 @@ export default function AgentDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_320px] md:mt-6">
         <div className="flex min-w-0 flex-col gap-6">
-          <RunPanel agentId={id} agentName={agent.name} liveRun={live_run} />
+          <RunPanel agentId={id} agentName={agent.name} liveRun={live_run} running={running} />
 
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4">
             <h2 className="text-sm font-semibold">Run history</h2>

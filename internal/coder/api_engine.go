@@ -117,6 +117,16 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 	return c.runToolLoop(ctx, prov, tools, req, start)
 }
 
+// cancelledResult keeps what a cancelled loop had spent and done, for a caller that
+// wants to record it. Nil unless the caller cancelled: every other failure keeps
+// returning no result, so nothing else has to reason about a partial one.
+func cancelledResult(ctx context.Context, usage llm.Usage, trace []ToolCallStat) *Result {
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		return nil
+	}
+	return &Result{Usage: usage, ToolTrace: trace}
+}
+
 // runToolLoop drives the Complete → execute host tools → feed results back →
 // Complete loop shared by runAPI (single user kickoff) and chatToolsAPI (threaded
 // chat history). It terminates when the model emits a final answer with no tool
@@ -137,7 +147,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	var stopReason string
 	for {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
+			return cancelledResult(ctx, total, toolTrace), fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 		}
 		// Counted at the top so paths that `continue` without running a tool still
 		// consume the hard ceiling — the loop is bounded by construction, not by the
@@ -166,7 +176,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 			}
-			return nil, c.mapProviderErr(err)
+			return cancelledResult(ctx, total, toolTrace), c.mapProviderErr(err)
 		}
 		total = addUsage(total, resp.Usage)
 
