@@ -8,7 +8,7 @@ export type DashboardRun = {
   id: string;
   agent_id: string;
   agent_name: string;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "stopped";
   trigger: string;
   started_at: string;
   finished_at: string | null;

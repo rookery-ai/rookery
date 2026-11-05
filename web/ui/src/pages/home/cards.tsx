@@ -60,6 +60,7 @@ export function QuickActions() {
 function statusDot(status: DashboardRun["status"]): string {
   if (status === "failed") return "bg-danger";
   if (status === "running") return "bg-warn";
+  if (status === "stopped") return "bg-muted-2";
   return "bg-ok";
 }
 
@@ -94,6 +95,7 @@ export function RecentActivityCard({ runs }: { runs: DashboardRun[] }) {
                   {" · "}
                   {r.trigger}
                   {r.status === "failed" && <span className="text-danger"> · failed</span>}
+                  {r.status === "stopped" && <span> · stopped</span>}
                 </span>
               </span>
               <span className="shrink-0 text-xs text-muted-2">

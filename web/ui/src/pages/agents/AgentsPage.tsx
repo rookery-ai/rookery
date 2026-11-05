@@ -1,40 +1,70 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Plus, Search, Undo2 } from "lucide-react";
+import { Bot, Plus, Search, Square, Undo2 } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
-import { useAgents, type Agent, type AgentDraft } from "@/lib/agents";
+import { useAgentActions, useAgents, type Agent, type AgentDraft } from "@/lib/agents";
 import { StatusChip } from "./StatusChip";
+
+// Sits beside the card's link rather than inside it: a button inside an anchor is
+// invalid HTML, and clicking it would open the agent as well as stop it.
+function StopRunButton({ agentId }: { agentId: string }) {
+  const { stopRun } = useAgentActions();
+  const [stopping, setStopping] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="absolute bottom-3 right-3"
+      disabled={stopping}
+      onClick={() => {
+        setStopping(true);
+        stopRun(agentId).then(
+          (stopped) => {
+            if (!stopped) setStopping(false);
+          },
+          () => setStopping(false),
+        );
+      }}
+    >
+      <Square />
+      {stopping ? "Stopping…" : "Stop"}
+    </Button>
+  );
+}
 
 function AgentCard({ agent }: { agent: Agent }) {
   return (
-    <Link
-      to={`/agents/${agent.id}`}
-      className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold leading-tight">{agent.name}</h3>
-        <StatusChip agent={agent} />
-      </div>
-      <p className="flex-1 text-sm leading-relaxed text-muted-2">
-        {agent.description || (
-          <em className="text-muted-2/70">No description</em>
-        )}
-      </p>
-      {/* Last run rather than Created, falling back to Created when the agent
-          has never run. The card is a summary, so it gets one date line — and
-          "when did this last do anything" is the question you open this page
-          with, while an agent that has never run has nothing else to say. */}
-      <p className="text-xs text-muted-2/80">
-        {agent.last_run_at
-          ? `Last run ${timeAgo(agent.last_run_at)}`
-          : `Created ${timeAgo(agent.created_at)}`}
-      </p>
-    </Link>
+    <div className="relative">
+      <Link
+        to={`/agents/${agent.id}`}
+        className="flex h-full flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="font-semibold leading-tight">{agent.name}</h3>
+          <StatusChip agent={agent} />
+        </div>
+        <p className="flex-1 text-sm leading-relaxed text-muted-2">
+          {agent.description || (
+            <em className="text-muted-2/70">No description</em>
+          )}
+        </p>
+        {/* Last run rather than Created, falling back to Created when the agent
+            has never run. The card is a summary, so it gets one date line — and
+            "when did this last do anything" is the question you open this page
+            with, while an agent that has never run has nothing else to say. */}
+        <p className="text-xs text-muted-2/80">
+          {agent.last_run_at
+            ? `Last run ${timeAgo(agent.last_run_at)}`
+            : `Created ${timeAgo(agent.created_at)}`}
+        </p>
+      </Link>
+      {agent.running && <StopRunButton agentId={agent.id} />}
+    </div>
   );
 }
 
