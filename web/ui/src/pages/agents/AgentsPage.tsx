@@ -6,7 +6,7 @@ import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { api } from "@/lib/api";
-import { timeAgo } from "@/lib/utils";
+import { cn, timeAgo } from "@/lib/utils";
 import { useAgentActions, useAgents, type Agent, type AgentDraft } from "@/lib/agents";
 import { StatusChip } from "./StatusChip";
 
@@ -42,7 +42,11 @@ function AgentCard({ agent }: { agent: Agent }) {
     <div className="relative">
       <Link
         to={`/agents/${agent.id}`}
-        className="flex h-full flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
+        className={cn(
+          "flex h-full flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm",
+          // Room for the Stop button, so it never sits on top of the description.
+          agent.running && "pb-12",
+        )}
       >
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold leading-tight">{agent.name}</h3>
