@@ -3,15 +3,76 @@ import { AlertTriangle, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
-import { useAgentActions, type AgentSchedule } from "@/lib/agents";
+import { useAgentActions, type AgentSchedule, type AgentScheduleSync } from "@/lib/agents";
 import { describeCronSentence } from "@/lib/cron";
 
 type ScheduleCardProps = {
   agentId: string;
   schedule: AgentSchedule;
+  sync?: AgentScheduleSync;
 };
 
-export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
+// ScheduleSyncNote says what happened to the sentences in this agent's instructions.
+// Every change is shown with its original text, because a model made it and nobody was
+// asked first. A pass that found nothing to do shows nothing.
+function ScheduleSyncNote({ sync }: { sync: AgentScheduleSync | undefined }) {
+  if (!sync) return null;
+  if (sync.state === "running") {
+    return (
+      <p role="status" className="text-xs text-muted-2">
+        Checking the instructions for sentences that mention the old timing…
+      </p>
+    );
+  }
+  if (sync.state === "failed") {
+    return (
+      <div className="flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          The schedule is saved, but sentences in the instructions that mention timing were not
+          checked. {sync.error} Save again to retry.
+        </span>
+      </div>
+    );
+  }
+  const refused = sync.refused > 0;
+  if (sync.changes.length === 0 && sync.review.length === 0 && !refused) return null;
+  return (
+    <div className="flex flex-col gap-2 text-xs text-muted-2">
+      {sync.changes.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="font-medium text-foreground">Updated in the instructions</p>
+          <ul className="flex flex-col gap-1">
+            {sync.changes.map((c) => (
+              <li key={c.find} className="break-words">
+                <span className="line-through">{c.find}</span> → {c.replace}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {sync.review.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="font-medium text-foreground">Worth checking, left as written</p>
+          <ul className="flex flex-col gap-1">
+            {sync.review.map((line) => (
+              <li key={line} className="break-words">{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {refused && (
+        <p>
+          {sync.refused === 1
+            ? "One suggested change was not safe to apply, so the instructions may still mention the old timing."
+            : `${sync.refused} suggested changes were not safe to apply, so the instructions may still mention the old timing.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function ScheduleCard({ agentId, schedule, sync }: ScheduleCardProps) {
   const { saveSchedule, deleteSchedule } = useAgentActions();
   const [cron, setCron] = useState(schedule?.cron_expr ?? "");
   const [saving, setSaving] = useState(false);
@@ -84,6 +145,8 @@ export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
           {error}
         </div>
       )}
+
+      <ScheduleSyncNote sync={sync} />
 
       <div className="flex gap-2">
         <Button

@@ -12,6 +12,8 @@ type AgentMDCardProps = {
   missingSecrets: string[];
 };
 
+const SCHEDULE_HEADER = "# Suggested schedule:";
+
 export function AgentMDCard({
   agentId,
   content,
@@ -28,6 +30,20 @@ export function AgentMDCard({
   useEffect(() => {
     if (!editing) setDraft(content);
   }, [content, editing]);
+
+  // While editing, adopt only a new schedule line. Saving a draft whose header differs
+  // from the file counts as changing the schedule, so a draft opened before the
+  // Schedule card was used would otherwise quietly put the old schedule back.
+  useEffect(() => {
+    const header = content.split("\n", 1)[0];
+    if (!header.startsWith(SCHEDULE_HEADER)) return;
+    setDraft((d) => {
+      const nl = d.indexOf("\n");
+      const first = nl < 0 ? d : d.slice(0, nl);
+      if (!first.startsWith(SCHEDULE_HEADER) || first === header) return d;
+      return header + (nl < 0 ? "" : d.slice(nl));
+    });
+  }, [content]);
 
   function startEditing() {
     setError(null);

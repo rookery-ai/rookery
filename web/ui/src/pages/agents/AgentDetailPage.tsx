@@ -337,7 +337,7 @@ export default function AgentDetailPage() {
             agentId={id}
             grants={browser ?? { available: false, irreversible: false, needs_irreversible: false }}
           />
-          <ScheduleCard agentId={id} schedule={schedule} />
+          <ScheduleCard agentId={id} schedule={schedule} sync={detail.schedule_sync} />
           <SkillsCard
             agentId={id}
             attachedSkills={attached_skills}

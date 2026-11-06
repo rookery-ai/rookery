@@ -2487,6 +2487,47 @@ load-bearing:
 Residual, stated rather than hidden: the running check is check-then-write, the same shape as the
 `state.md` 409 guard, so a run starting in the gap can write a note under the old name.
 
+### Changing a schedule updates everything that states it
+
+`agent_schedules` decides what runs; everything else is a statement of it. The Schedule card used to
+write the row alone, so `AGENT.md` went on announcing the old time, and Remove left a file naming a
+cron for an agent with no schedule. `web/schedule_sync.go`'s `applyScheduleChange` is now the one
+path: the row first, then the `# Suggested schedule:` header and whole-token mentions of the old cron
+in code (`agentdesigner.SetScheduleHeader`/`ReplaceCronLiteral`), this agent's edit draft, and the
+description when it is still derived from the file. Sentences ("every Tuesday at 7am") follow in a
+background model pass, reported as `schedule_sync` on the agent detail and shown on the card. Six
+things are load-bearing:
+
+- **The model never returns a file.** It returns exact `{find, replace}` pairs, and
+  `ApplyScheduleEdits` refuses any that is not a single line occurring exactly once, touches a header
+  or `[CALL:` line, or adds a protocol marker; the batch is capped. That is what lets a model edit an
+  agent's instructions unattended, since it cannot drop a step. Every applied edit is shown with its
+  original text, and a line whose logic depends on the old timing comes back in `review`, unedited.
+- **The pass is told what the file should state, not what changed**, so a later save can cancel an
+  earlier pass and saving A, B, C converges on C. Saving an unchanged value re-runs it, which is also
+  how a file that drifted earlier repairs itself. There is deliberately no startup backfill: it would
+  edit files nobody asked to change.
+- **The pass is detached and its failure is never the save's failure.** A CLI coder can take minutes
+  and a dead coder must not stop an owner changing a schedule. `scheduleProse` is nil unless `serve`
+  calls `EnableScheduleProseSync`, so a test saving a schedule cannot reach a real coder, which would
+  be a paid call wherever a `claude` binary is on PATH.
+- **A live edit session of THIS agent refuses a schedule change (409), and an edit draft is
+  rewritten.** Both hold their own `AGENT.md`, and approving one runs `reconcileScheduleOnSave`, which
+  would restore the old schedule. Unlike a rename this is not refused for other agents' sessions,
+  which cannot do that. Residual: a draft's conversation history may still name the old schedule, so a
+  rebuild from it can write it back; the header is visible at review.
+- **The AGENT.md card compares a saved header with the FILE, never the row.** A header the owner
+  changed is a schedule change (an invalid one is a 400, `none` removes). One they left alone is
+  rewritten from the row. Comparing with the row would make fixing a typo in a drifted file re-time
+  the agent. `reconcileScheduleOnSave` is not reused here because it deletes the schedule when the
+  header is missing or invalid, which is right for a coder's output and wrong for a hand edit.
+- **The KB editor can never change a schedule.** It autosaves, so a save to `agents/<id>/AGENT.md` has
+  its header set from the row: a stale tab must not re-time an agent.
+
+Left alone on purpose: `state.md`, `tools/`, run notes and the audit log, which are the agent's memory
+and records of what happened. A pass lost to a restart leaves the header correct; saving again finishes
+it.
+
 ### Agent output protocol (AGENT.md)
 
 - **`[CHAT]`** — sends a message to the user. A `[CHAT]` block runs until the next protocol marker (`[STATE]`, `[CALL]`, `[SILENT]`, a new `[CHAT]`) or end of output; **blank lines are part of the message, not a terminator** (an earlier rule ended the block at a blank line and silently dropped real content — fixed). Empty/whitespace-only `[CHAT]` blocks are dropped (never deliver a blank message).

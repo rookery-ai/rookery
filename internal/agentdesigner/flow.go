@@ -707,10 +707,10 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 
 // loadAgentForEdit loads an existing agent's name and AGENT.md, reconciling the
 // AGENT.md's "# Suggested schedule:" first line with the real agent_schedules row
-// before returning it. The schedule UI writes the DB directly and never touches
-// AGENT.md, so the on-disk line can be stale; reconciling here makes AGENT.md the
-// single source of truth for the rest of the edit (both what the coder sees and what
-// finalize compares against).
+// before returning it. The schedule card keeps the file in step, but an agent or chat
+// can write the file too and a file can predate that, so the on-disk line can still be
+// stale; reconciling here makes AGENT.md the single source of truth for the rest of the
+// edit (both what the coder sees and what finalize compares against).
 func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconciledMD string, tools map[string]string, err error) {
 	if f.db == nil {
 		return "", "", nil, fmt.Errorf("no database configured")
@@ -727,17 +727,11 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 	}
 	agentMD := strings.TrimSpace(string(raw))
 
-	scheduleLine := "# Suggested schedule: none"
+	cronExpr := ""
 	if sched, schedErr := f.db.GetScheduleForAgent(agentID); schedErr == nil && sched != nil && sched.Enabled {
-		scheduleLine = "# Suggested schedule: " + sched.CronExpr
+		cronExpr = sched.CronExpr
 	}
-
-	lines := strings.SplitN(agentMD, "\n", 2)
-	if len(lines) == 2 && strings.HasPrefix(strings.TrimSpace(lines[0]), "# Suggested schedule:") {
-		agentMD = scheduleLine + "\n" + lines[1]
-	} else {
-		agentMD = scheduleLine + "\n" + agentMD
-	}
+	agentMD = SetScheduleHeader(agentMD, cronExpr)
 
 	attachedSkills, skillsKnown := f.skillNamesForAgent(agentID)
 	agentMD = reconcileSkillsLine(agentMD, attachedSkills, skillsKnown)

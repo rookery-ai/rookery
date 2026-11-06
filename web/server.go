@@ -89,6 +89,12 @@ type Server struct {
 	runs   map[string]*agentRunState
 	runsMu sync.Mutex
 
+	// scheduleSync tracks the pass that keeps an agent's sentences in step with its
+	// schedule. scheduleProse is the model call behind it: nil turns the pass off, and
+	// only EnableScheduleProseSync sets it, so tests cannot reach a real coder.
+	scheduleSync  scheduleSyncTracker
+	scheduleProse func(ctx context.Context, workspaceID, prompt string) (string, error)
+
 	// chatTurns tracks in-flight chat turns for exactly the same reason, keyed
 	// by chatID. A chat turn used to run on the REQUEST context with both
 	// messages persisted only after the coder returned, so leaving the page

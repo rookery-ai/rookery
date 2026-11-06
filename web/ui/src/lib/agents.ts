@@ -34,6 +34,15 @@ export type AgentSchedule = {
   enabled: boolean;
 } | null;
 
+// Mirrors apiScheduleSync: the pass that rewords sentences stating when an agent runs.
+export type AgentScheduleSync = {
+  state: "running" | "done" | "failed";
+  changes: { find: string; replace: string }[];
+  review: string[];
+  refused: number;
+  error?: string;
+} | null;
+
 // Mirrors toAPIRun.
 export type AgentRun = {
   id: string;
@@ -114,6 +123,7 @@ export type Connection = {
 export type AgentDetail = {
   agent: Agent;
   schedule: AgentSchedule;
+  schedule_sync?: AgentScheduleSync;
   runs: AgentRun[];
   agent_md: string;
   state: string;
@@ -143,6 +153,7 @@ export type AgentBrowserGrants = {
 };
 
 const RUNNING_POLL_MS = 5000;
+const SCHEDULE_SYNC_POLL_MS = 2000;
 
 export function useAgents() {
   return useQuery({
@@ -183,7 +194,10 @@ export function useAgentDetail(id: string | null) {
     queryKey: ["agent", id],
     queryFn: () => api.get<AgentDetail>(`/api/v1/agents/${id}`).then(normalizeAgentDetail),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.running ? RUNNING_POLL_MS : false),
+    refetchInterval: (query) => {
+      if (query.state.data?.schedule_sync?.state === "running") return SCHEDULE_SYNC_POLL_MS;
+      return query.state.data?.running ? RUNNING_POLL_MS : false;
+    },
   });
 }
 

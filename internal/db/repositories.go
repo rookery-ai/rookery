@@ -1858,6 +1858,14 @@ func (d *DB) GetAgentDraft(workspaceID string) (*AgentDraft, error) {
 }
 
 // DeleteAgentDraft removes the user's draft.
+// UpdateEditDraftAgentMD replaces the pending AGENT.md of one agent's edit draft. It is
+// scoped to the agent because a workspace's single draft may belong to another one.
+func (d *DB) UpdateEditDraftAgentMD(workspaceID, agentID, agentMD string) error {
+	_, err := d.Exec(`UPDATE agent_drafts SET pending_agent_md=? WHERE workspace_id=? AND agent_id=? AND is_edit=1`,
+		agentMD, workspaceID, agentID)
+	return err
+}
+
 func (d *DB) DeleteAgentDraft(workspaceID string) error {
 	_, err := d.Exec(`DELETE FROM agent_drafts WHERE workspace_id=?`, workspaceID)
 	return err
