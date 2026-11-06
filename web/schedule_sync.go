@@ -286,9 +286,10 @@ func (s *Server) startScheduleProse(workspaceID string, agent *db.Agent, cronExp
 		if ctx.Err() == context.Canceled {
 			return // replaced by a newer save, which reports for itself
 		}
-		s.finishScheduleSync(agent.ID, gen, status)
 		s.audit.Log(workspaceID, "schedule_text_sync", "agent:"+agent.ID,
 			fmt.Sprintf("%s: %d edited, %d to review, %d refused", status.State, len(status.Changes), len(status.Review), status.Refused), "")
+		// Last, so a reader seeing the outcome knows the pass has finished all its work.
+		s.finishScheduleSync(agent.ID, gen, status)
 	}()
 }
 
