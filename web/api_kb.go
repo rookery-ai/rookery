@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/convert"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/export"
@@ -837,11 +838,28 @@ func (s *Server) apiSaveKBNote(c echo.Context) error {
 			"this agent is running right now — its state.md will be overwritten when the run finishes. Wait for it to finish, then save your edit.")
 	}
 	content := normalizeNewlines(req.Content)
+	// This editor autosaves, so what it holds is not a decision about the schedule: a
+	// stale tab must not re-time an agent, and it must not put an old time back in the
+	// file either. The schedule card and the agent page's editor are the deliberate doors.
+	if agentID, ok := agentIDFromAgentMDPath(rel); ok {
+		if agent, err := s.getOwnedAgent(u.ID, agentID); err == nil {
+			content = agentdesigner.SetScheduleHeader(content, s.currentCron(agent.ID))
+		}
+	}
 	if err := s.vault.WriteNote(u.ID, rel, []byte(content)); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "save failed: "+err.Error())
 	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+// agentIDFromAgentMDPath is agentIDFromStatePath's sibling for agents/<id>/AGENT.md.
+func agentIDFromAgentMDPath(rel string) (string, bool) {
+	parts := strings.Split(strings.TrimPrefix(path.Clean("/"+rel), "/"), "/")
+	if len(parts) != 3 || !strings.EqualFold(parts[0], "agents") || !strings.EqualFold(parts[2], "AGENT.md") {
+		return "", false
+	}
+	return parts[1], parts[1] != ""
 }
 
 // apiNewKBNote ports handleNewKBNote. The template form takes dir+name+kind

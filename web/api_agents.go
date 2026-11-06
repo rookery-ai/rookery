@@ -10,13 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/agentrunner"
 	"github.com/rookery-ai/rookery/internal/db"
-	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/secrets"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
 	"github.com/rookery-ai/rookery/internal/vault"
@@ -210,6 +208,7 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 	return map[string]any{
 		"agent":                   s.toAPIAgent(d.Agent),
 		"schedule":                toAPISchedule(d.Schedule),
+		"schedule_sync":           s.scheduleSyncStatus(d.Agent.ID),
 		"runs":                    runs,
 		"agent_md":                d.AgentMD,
 		"state":                   d.State,
@@ -448,32 +447,15 @@ func (s *Server) apiSaveSchedule(c echo.Context) error {
 	}
 
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	sched, parseErr := parser.Parse(cronExpr)
-	if parseErr != nil {
+	if _, parseErr := parser.Parse(cronExpr); parseErr != nil {
 		return jsonErr(c, http.StatusBadRequest, "invalid_cron", "invalid cron expression: "+parseErr.Error())
 	}
 
-	// Store the zone the expression is meant to be read in. An owner typing
-	// "0 8 * * *" means 08:00 where THEY are, not where the server is; an empty
-	// profile timezone yields "" + time.Local, which is the pre-column behaviour.
-	tz, loc := profile.ScheduleZone(s.db, u.ID)
-	nextRun := sched.Next(time.Now().In(loc))
-	// Reuse existing schedule ID so ON CONFLICT(id) updates rather than inserts.
-	existing, _ := s.db.GetScheduleForAgent(agent.ID)
-	schedID := uuid.New().String()
-	if existing != nil {
-		schedID = existing.ID
+	if s.agentEditOpen(u.ID, agent.ID) {
+		return jsonErr(c, http.StatusConflict, "design_in_progress", agentEditOpenMsg)
 	}
-	row := &db.AgentSchedule{
-		ID:          schedID,
-		AgentID:     agent.ID,
-		WorkspaceID: u.ID,
-		CronExpr:    cronExpr,
-		NextRunAt:   &nextRun,
-		Enabled:     true,
-		Timezone:    tz,
-	}
-	if err := s.db.UpsertAgentSchedule(row); err != nil {
+	row, err := s.applyScheduleChange(u.ID, agent, cronExpr)
+	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save schedule: "+err.Error())
 	}
 	s.audit.Log(u.ID, "save_schedule", "agent:"+agent.ID, cronExpr, c.RealIP())
@@ -486,7 +468,12 @@ func (s *Server) apiDeleteSchedule(c echo.Context) error {
 	if err != nil {
 		return jsonErr(c, http.StatusNotFound, "not_found", "agent not found")
 	}
-	_ = s.db.DeleteAgentSchedule(agent.ID)
+	if s.agentEditOpen(u.ID, agent.ID) {
+		return jsonErr(c, http.StatusConflict, "design_in_progress", agentEditOpenMsg)
+	}
+	if _, err := s.applyScheduleChange(u.ID, agent, ""); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to remove schedule: "+err.Error())
+	}
 	s.audit.Log(u.ID, "delete_schedule", "agent:"+agent.ID, "", c.RealIP())
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
 }
@@ -509,9 +496,37 @@ func (s *Server) apiSaveAgentMD(c echo.Context) error {
 		return jsonErr(c, http.StatusBadRequest, "ethics_blocked", "AGENT.md failed safety check: "+err.Error())
 	}
 
-	dir := s.agentsDir()
-	if err := os.WriteFile(agentdesigner.AgentDescPath(dir, u.ID, agent.ID), []byte(req.Content), 0o640); err != nil {
+	path := agentdesigner.AgentDescPath(s.agentsDir(), u.ID, agent.ID)
+	s.scheduleSync.fileMu.Lock()
+	disk, _ := os.ReadFile(path)
+	s.scheduleSync.fileMu.Unlock()
+
+	rowCron := s.currentCron(agent.ID)
+	cronExpr, change, err := resolveAgentMDSave(req.Content, string(disk))
+	if err != nil {
+		return jsonErr(c, http.StatusBadRequest, "invalid_cron", "invalid cron expression in the schedule line: "+err.Error())
+	}
+	change = change && cronExpr != rowCron
+	if change && s.agentEditOpen(u.ID, agent.ID) {
+		return jsonErr(c, http.StatusConflict, "design_in_progress", agentEditOpenMsg)
+	}
+
+	content := req.Content
+	if !change {
+		content = agentdesigner.SetScheduleHeader(content, rowCron)
+	}
+	s.scheduleSync.fileMu.Lock()
+	err = writeAgentMDAtomic(path, content)
+	s.scheduleSync.fileMu.Unlock()
+	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "write failed: "+err.Error())
+	}
+	if change {
+		diskHeader, _ := agentdesigner.ReadScheduleHeader(string(disk))
+		if _, err := s.applyScheduleChange(u.ID, agent, cronExpr, diskHeader); err != nil {
+			return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save schedule: "+err.Error())
+		}
+		s.audit.Log(u.ID, "save_schedule", "agent:"+agent.ID, cronExpr, c.RealIP())
 	}
 
 	data := s.loadAgentDetail(c.Request().Context(), agent, u.ID)

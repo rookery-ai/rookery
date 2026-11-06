@@ -810,6 +810,7 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("create server: %w", err)
 			}
 			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithMCP(mcpClient, mcpBridge).WithBrowser(browserMgr, browserBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
+			srv.EnableScheduleProseSync()
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
