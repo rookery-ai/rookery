@@ -49,6 +49,7 @@ func (r *editRecorder) waitFor(t *testing.T, n int) []string {
 func quickTrace(header string, r *editRecorder) *stepTrace {
 	tr := newStepTrace(header, r.edit)
 	tr.interval = time.Millisecond
+	tr.waitingInterval = time.Millisecond
 	return tr
 }
 
@@ -64,15 +65,9 @@ func TestStepTraceRendersRunningList(t *testing.T) {
 	r.waitFor(t, 1)
 	tr.Step(readLine)
 	got := r.waitFor(t, 2)
-	last := got[len(got)-1]
-	for _, want := range []string{
-		"✓ 📚 Searched knowledge base: `report`",
-		"⏳ 📄 Reading `notes/a.md`",
-		"_step 2 · 0:00_",
-	} {
-		if !strings.Contains(last, want) {
-			t.Errorf("missing %q in:\n%s", want, last)
-		}
+	want := "✓ 📚 Searched knowledge base: `report`\n⏳ 📄 Reading `notes/a.md`"
+	if last := got[len(got)-1]; last != want {
+		t.Errorf("got:\n%s\nwant:\n%s", last, want)
 	}
 }
 
@@ -95,14 +90,11 @@ func TestStepTraceCollapsesOlderSteps(t *testing.T) {
 	text := tr.render()
 	tr.mu.Unlock()
 	tr.Close()
-	if !strings.Contains(text, "_+3 earlier_") {
+	if !strings.HasPrefix(text, "_+3 earlier_\n") {
 		t.Errorf("older steps not collapsed:\n%s", text)
 	}
 	if n := strings.Count(text, "knowledge base"); n != stepTraceVisible {
 		t.Errorf("showed %d steps, want %d", n, stepTraceVisible)
-	}
-	if !strings.Contains(text, "_step 8 ·") {
-		t.Errorf("count should cover every step:\n%s", text)
 	}
 }
 
@@ -110,16 +102,18 @@ func TestStepTraceCoalescesWithinInterval(t *testing.T) {
 	r := &editRecorder{}
 	tr := newStepTrace("", r.edit)
 	tr.interval = 100 * time.Millisecond
+	tr.Step(searchLine)
+	r.waitFor(t, 1)
 	for i := 0; i < 20; i++ {
-		tr.Step(searchLine)
+		tr.Step(readLine)
 	}
-	got := r.waitFor(t, 1)
+	got := r.waitFor(t, 2)
 	time.Sleep(250 * time.Millisecond)
 	got = r.all()
-	if len(got) > 2 {
-		t.Errorf("20 quick steps produced %d edits", len(got))
+	if len(got) != 2 {
+		t.Errorf("20 quick steps produced %d edits", len(got)-1)
 	}
-	if !strings.Contains(got[len(got)-1], "_step 20 ·") {
+	if !strings.HasSuffix(got[len(got)-1], "Reading `notes/a.md`") {
 		t.Errorf("the newest state was never flushed: %q", got[len(got)-1])
 	}
 	tr.Close()
@@ -147,8 +141,8 @@ func TestStepDoesNotBlockOnSlowEdit(t *testing.T) {
 }
 
 // The race this type exists to close: the final send clears the placeholder, so
-// a flush finishing after it would post the old list below the answer.
-func TestSummaryWaitsForInFlightFlushAndNothingFollows(t *testing.T) {
+// an edit finishing after it would post the old list below the answer.
+func TestPauseWaitsForInFlightEditAndNothingFollows(t *testing.T) {
 	release := make(chan struct{})
 	r := &editRecorder{block: release}
 	tr := quickTrace("", r)
@@ -156,57 +150,93 @@ func TestSummaryWaitsForInFlightFlushAndNothingFollows(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	tr.Step(readLine) // scheduled while the first flush is stuck
 
-	summarised := make(chan string)
-	go func() { summarised <- tr.Summary() }()
+	paused := make(chan struct{})
+	go func() {
+		tr.Pause()
+		close(paused)
+	}()
 	select {
-	case <-summarised:
-		t.Fatal("Summary returned while a flush was in flight")
+	case <-paused:
+		t.Fatal("Pause returned while an edit was in flight")
 	case <-time.After(30 * time.Millisecond):
 	}
 	close(release)
-	if got := <-summarised; !strings.Contains(got, "2 steps") {
-		t.Errorf("summary = %q", got)
-	}
+	<-paused
 	n := len(r.all())
 	time.Sleep(30 * time.Millisecond)
 	if after := len(r.all()); after != n {
-		t.Errorf("%d edits landed after Summary", after-n)
+		t.Errorf("%d edits landed after Pause", after-n)
 	}
 }
 
-func TestStepAfterSummaryResumes(t *testing.T) {
+func TestStepAfterPauseResumes(t *testing.T) {
 	r := &editRecorder{}
 	tr := quickTrace("", r)
 	tr.Step(searchLine)
 	r.waitFor(t, 1)
-	if tr.Summary() == "" {
-		t.Fatal("no summary after a step")
-	}
-	if got := tr.Summary(); got != "" {
-		t.Errorf("a second summary with no new step = %q", got)
-	}
+	tr.Pause()
 	tr.Step(readLine)
-	if got := r.waitFor(t, 2); !strings.Contains(got[1], "_step 2 ·") {
+	if got := r.waitFor(t, 2); !strings.Contains(got[1], "Reading") {
 		t.Errorf("trace did not resume: %q", got[1])
 	}
-	if got := tr.Summary(); !strings.Contains(got, "2 steps") {
-		t.Errorf("summary should be cumulative: %q", got)
+	tr.Close()
+}
+
+func TestWaitingPhraseRotatesThroughEveryPhrase(t *testing.T) {
+	r := &editRecorder{}
+	tr := quickTrace("", r)
+	tr.StartWaiting()
+	got := r.waitFor(t, len(waitingPhrases))[:len(waitingPhrases)]
+	tr.Close()
+	for i, line := range got {
+		if i > 0 && line == got[i-1] {
+			t.Errorf("phrase did not change: %q", got)
+		}
+	}
+	for _, phrase := range waitingPhrases {
+		if !strings.Contains(strings.Join(got, "\n"), phrase) {
+			t.Errorf("%q never appeared in %q", phrase, got)
+		}
 	}
 }
 
-func TestNoStepsMeansNoSummary(t *testing.T) {
-	tr := quickTrace("", &editRecorder{})
-	if got := tr.withSummary("answer"); got != "answer" {
+func TestWaitingPhraseKeepsHeader(t *testing.T) {
+	r := &editRecorder{}
+	tr := quickTrace("Running agent **x**...", r)
+	tr.StartWaiting()
+	got := r.waitFor(t, 1)[0]
+	tr.Close()
+	if !strings.HasPrefix(got, "Running agent **x**...\n\n⏳ _") {
 		t.Errorf("got %q", got)
 	}
 }
 
-func TestSummaryUsesSingularForOneStep(t *testing.T) {
+func TestFirstStepEndsTheWaitingPhrase(t *testing.T) {
 	r := &editRecorder{}
 	tr := quickTrace("", r)
+	tr.waitingInterval = 20 * time.Millisecond
+	tr.StartWaiting()
+	r.waitFor(t, 1)
 	tr.Step(searchLine)
-	if got := tr.Summary(); !strings.HasPrefix(got, "_✓ 1 step ·") {
-		t.Errorf("summary = %q", got)
+	time.Sleep(100 * time.Millisecond)
+	got := r.all()
+	tr.Close()
+	if last := got[len(got)-1]; !strings.Contains(last, "Searching knowledge base") {
+		t.Errorf("a phrase replaced the step: %q", got)
+	}
+}
+
+func TestPauseStopsTheWaitingPhrase(t *testing.T) {
+	r := &editRecorder{}
+	tr := quickTrace("", r)
+	tr.waitingInterval = 5 * time.Millisecond
+	tr.StartWaiting()
+	r.waitFor(t, 1)
+	tr.Pause()
+	n := len(r.all())
+	time.Sleep(30 * time.Millisecond)
+	if after := len(r.all()); after != n {
+		t.Errorf("%d phrases landed after Pause", after-n)
 	}
 }
 
@@ -215,6 +245,7 @@ func TestStepAfterCloseIsIgnored(t *testing.T) {
 	tr := quickTrace("", r)
 	tr.Close()
 	tr.Step(searchLine)
+	tr.StartWaiting()
 	time.Sleep(20 * time.Millisecond)
 	if got := r.all(); len(got) != 0 {
 		t.Errorf("edits after Close: %v", got)
@@ -223,11 +254,10 @@ func TestStepAfterCloseIsIgnored(t *testing.T) {
 
 func TestNilTraceIsSafe(t *testing.T) {
 	var tr *stepTrace
+	tr.StartWaiting()
 	tr.Step(searchLine)
+	tr.Pause()
 	tr.Close()
-	if got := tr.withSummary("x"); got != "x" {
-		t.Errorf("got %q", got)
-	}
 	if newStepTrace("", nil) != nil {
 		t.Error("no editor should mean no trace")
 	}
@@ -239,9 +269,9 @@ func TestTraceSurvivesEveryRenderer(t *testing.T) {
 	tr := quickTrace("", r)
 	tr.Step("🔧 read_file(notes/my_file_name.md)")
 	tr.Step("🔧 search_files(a*b [c] <d> ~e~ |f| _g_)")
-	got := r.waitFor(t, 1)
+	r.waitFor(t, 1)
 	time.Sleep(10 * time.Millisecond)
-	got = r.all()
+	got := r.all()
 	last := got[len(got)-1]
 	tr.Close()
 
@@ -256,9 +286,17 @@ func TestTraceSurvivesEveryRenderer(t *testing.T) {
 		if strings.Contains(out, "```") {
 			t.Errorf("%s rendered a code block:\n%s", platform, out)
 		}
-		lines := strings.Split(out, "\n")
-		if len(lines) < 3 {
+		if len(strings.Split(out, "\n")) < 2 {
 			t.Errorf("%s collapsed the list onto one line:\n%s", platform, out)
+		}
+	}
+}
+
+func TestEveryWaitingPhraseRendersCleanly(t *testing.T) {
+	for i := range waitingPhrases {
+		out := render.For("telegram").Render(waitingLine(i))
+		if !strings.HasSuffix(out, `\.\.\._`) || !strings.HasPrefix(out, "⏳ _") {
+			t.Errorf("phrase %d rendered as %q", i, out)
 		}
 	}
 }

@@ -4,6 +4,8 @@
 
 **Goal:** Edit the chat-app placeholder into a live, plain-language list of tool steps for chat turns and `/run`.
 
+> **Revised after first testing feedback:** the time and step counters and the summary line were removed, `Summary` became `Pause`, and a rotating waiting phrase was added. The spec and code are authoritative where the tasks below still name the earlier shape.
+
 **Architecture:** `coder.FriendlyStep` translates a milestone line beside the code that produces it. `gateway.stepTrace` owns the list, throttling and the flush barrier. The router wires it between the handlers and the existing `send`/`sendProgress`.
 
 **Tech Stack:** Go; `internal/coder`, `internal/gateway`, `internal/agentrunner`, `cmd/rookery`.

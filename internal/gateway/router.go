@@ -639,17 +639,20 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 
 	trace := newStepTrace(header, sendProgress)
 	defer trace.Close()
+	trace.StartWaiting()
 
 	delivered := false
 	track := func(text string) {
 		delivered = true
-		send(trace.withSummary(text))
+		trace.Pause()
+		send(text)
 	}
 
 	if err := r.onAgentRun(ctx, msg.WorkspaceID, name, track, trace.Step); err != nil {
 		// Edits the "Running agent…" line rather than letting it read as finished.
 		if errors.Is(err, agentrunner.ErrRunStopped) {
-			sendProgress(trace.withSummary(fmt.Sprintf("⏹ **%s** was stopped.", name)))
+			trace.Pause()
+			sendProgress(fmt.Sprintf("⏹ **%s** was stopped.", name))
 			return nil
 		}
 		// The runner already delivered FriendlyRunError through SendOutput.
@@ -664,7 +667,8 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 		// A [SILENT] run never reaches a SendOutput site — runCoderAgent's
 		// switch has no matching case — so without this the user is left
 		// looking at "Running agent…" forever with no idea the run finished.
-		sendProgress(trace.withSummary(fmt.Sprintf("✅ **%s** finished — no notification.", name)))
+		trace.Pause()
+		sendProgress(fmt.Sprintf("✅ **%s** finished — no notification.", name))
 	}
 	return nil
 }
@@ -1247,15 +1251,13 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	_ = r.db.AddChatMessage(activeChat.ID, "user", msg.Text)
 	_ = r.db.TouchChat(activeChat.ID)
 
+	trace := newStepTrace("", sendProgress)
+	defer trace.Close()
+	trace.StartWaiting()
+
 	// Intercept send so we can capture the assistant reply for chat storage.
 	// The "previous chat ended" notice rides on the FIRST delivered message and
 	// is never stored — it is about the conversation, not part of it.
-	//
-	// The trace's summary is added after assistantReply is captured for the same
-	// reason: stored text feeds later turns, the vault note and the auto-title.
-	trace := newStepTrace("", sendProgress)
-	defer trace.Close()
-
 	var assistantReply string
 	wrappedSend := func(text string) {
 		assistantReply = text
@@ -1263,7 +1265,8 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 			text = notice + "\n\n" + text
 			notice = ""
 		}
-		send(trace.withSummary(text))
+		trace.Pause()
+		send(text)
 	}
 
 	if err := r.onText(ctx, msg.WorkspaceID, history, msg.Text, wrappedSend, trace.Step); err != nil {

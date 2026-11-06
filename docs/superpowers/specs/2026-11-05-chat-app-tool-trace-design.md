@@ -9,13 +9,14 @@ never pass them along.
 
 ## What it does
 
-The placeholder message is edited into a running list while the work happens:
+Until the first tool call, the placeholder rotates every 5 seconds through Thinking,
+Reasoning, Taking a look, Researching and Figuring something out. This applies on every
+coder kind. It is then edited into a running list while the work happens:
 
 ```
 ✓ 📚 Searched knowledge base: `quarterly report`
 ✓ 📄 Read `notes/report.md`
 ⏳ 🌐 Searching the web: `example topic`
-step 3 · 0:42
 ```
 
 - Applies to plain chat messages and `/run <agent>` on every adapter with `TypingGateway`
@@ -23,9 +24,8 @@ step 3 · 0:42
 - At most the last 5 steps show, under a `+N earlier` line.
 - Edits go out at most once every 3 seconds, the rate Telegram tolerates in a group
   (20 per minute). Steps arriving faster are coalesced. The newest state always gets flushed.
-- The elapsed time moves only when a step arrives. There is no ticking edit.
-- When the turn finishes, the answer replaces the list as it does today, with `✓ 6 steps · 1:12`
-  above it. A turn with no tool calls is unchanged.
+- When the turn finishes, the answer replaces the list as it does today. No time or step
+  count is shown at any point.
 
 ## Privacy
 
@@ -41,8 +41,6 @@ member, so the labels show less than the web trace does. Unknown tools show thei
 
 ## Requirements the code must keep
 
-- **The summary line is never stored.** It is added outside `wrappedSend`, so it stays out of
-  chat history, the vault reflection and the auto-title.
 - **A flush can never land after the answer.** `send()` clears the placeholder id, so a late
   edit would post the stale list as a new message below the reply.
 - **Recording a step never blocks the tool loop.** Progress runs inline in the engine.
@@ -59,6 +57,6 @@ member, so the labels show less than the web trace does. Unknown tools show thei
 
 ## Accepted costs
 
-- A message sent mid-run (`browser_wait`'s notify) consumes the placeholder and carries the
-  summary so far. Later steps start a new list, which the final answer then replaces.
+- A message sent mid-run (`browser_wait`'s notify) consumes the placeholder. Later steps
+  start a new list, which the final answer then replaces.
 - `✓` means the run moved past a step. A step whose tool returned an error also gets one.

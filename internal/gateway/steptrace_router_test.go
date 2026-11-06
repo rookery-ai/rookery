@@ -14,7 +14,7 @@ const traceChat = "1001"
 
 // newTraceManager runs messages through the real dispatcher and router, against a
 // fake platform.
-func newTraceManager(t *testing.T, onText TextHandler, onRun AgentRunHandler) (*GatewayManager, *db.DB, *fakeTypingGateway) {
+func newTraceManager(t *testing.T, onText TextHandler, onRun AgentRunHandler) (*GatewayManager, *fakeTypingGateway) {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -32,7 +32,7 @@ func newTraceManager(t *testing.T, onText TextHandler, onRun AgentRunHandler) (*
 	m := New(database, []byte("k"), NewRouter(database, onText, onRun, nil, nil))
 	gw := &fakeTypingGateway{}
 	m.gateways[key("telegram", "ws1")] = gw
-	return m, database, gw
+	return m, gw
 }
 
 func waitForEdit(t *testing.T, gw *fakeTypingGateway, substr string) {
@@ -60,7 +60,7 @@ func TestChatTurnShowsStepsThenTheAnswer(t *testing.T) {
 		send("the answer")
 		return nil
 	}
-	m, _, g := newTraceManager(t, onText, nil)
+	m, g := newTraceManager(t, onText, nil)
 	gw = g
 
 	m.dispatch(context.Background(), Message{
@@ -71,8 +71,7 @@ func TestChatTurnShowsStepsThenTheAnswer(t *testing.T) {
 	if len(sent) != 1 {
 		t.Errorf("new messages = %q, want only the placeholder", sent)
 	}
-	last := edits[len(edits)-1]
-	if !strings.Contains(last, "the answer") || !strings.Contains(last, "_✓ 2 steps ·") {
+	if last := edits[len(edits)-1]; last != "the answer" {
 		t.Errorf("final edit = %q", last)
 	}
 
@@ -84,55 +83,32 @@ func TestChatTurnShowsStepsThenTheAnswer(t *testing.T) {
 	}
 }
 
-// Stored text feeds later turns, the vault note and the auto-title.
-func TestChatTraceSummaryIsNotStored(t *testing.T) {
-	onText := func(_ context.Context, _ string, _ []db.ChatMessage, _ string, send, onStep func(string)) error {
-		onStep("🔧 search_files(report)")
-		send("the answer")
-		return nil
-	}
-	m, database, gw := newTraceManager(t, onText, nil)
-	m.dispatch(context.Background(), Message{
-		Platform: "telegram", PlatformUserID: traceChat, WorkspaceID: "ws1", Text: "find it",
-	})
-
-	_, edits := gw.snapshot()
-	if !strings.Contains(edits[len(edits)-1], "1 step") {
-		t.Fatalf("summary never shown: %q", edits)
-	}
-	cur, err := database.GetActiveChatForPlatform("ws1", "telegram")
-	if err != nil || cur == nil {
-		t.Fatalf("chat: %v, %v", cur, err)
-	}
-	msgs, err := database.ListChatMessages(cur.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reply := msgs[len(msgs)-1]
-	if reply.Role != "assistant" || reply.Content != "the answer" {
-		t.Errorf("stored reply = %+v", reply)
-	}
-}
-
-func TestChatWithNoStepsIsUnchanged(t *testing.T) {
+func TestPlaceholderOpensWithAWaitingPhrase(t *testing.T) {
 	onText := func(_ context.Context, _ string, _ []db.ChatMessage, _ string, send, _ func(string)) error {
 		send("the answer")
 		return nil
 	}
-	m, _, gw := newTraceManager(t, onText, nil)
+	m, gw := newTraceManager(t, onText, nil)
 	m.dispatch(context.Background(), Message{
 		Platform: "telegram", PlatformUserID: traceChat, WorkspaceID: "ws1", Text: "hello",
 	})
 	sent, edits := gw.snapshot()
-	if len(sent) != 1 || !strings.Contains(sent[0], "Thinking") {
-		t.Errorf("sent = %q", sent)
+	if len(sent) != 1 {
+		t.Fatalf("sent = %q", sent)
+	}
+	matched := false
+	for i := range waitingPhrases {
+		matched = matched || sent[0] == waitingLine(i)
+	}
+	if !matched {
+		t.Errorf("placeholder = %q", sent[0])
 	}
 	if len(edits) != 1 || edits[0] != "the answer" {
 		t.Errorf("edits = %q", edits)
 	}
 }
 
-func TestRunTraceKeepsHeaderAndSummarises(t *testing.T) {
+func TestRunTraceKeepsHeaderAndHidesCommands(t *testing.T) {
 	var gw *fakeTypingGateway
 	onRun := func(_ context.Context, _, _ string, send, onStep func(string)) error {
 		onStep("🔧 bash(curl https://example.com/?token=abc)")
@@ -140,7 +116,7 @@ func TestRunTraceKeepsHeaderAndSummarises(t *testing.T) {
 		send("the report")
 		return nil
 	}
-	m, _, g := newTraceManager(t, nil, onRun)
+	m, g := newTraceManager(t, nil, onRun)
 	gw = g
 	m.dispatch(context.Background(), Message{
 		Platform: "telegram", PlatformUserID: traceChat, WorkspaceID: "ws1", Text: "/run weather",
@@ -156,27 +132,25 @@ func TestRunTraceKeepsHeaderAndSummarises(t *testing.T) {
 	if strings.Contains(strings.Join(edits, "\n"), "abc") {
 		t.Errorf("a command reached the chat: %q", edits)
 	}
-	last := edits[len(edits)-1]
-	if !strings.HasPrefix(last, "_✓ 1 step ·") || !strings.HasSuffix(last, "the report") {
+	if last := edits[len(edits)-1]; last != "the report" {
 		t.Errorf("final edit = %q", last)
 	}
 }
 
-func TestSilentRunWithStepsSummarisesInPlace(t *testing.T) {
+func TestSilentRunReplacesTheListInPlace(t *testing.T) {
 	var gw *fakeTypingGateway
 	onRun := func(_ context.Context, _, _ string, _, onStep func(string)) error {
 		onStep("🔧 web_search(topic)")
 		waitForEdit(t, gw, "Searching the web")
 		return nil
 	}
-	m, _, g := newTraceManager(t, nil, onRun)
+	m, g := newTraceManager(t, nil, onRun)
 	gw = g
 	m.dispatch(context.Background(), Message{
 		Platform: "telegram", PlatformUserID: traceChat, WorkspaceID: "ws1", Text: "/run weather",
 	})
 	_, edits := gw.snapshot()
-	last := edits[len(edits)-1]
-	if !strings.Contains(last, "1 step") || !strings.Contains(last, "no notification") {
+	if last := edits[len(edits)-1]; !strings.Contains(last, "no notification") || strings.Contains(last, "Search") {
 		t.Errorf("final edit = %q", last)
 	}
 }
