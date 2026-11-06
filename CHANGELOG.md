@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/rookery-ai/rookery/compare/v0.22.0...v0.23.0) (2026-11-06)
+
+
+### Features
+
+* **rename:** rename agents and skills from their pages ([#415](https://github.com/rookery-ai/rookery/issues/415)) ([536bc5f](https://github.com/rookery-ai/rookery/commit/536bc5fbdb110d1e2bf1874d54847a4661dd3122))
+
 ## [0.22.0](https://github.com/rookery-ai/rookery/compare/v0.21.0...v0.22.0) (2026-11-06)
 
 
