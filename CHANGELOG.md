@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/rookery-ai/rookery/compare/v0.21.0...v0.22.0) (2026-11-06)
+
+
+### Features
+
+* **agents:** stop a running agent ([#410](https://github.com/rookery-ai/rookery/issues/410)) ([394b913](https://github.com/rookery-ai/rookery/commit/394b9138c0c7a5e7bbbf27434212552a188e6e8d))
+* **gateway:** show live tool steps in chat apps ([#412](https://github.com/rookery-ai/rookery/issues/412)) ([1fa7a04](https://github.com/rookery-ai/rookery/commit/1fa7a048de2298bd12438d0a94cac9f15ebb68cd))
+
+
+### Bug Fixes
+
+* **deps:** upgrade Echo to v4.16.3 and gate govulncheck findings ([#413](https://github.com/rookery-ai/rookery/issues/413)) ([6586bf9](https://github.com/rookery-ai/rookery/commit/6586bf987f27bb851d263fe80969aaafc8c4917b))
+
 ## [0.21.0](https://github.com/rookery-ai/rookery/compare/v0.20.2...v0.21.0) (2026-11-04)
 
 
