@@ -159,7 +159,14 @@ image pushes.**
      precisely because nothing ever built it.
    - `Frontend` — `npm ci`, `tsc -b`, `oxlint`, `vitest`, `vite build`
    - `Security scan` — govulncheck, Trivy (fs), gitleaks. CodeQL runs in its own
-     workflow because it needs `security-events: write`.
+     workflow because it needs `security-events: write`. govulncheck's result goes
+     through `scripts/govulncheck-gate.py`, because the Go vulnerability database can
+     list no fixed version for a release upstream has already fixed, and govulncheck
+     cannot ignore an advisory, so every pull request fails. An exemption names the
+     module and the fixing release and applies only at that release or later. It is
+     not for an advisory with no fix, and the gate says when one can be removed.
+     `audit_logs` records `c.RealIP()`, which since Echo v4.16.3 is the connection
+     peer: no `IPExtractor` is set, so behind a reverse proxy it is the proxy's address.
    - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
      asserts `/healthz`, the SPA root and the session endpoint all answer. **One
      of the project's two end-to-end gates** — this one covers the container
