@@ -234,7 +234,11 @@ jobs:
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          # The gate applies exemptions for advisories whose fix the database has
+          # not recorded yet. govulncheck has no way to ignore one itself.
+          python3 scripts/govulncheck-gate.py --selftest
+          govulncheck -format json ./... > "$RUNNER_TEMP/govulncheck-report.json"
+          python3 scripts/govulncheck-gate.py "$RUNNER_TEMP/govulncheck-report.json"
 
       # Trivy in filesystem mode covers the npm tree and Go modules. Ignore
       # unfixed findings: failing on a CVE with no available patch blocks work
