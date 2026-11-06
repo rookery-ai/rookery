@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/rookery-ai/rookery/compare/v0.23.0...v0.23.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **agents:** keep every statement of a schedule in step with the schedule ([#417](https://github.com/rookery-ai/rookery/issues/417)) ([6b7a49c](https://github.com/rookery-ai/rookery/commit/6b7a49cd9fed59098379081c6ce9ff02fbed1fdb))
+
 ## [0.23.0](https://github.com/rookery-ai/rookery/compare/v0.22.0...v0.23.0) (2026-11-06)
 
 
