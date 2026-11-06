@@ -488,9 +488,9 @@ func serveCmd() *cli.Command {
 
 			vaultSearcher := vlt.NewSearcher()
 
-			textHandler := func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error {
+			textHandler := func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send, onStep func(string)) error {
 				root := vlt.Root(workspaceID)
-				cd := coderFor(workspaceID).WithDir(root)
+				cd := coderFor(workspaceID).WithDir(root).WithProgress(onStep)
 
 				// Strip protocol markers out of the model's own prior turns before
 				// they become few-shot context, matching the web chat path — a
@@ -649,7 +649,7 @@ func serveCmd() *cli.Command {
 			// AgentRunHandler: /run <name> from Telegram.
 			// MasterPw is empty here — agents without secret injection still run.
 			// Phase 7 adds a session-stored master password.
-			agentRunHandler := func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+			agentRunHandler := func(ctx context.Context, workspaceID, agentName string, send, onStep func(string)) error {
 				// Label the reply with the agent that produced it, at the send
 				// site rather than inside the runner: runCoderAgent reuses
 				// SendOutput as a collector for child-agent recursion, and that
@@ -657,7 +657,7 @@ func serveCmd() *cli.Command {
 				labelled := func(msg string) {
 					send(gateway.AgentPrefixed(agentName, msg))
 				}
-				return runner.RunByName(ctx, workspaceID, agentName, "", labelled)
+				return runner.RunByName(ctx, workspaceID, agentName, "", labelled, onStep)
 			}
 
 			// The SAME skillFlow instance the web layer uses — two would each hold

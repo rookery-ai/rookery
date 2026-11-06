@@ -82,7 +82,7 @@ func TestAgentStopWithoutARunner(t *testing.T) {
 // A run stopped from elsewhere must not report that it finished.
 func TestStoppedChatRunDoesNotReportFinished(t *testing.T) {
 	h := &runHarness{}
-	r := newRunRouter(func(context.Context, string, string, func(string)) error {
+	r := newRunRouter(func(context.Context, string, string, func(string), func(string)) error {
 		return fmt.Errorf("wrapped: %w", agentrunner.ErrRunStopped)
 	})
 	if err := r.handleRun(context.Background(), Message{WorkspaceID: "ws1"}, "weather", h.send, h.progress); err != nil {
@@ -100,7 +100,7 @@ func TestStoppedChatRunDoesNotReportFinished(t *testing.T) {
 func TestChatRunFailureIsStillAnError(t *testing.T) {
 	h := &runHarness{}
 	boom := errors.New("boom")
-	r := newRunRouter(func(context.Context, string, string, func(string)) error { return boom })
+	r := newRunRouter(func(context.Context, string, string, func(string), func(string)) error { return boom })
 	if err := r.handleRun(context.Background(), Message{WorkspaceID: "ws1"}, "weather", h.send, h.progress); !errors.Is(err, boom) {
 		t.Fatalf("handleRun = %v, want the failure", err)
 	}

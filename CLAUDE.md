@@ -652,6 +652,36 @@ and every lookup is now scoped by workspace. Four things are load-bearing:
   `ensureBotUnused` still refuses one bot across two workspaces — both would open a
   session for the token and answer every message twice.
 
+**A chat turn or `/run` shows its tool steps by editing the placeholder**
+(`internal/gateway/steptrace.go`). Chat apps used to show `⏳ Thinking...` until the
+answer, while the web UI listed every step from the same engine milestones. It is
+API-engine only, because a CLI coder emits no milestones on any surface. Scheduled runs
+supply no `OnStep` and post nothing new, and designer builds keep `sendProgress` as it
+was. Until the first step the placeholder rotates through `waitingPhrases` every 5s, on
+every coder kind, so a model answering without tools still shows movement. Six things are
+load-bearing:
+
+- **`RunInput.OnStep` is not `OnProgress`.** That one also carries `[CHAT]` lines and the
+  final output, so a list fed from it would present the agent's message as a step.
+- **`stepTrace.Pause` is a barrier, and it holds two locks for a reason.** `Step` runs
+  inline in the tool loop and must not wait on a network call, so it takes only `mu` and
+  a timer does the edit. A flush holds `flushMu` across that edit so `Pause` can wait it
+  out: the final `send` clears the placeholder id, and an edit landing after it would make
+  `updatePlaceholder` post the stale list as a NEW message below the answer.
+- **The first step cancels the phrase timer before scheduling its own flush.** `Step`
+  skips scheduling while a timer is pending, so a waiting timer left running would hold
+  the step back and then show a phrase in its place.
+- **`coder.FriendlyStep` shows less than the web trace, on purpose.** These messages pass
+  through a third party and a group shows them to every member, so commands, URL paths and
+  queries, typed browser values and connector arguments never appear. An unknown tool
+  shows its name only. It parses the milestone line, so its tests drive the real
+  `toolMilestone`/`browserMilestone` rather than hand-written strings.
+- **A detail goes in a code span, never backslash-escaped.** The Telegram renderer doubles
+  the backslash, which breaks the MarkdownV2 edit, and Slack displays it. Stripping the
+  punctuation instead would corrupt a name like `my_file.md`.
+- **Step edits are at most one per `stepTraceInterval` (3s), and only when a step arrives.**
+  Telegram allows about 20 a minute in a group and a rejected edit is simply lost.
+
 ### Key packages
 
 | Package | Responsibility |

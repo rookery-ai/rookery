@@ -480,7 +480,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		if ok {
 			if tg, ok := gw.(TypingGateway); ok {
 				_ = tg.SendTyping(msg.PlatformUserID)
-				placeholderID, _ = tg.SendMessageGetID(msg.PlatformUserID, "⏳ _Thinking..._")
+				placeholderID, _ = tg.SendMessageGetID(msg.PlatformUserID, randomWaitingLine())
 			}
 		}
 	}
