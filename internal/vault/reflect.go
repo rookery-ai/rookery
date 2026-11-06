@@ -297,6 +297,45 @@ func (r *Reflector) UnreflectAgentRuns(workspaceID, agentID string) (int, error)
 	return removed, firstErr
 }
 
+// RenameAgentInRuns updates AgentName in the run sidecars of one agent, so the mirror
+// agrees with the run notes after a rename. Sidecars are keyed by RUN id, so the only way
+// to find them is to read each one back. One that cannot be parsed is left alone.
+func (r *Reflector) RenameAgentInRuns(workspaceID, agentID, newName string) error {
+	if r == nil || agentID == "" {
+		return nil
+	}
+	entries, err := r.v.List(workspaceID, filepath.Join(InternalDir, "db-export", "agent_runs"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var firstErr error
+	for _, e := range entries {
+		if e.IsDir || !strings.HasSuffix(e.Name, ".json") {
+			continue
+		}
+		raw, err := r.v.ReadNote(workspaceID, e.Path)
+		if err != nil {
+			continue
+		}
+		var note RunNote
+		if err := json.Unmarshal(raw, &note); err != nil || note.AgentID != agentID || note.AgentName == newName {
+			continue
+		}
+		note.AgentName = newName
+		data, err := json.MarshalIndent(note, "", "  ")
+		if err == nil {
+			err = r.v.WriteNote(workspaceID, e.Path, data)
+		}
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // write persists the markdown note and its JSON sidecar. The sidecar holds the
 // full structured value for restore fidelity.
 func (r *Reflector) write(workspaceID, relMarkdown, content, table, id string, sidecar any) error {

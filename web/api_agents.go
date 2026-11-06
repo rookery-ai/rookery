@@ -31,6 +31,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.GET("/agents", s.apiListAgents)
 	g.GET("/agents/:id", s.apiGetAgent)
 	g.DELETE("/agents/:id", s.apiDeleteAgent)
+	g.PUT("/agents/:id/name", s.apiRenameAgent)
 	g.POST("/agents/:id/run", s.apiRunAgent)
 	g.POST("/agents/:id/run/stop", s.apiStopAgentRun)
 	g.PUT("/agents/:id/schedule", s.apiSaveSchedule)

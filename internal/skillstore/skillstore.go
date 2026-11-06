@@ -20,6 +20,10 @@ import (
 
 var validSkillName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 
+// ValidName reports whether name is a legal skill name: it becomes a folder and a
+// Python environment name, so the rule is not cosmetic.
+func ValidName(name string) bool { return validSkillName.MatchString(name) }
+
 const maxZipExtractSize = 10 * 1024 * 1024 // 10 MB total extracted
 
 // Store manages skills on disk and in the database.

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { invalidateAfterRename, type RenameResult } from "./rename";
 
 // Mirrors toAPISkillListItem (web/api_skills.go).
 // Mirrors apiSkillMeta — the SAME fields for both kinds, parsed server-side by
@@ -83,8 +84,15 @@ export function useSkillActions() {
     },
   });
 
+  const renameMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.put<RenameResult>(`/api/v1/skills/${id}/name`, { name }),
+    onSuccess: () => invalidateAfterRename(qc),
+  });
+
   return {
     create: (content: string) => createMut.mutateAsync(content),
+    rename: (id: string, name: string) => renameMut.mutateAsync({ id, name }),
     save: (id: string, content: string) => saveMut.mutateAsync({ id, content }),
     del: (id: string) => delMut.mutateAsync(id),
   };

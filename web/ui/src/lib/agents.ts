@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./api";
+import { invalidateAfterRename, type RenameResult } from "./rename";
 
 // Mirrors web/api_agents.go's apiAgent struct (toAPIAgent).
 export type Agent = {
@@ -194,6 +195,12 @@ export function useAgentActions() {
     qc.invalidateQueries({ queryKey: ["agent", id] });
   }
 
+  const renameMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.put<RenameResult>(`/api/v1/agents/${id}/name`, { name }),
+    onSuccess: () => invalidateAfterRename(qc),
+  });
+
   const delMut = useMutation({
     mutationFn: (id: string) => api.del<{ ok: boolean }>(`/api/v1/agents/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
@@ -259,6 +266,7 @@ export function useAgentActions() {
   });
 
   return {
+    rename: (id: string, name: string) => renameMut.mutateAsync({ id, name }),
     del: (id: string) => delMut.mutateAsync(id),
     run: (id: string) => runMut.mutateAsync(id),
     stopRun: (id: string) => stopRunMut.mutateAsync(id),

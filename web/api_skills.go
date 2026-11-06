@@ -35,6 +35,7 @@ func (s *Server) registerSkillsAPI(g *echo.Group) {
 	g.GET("/skills/:id", s.apiGetSkill)
 	g.PUT("/skills/:id", s.apiSaveSkill)
 	g.DELETE("/skills/:id", s.apiDeleteSkill)
+	g.PUT("/skills/:id/name", s.apiRenameSkill)
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────

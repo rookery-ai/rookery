@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Pencil, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +35,7 @@ export type SkillViewProps = {
   /** Present only for kind="user" — a core skill is embedded in the binary. */
   onSave?: (content: string) => Promise<void>;
   onDelete?: () => void;
+  onRename?: () => void;
   /** Extra controls rendered beside the tab switcher (e.g. a back link). */
   actions?: React.ReactNode;
 };
@@ -58,6 +59,7 @@ export function SkillView({
   content,
   onSave,
   onDelete,
+  onRename,
   actions,
 }: SkillViewProps) {
   // Rendered is the default for BOTH kinds: a skill is a document meant to be
@@ -124,6 +126,19 @@ export function SkillView({
                 <Save />
                 Save
               </Button>
+              {onRename && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRename}
+                  // Saving these edits after a rename would write the old name back.
+                  disabled={dirty || saving}
+                  title={dirty ? "Save your changes first" : undefined}
+                >
+                  <Pencil />
+                  Rename
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"

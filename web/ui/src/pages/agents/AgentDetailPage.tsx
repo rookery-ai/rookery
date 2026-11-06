@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
+import { RenameDialog } from "@/components/RenameDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -226,7 +227,8 @@ export default function AgentDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { data: detail } = useAgentDetail(id);
-  const { del } = useAgentActions();
+  const { del, rename } = useAgentActions();
+  const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -281,6 +283,10 @@ export default function AgentDetailPage() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <Pencil />
+                Rename…
+              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => setDeleteOpen(true)}
@@ -346,6 +352,15 @@ export default function AgentDetailPage() {
           <MCPServersCard agentId={id} />
         </div>
       </div>
+
+      {renameOpen && (
+        <RenameDialog
+          label="agent"
+          currentName={agent.name}
+          onClose={() => setRenameOpen(false)}
+          onRename={(name) => rename(id, name)}
+        />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">

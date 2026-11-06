@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router";
+import { RenameDialog } from "@/components/RenameDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,8 +24,9 @@ export default function SkillDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { data: skill } = useSkillDetail(id);
-  const { save, del } = useSkillActions();
+  const { save, del, rename } = useSkillActions();
 
+  const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -57,7 +59,18 @@ export default function SkillDetailPage() {
           await save(id, content);
         }}
         onDelete={() => setDeleteOpen(true)}
+        onRename={() => setRenameOpen(true)}
       />
+
+      {renameOpen && (
+        <RenameDialog
+          label="skill"
+          currentName={skill.name}
+          hint="Lowercase letters, digits and hyphens."
+          onClose={() => setRenameOpen(false)}
+          onRename={(name) => rename(id, name)}
+        />
+      )}
 
       {deleteError && (
         <p className="px-6 pb-4 text-xs text-danger" role="alert">

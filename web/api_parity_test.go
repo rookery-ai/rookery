@@ -34,6 +34,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/agents/:id/schedule", "DELETE /api/v1/agents/:id/schedule",
 		"PUT /api/v1/agents/:id/agent-md", "PUT /api/v1/agents/:id/skills",
 		"PUT /api/v1/agents/:id/connections",
+		"PUT /api/v1/agents/:id/name",
 		"GET /api/v1/agents/:id/mcp",
 		"PUT /api/v1/agents/:id/mcp",
 
@@ -54,6 +55,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"POST /api/v1/agents/:id/edit/start",
 		"GET /api/v1/skills", "POST /api/v1/skills", "GET /api/v1/skills/core/:slug",
 		"GET /api/v1/skills/:id", "PUT /api/v1/skills/:id", "DELETE /api/v1/skills/:id",
+		"PUT /api/v1/skills/:id/name",
 		"POST /api/v1/skills/design", "POST /api/v1/skills/design/cancel",
 		"POST /api/v1/skills/design/resume", "POST /api/v1/skills/design/dismiss",
 		"GET /api/v1/skills/design/progress",
