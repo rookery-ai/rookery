@@ -2451,6 +2451,42 @@ Editing reuses the same `Flow` FSM via `DesignSession.IsEdit`. `loadAgentForEdit
 
 **Edit generation** runs in a sibling staging dir (`<agentID>-edit-staging`) — the live agent dir is never touched before approval. On approval, `updateAndFinish()` calls `AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription` (UPDATE, not INSERT). `reconcileScheduleOnSave()` reuses the existing schedule row's ID to avoid duplicate rows and double-firing.
 
+### Renaming an agent or a skill
+
+`internal/rename` implements one rule: **structural references are rewritten, prose is left
+alone.** Blind find-and-replace over a knowledge base is how a skill called `notes` ends up
+rewriting every `notes/` path in the vault, so a one-word skill name only moves in forms that
+cannot be prose (`name:`, `skills/x`, `envs/x`, `env=`, `--env`, the `# Skills:` header); a
+hyphenated one is distinctive enough to replace as a whole token. Files that still mention the old
+name come back as `still_mentions` instead of being edited. The audit log, run output, chat
+messages and an environment's install manifest are records and keep the old name. Six things are
+load-bearing:
+
+- **A plan is made before anything changes** (`PrepareAgent`/`PrepareSkill`, then `Plan.Apply`),
+  because the refusals need the plan's answer: who refers to this name. A running caller holds
+  `[CALL: old]` in its prompt, so the check covers it as well as the agent itself.
+- **`[CALL: old]` is rewritten case-sensitively** because the runner resolves it with an exact
+  `GetAgentByName`; a differently-cased call is already "agent not found", and fixing it would
+  change what that agent does. Collisions, by contrast, are checked case-insensitively, because
+  `/agent stop` matches names that way.
+- **A `[[wikilink]]` is only rewritten when the old name does not resolve to a real note.** Otherwise
+  renaming an agent called `Weekly digest` would break every link to `notes/Weekly digest.md`.
+- **The database commits before the files are written**, since it decides what works and every
+  file edit is safe to repeat; a failed write afterwards is a `warning`, not a failed rename. A
+  skill's folder moves *before* the commit and moves back if it fails, because a commit pointing at
+  an unmoved folder leaves the skill unreadable. A retry after a crash between the two finishes the
+  job: an existing new folder with no old one is not a collision.
+- **A skill's Python environment is deleted, not moved.** A virtual environment holds absolute
+  paths, so a moved one is subtly broken, while a missing one is already reported to the next run,
+  which reinstalls it. The cost is one slower run, and the response says so.
+- **An open agent design session refuses a rename, and a skill draft holding either name does too.**
+  The session holds `AGENT.md` and the skill list in memory and would save the old name back, and
+  saving a skill overwrites a same-named one in place. A persisted agent draft with no live session
+  needs no refusal, because `pending_agent_md` is rewritten in the rename's transaction.
+
+Residual, stated rather than hidden: the running check is check-then-write, the same shape as the
+`state.md` 409 guard, so a run starting in the gap can write a note under the old name.
+
 ### Agent output protocol (AGENT.md)
 
 - **`[CHAT]`** — sends a message to the user. A `[CHAT]` block runs until the next protocol marker (`[STATE]`, `[CALL]`, `[SILENT]`, a new `[CHAT]`) or end of output; **blank lines are part of the message, not a terminator** (an earlier rule ended the block at a blank line and silently dropped real content — fixed). Empty/whitespace-only `[CHAT]` blocks are dropped (never deliver a blank message).
