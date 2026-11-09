@@ -173,7 +173,10 @@ func (c RunCeiling) Exceeded(u llm.Usage, turns int, dollars bool) (bool, string
 // FormatPauseReason is the sentence stored when an agent is paused, e.g.
 // "monthly limit of $30.00 reached".
 func FormatPauseReason(p Period, limit string) string {
-	name := map[Period]string{PeriodDay: "daily", PeriodMonth: "monthly", PeriodRun: "per-run"}[p]
+	name, known := map[Period]string{PeriodDay: "daily", PeriodMonth: "monthly", PeriodRun: "per-run"}[p]
+	if !known {
+		name = string(p)
+	}
 	return name + " limit of " + limit + " reached"
 }
 

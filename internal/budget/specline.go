@@ -2,6 +2,7 @@ package budget
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,7 +18,8 @@ import (
 // ok=false on anything unrecognised, and the caller ignores the whole line: a
 // half-read limit would silently be a different limit from the one approved.
 func ParseSpecLine(v string) (l db.AgentLimits, set bool, ok bool) {
-	v = strings.ToLower(strings.TrimSpace(v))
+	// A model often ends the line with a full stop; that is not part of a value.
+	v = strings.ToLower(strings.TrimRight(strings.TrimSpace(v), ".,;! \t"))
 	switch v {
 	case "", "unchanged":
 		return l, false, true
@@ -30,15 +32,16 @@ func ParseSpecLine(v string) (l db.AgentLimits, set bool, ok bool) {
 		if scope == "" {
 			continue
 		}
-		name, rest, found := strings.Cut(scope, ":")
-		name = strings.Join(strings.Fields(name), " ")
-		if !found || seen[name] {
+		rawName, rest, found := strings.Cut(scope, ":")
+		name := scopeName(rawName)
+		if !found || name == "" || seen[name] {
 			return db.AgentLimits{}, false, false
 		}
 		seen[name] = true
+		units := map[string]bool{}
 		// Split on comma+space only: "1,000,000" is a number, not a list.
 		for _, item := range splitItems(rest) {
-			if !applyItem(&l, name, item) {
+			if !applyItem(&l, name, item, units) {
 				return db.AgentLimits{}, false, false
 			}
 		}
@@ -48,6 +51,31 @@ func ParseSpecLine(v string) (l db.AgentLimits, set bool, ok bool) {
 	}
 	return l, true, true
 }
+
+// scopeName folds the spellings a model plausibly writes into the three
+// canonical scopes, or "" when it is none of them.
+func scopeName(raw string) string {
+	r := strings.NewReplacer("-", " ", "_", " ")
+	switch strings.Join(strings.Fields(r.Replace(raw)), " ") {
+	case "per run", "run", "each run":
+		return "per run"
+	case "per day", "day", "daily", "each day":
+		return "per day"
+	case "per month", "month", "monthly", "each month":
+		return "per month"
+	}
+	return ""
+}
+
+// Caps keep a typo from becoming a limit that can never fire.
+const (
+	maxCount = 1e12
+	maxUSD   = 1e9
+)
+
+// plainNumber admits digits, thousands commas and one decimal point, and
+// nothing else: no exponent, nan, inf or sign.
+var plainNumber = regexp.MustCompile(`^(?:\d[\d,]*(?:\.\d+)?|\.\d+)$`)
 
 func splitItems(s string) []string {
 	var out []string
@@ -63,30 +91,45 @@ func splitItems(s string) []string {
 	return append(out, strings.TrimSpace(cur))
 }
 
-func applyItem(l *db.AgentLimits, scope, item string) bool {
+func applyItem(l *db.AgentLimits, scope, item string, units map[string]bool) bool {
 	item = strings.TrimSpace(item)
 	if strings.HasPrefix(item, "$") {
-		f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(item[1:]), ",", ""), 64)
-		if err != nil || f <= 0 {
+		num := strings.TrimSpace(item[1:])
+		if !plainNumber.MatchString(num) || units["usd"] {
 			return false
 		}
+		f, err := strconv.ParseFloat(strings.ReplaceAll(num, ",", ""), 64)
+		if err != nil || f <= 0 || f > maxUSD {
+			return false
+		}
+		units["usd"] = true
 		switch scope {
 		case "per run":
 			l.RunUSD = f
 		case "per day":
 			l.DayUSD = f
-		case "per month":
-			l.MonthUSD = f
 		default:
-			return false
+			l.MonthUSD = f
 		}
 		return true
 	}
 	fields := strings.Fields(item)
-	if len(fields) != 2 || !strings.HasPrefix(fields[1], "token") && !strings.HasPrefix(fields[1], "turn") {
+	if len(fields) != 2 {
 		return false
 	}
-	num := strings.ReplaceAll(fields[0], ",", "")
+	unit := ""
+	switch fields[1] {
+	case "token", "tokens":
+		unit = "tokens"
+	case "turn", "turns":
+		unit = "turns"
+	default:
+		return false
+	}
+	if units[unit] || (unit == "turns" && scope != "per run") {
+		return false
+	}
+	num := fields[0]
 	mult := 1.0
 	switch {
 	case strings.HasSuffix(num, "k"):
@@ -94,15 +137,16 @@ func applyItem(l *db.AgentLimits, scope, item string) bool {
 	case strings.HasSuffix(num, "m"):
 		mult, num = 1e6, strings.TrimSuffix(num, "m")
 	}
-	f, err := strconv.ParseFloat(num, 64)
-	if err != nil || f <= 0 {
+	if !plainNumber.MatchString(num) {
 		return false
 	}
+	f, err := strconv.ParseFloat(strings.ReplaceAll(num, ",", ""), 64)
+	if err != nil || f*mult < 0.5 || f*mult > maxCount {
+		return false
+	}
+	units[unit] = true
 	n := int64(f*mult + 0.5)
-	if strings.HasPrefix(fields[1], "turn") {
-		if scope != "per run" {
-			return false
-		}
+	if unit == "turns" {
 		l.RunTurns = n
 		return true
 	}
@@ -111,10 +155,8 @@ func applyItem(l *db.AgentLimits, scope, item string) bool {
 		l.RunTokens = n
 	case "per day":
 		l.DayTokens = n
-	case "per month":
-		l.MonthTokens = n
 	default:
-		return false
+		l.MonthTokens = n
 	}
 	return true
 }
@@ -144,7 +186,12 @@ func FormatSpecLine(l db.AgentLimits) string {
 		if v == 0 {
 			return ""
 		}
-		return fmt.Sprintf("$%.2f", v)
+		// Trim to two decimals minimum so a sub-cent limit survives a round trip.
+		t := strconv.FormatFloat(v, 'f', 4, 64)
+		for strings.HasSuffix(t, "0") && !strings.HasSuffix(t[:len(t)-1], ".") && len(t)-strings.Index(t, ".") > 3 {
+			t = t[:len(t)-1]
+		}
+		return "$" + t
 	}
 	turns := ""
 	if l.RunTurns > 0 {

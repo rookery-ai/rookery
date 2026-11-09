@@ -110,3 +110,9 @@ func TestHasPeriodLimit(t *testing.T) {
 		t.Fatal("wrong")
 	}
 }
+
+func TestFormatPauseReasonUnknownPeriod(t *testing.T) {
+	if got := FormatPauseReason(Period("week"), "1 token"); got != "week limit of 1 token reached" {
+		t.Fatal(got)
+	}
+}
