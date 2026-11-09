@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -22,6 +23,55 @@ func enforcedRunner(t *testing.T, s *Server) {
 		return coder.New("", time.Minute, t.TempDir(), t.TempDir()).WithAPIConfig("openrouter", "m", "", "K")
 	})
 	s.runner = r
+}
+
+// cliRunner is a runner whose coder is a CLI binary: it reports no usage, so its
+// agents' limits are kept but never enforced.
+func cliRunner(t *testing.T, s *Server) {
+	t.Helper()
+	r := agentrunner.New(s.db, []byte(strings.Repeat("ab", 32)), t.TempDir(), t.TempDir(), t.TempDir(), nil, t.TempDir())
+	r.WithCoderFactory(func(string) *coder.Coder {
+		return coder.New("claude", time.Minute, t.TempDir(), t.TempDir())
+	})
+	s.runner = r
+}
+
+// A pause left over from when the workspace ran an API coder cannot be lifted or
+// re-checked on a CLI coder (nothing there enforces limits), so showing it would
+// present a banner the owner can do nothing about for an agent that runs anyway.
+func TestPauseHiddenWhenTheCoderDoesNotEnforce(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cliRunner(t, s)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+	if _, err := s.db.SetAgentBudgetPause(a.ID, time.Now().Add(time.Hour), "daily limit"); err != nil {
+		t.Fatal(err)
+	}
+	lim := doJSON(t, s, http.MethodGet, "/api/v1/agents/"+a.ID+"/limits", nil, cookies).Body.String()
+	if !contains(lim, `"paused_until":null`) || !contains(lim, `"pause_reason":""`) || !contains(lim, `"enforced":false`) {
+		t.Errorf("a CLI coder's agent must not report a pause: %s", lim)
+	}
+	dash := doJSON(t, s, http.MethodGet, "/api/v1/dashboard", nil, cookies).Body.String()
+	if !contains(dash, `"paused_agents":[]`) {
+		t.Errorf("a CLI coder's agent must not be listed as paused: %s", dash)
+	}
+}
+
+// A spend that could not be read is not a measured one: the dollar figure must
+// not be presented as reported.
+func TestLimitsSpendReadErrorIsNotReported(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	_, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out := s.agentLimitsDTO(context.Background(), a, wsID)
+	if out.Spend.Day.USDReported || out.Spend.Month.USDReported {
+		t.Errorf("unreadable spend must read as unreported: %+v", out.Spend)
+	}
 }
 
 func TestGetLimitsShape(t *testing.T) {
@@ -49,6 +99,7 @@ func TestGetLimitsShape(t *testing.T) {
 
 func TestPutLimitsClearsPause(t *testing.T) {
 	s, _ := newAPITestServer(t)
+	enforcedRunner(t, s)
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 	a := seedAgent(t, s, wsID)
@@ -134,6 +185,7 @@ func TestRunListShowsLimitedStatus(t *testing.T) {
 
 func TestDashboardPausedAgentsNeverNull(t *testing.T) {
 	s, _ := newAPITestServer(t)
+	enforcedRunner(t, s)
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 	if body := doJSON(t, s, http.MethodGet, "/api/v1/dashboard", nil, cookies).Body.String(); !contains(body, `"paused_agents":[]`) {

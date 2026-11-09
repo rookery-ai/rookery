@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"net/http"
 	"time"
@@ -55,12 +56,19 @@ type agentLimitsDTO struct {
 }
 
 // activePause reports the agent's pause only while it is still in the future; a
-// lapsed pause is history and must not render as a live one.
+// lapsed pause is history and must not render as a live one. Callers also check
+// agentEnforced: a pause set while the workspace ran an API coder is not
+// enforced, re-checked or liftable on a CLI coder, so it is not shown there.
 func activePause(a *db.Agent, now time.Time) (time.Time, string, bool) {
 	if a.BudgetPausedUntil == nil || !a.BudgetPausedUntil.After(now) {
 		return time.Time{}, "", false
 	}
 	return *a.BudgetPausedUntil, a.BudgetPauseReason, true
+}
+
+// agentEnforced reports whether the coder this agent runs on enforces limits.
+func (s *Server) agentEnforced(workspaceID, agentID string) bool {
+	return s.runner != nil && s.runner.AgentEnforcement(workspaceID, agentID).Enforced
 }
 
 // agentLimitsDTO is the one builder behind GET/PUT limits and the agent detail's
@@ -84,14 +92,17 @@ func (s *Server) agentLimitsDTO(_ context.Context, agent *db.Agent, workspaceID 
 	fill := func(p budget.Period, dst *limitSpend) {
 		sp, err := s.db.AgentSpendSince(agent.ID, budget.PeriodStart(p, now, loc))
 		if err != nil {
-			dst.USDReported = true
+			// A spend that could not be read is not a measured one; reporting it
+			// as such would show $0.00 as if nothing had been spent.
+			slog.Warn("web: could not read agent spend", "agent_id", agent.ID, "err", err)
+			dst.USDReported = false
 			return
 		}
 		*dst = limitSpend{Tokens: sp.Tokens, USD: sp.USD, USDReported: !sp.CostUnreported}
 	}
 	fill(budget.PeriodDay, &out.Spend.Day)
 	fill(budget.PeriodMonth, &out.Spend.Month)
-	if until, reason, ok := activePause(agent, now); ok {
+	if until, reason, ok := activePause(agent, now); ok && out.Enforced {
 		u := until.UTC().Format(time.RFC3339)
 		out.PausedUntil = &u
 		out.PauseReason = reason

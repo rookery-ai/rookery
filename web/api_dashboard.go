@@ -122,7 +122,9 @@ func (s *Server) apiGetDashboard(c echo.Context) error {
 	pausedOut := []apiPausedAgent{}
 	now := time.Now()
 	for _, a := range agents {
-		if until, reason, ok := activePause(a, now); ok {
+		// Enforcement is asked only for a paused agent: it resolves the coder,
+		// and most agents are never paused.
+		if until, reason, ok := activePause(a, now); ok && s.agentEnforced(u.ID, a.ID) {
 			pausedOut = append(pausedOut, apiPausedAgent{AgentID: a.ID, AgentName: a.Name, Until: until.UTC().Format(time.RFC3339), Reason: reason})
 		}
 		if a.Active {
