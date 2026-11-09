@@ -3711,7 +3711,7 @@ click; Undo cancels the timer so the call is never made at all. No soft-delete s
 
 Home's inbox (`pages/home/HomePage.tsx`) groups notifications under calendar-day headers
 (Today/Yesterday/`Weekday, D Mon`, bucketed in local time), flags a failed agent run with a "Failed"
-status badge, marks unread rows with a left accent bar, and deep-links each card to its source agent;
+status badge (and a spending-limit notice, status `limited`, with a warn "Limit reached" one), marks unread rows with a left accent bar, and deep-links each card to its source agent;
 deleting a message or a reminder goes through the deferred-delete/undo flow above.
 
 **Chat message chrome.** Every `ChatMessageBubble` (`components/chat/Bubbles.tsx`) renders a

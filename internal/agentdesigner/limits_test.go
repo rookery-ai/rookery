@@ -1,9 +1,14 @@
 package agentdesigner
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 func specTurn(limitsLine string) db.ChatMessage {
@@ -152,5 +157,43 @@ func TestEditCurrentLimitsFormatsTheAgentsLimits(t *testing.T) {
 	}
 	if f.editCurrentLimits(&DesignSession{AgentID: id}) != "" {
 		t.Fatal("a create session has no current limits")
+	}
+}
+
+// captureProvider records the system prompt of each completion.
+type captureProvider struct{ system []string }
+
+func (p *captureProvider) Name() string { return "capture" }
+func (p *captureProvider) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
+	p.system = append(p.system, req.System)
+	return &llm.Response{Content: "ok"}, nil
+}
+
+// The wiring half of the edit fix: a design turn on an edit session must carry
+// the agent's current limits into the prompt, or the designer is back to
+// guessing what it keeps.
+func TestEditDesignTurnStatesCurrentLimits(t *testing.T) {
+	database, ws := testDB(t)
+	id := seedLimitsAgent(t, database, ws)
+	if err := database.SaveAgentLimits(db.AgentLimits{AgentID: id, DayTokens: 500000}); err != nil {
+		t.Fatal(err)
+	}
+	p := &captureProvider{}
+	name := "capture-" + t.Name()
+	llm.RegisterProvider(name, func(llm.Config) (llm.Provider, error) { return p, nil })
+	api := coder.New("claude", time.Minute, t.TempDir(), t.TempDir()).
+		WithSandbox(false).
+		WithAPIConfig(name, "m", "fake://test", "KEY").
+		WithSecretsLookup(func(context.Context, string, string) (string, error) { return "k", nil })
+	f := &Flow{
+		sessions: map[string]*DesignSession{ws: {WorkspaceID: ws, AgentID: id, AgentName: "a", IsEdit: true, ExistingAgentMD: "# a"}},
+		db:       database,
+		coderFor: func(string) *coder.Coder { return api },
+	}
+	if _, err := f.callCoder(context.Background(), ws, "lower the daily limit"); err != nil {
+		t.Fatalf("callCoder: %v", err)
+	}
+	if len(p.system) == 0 || !strings.Contains(p.system[0], "currently: per day: 500000 tokens") {
+		t.Fatalf("edit design prompt lacks the current limits: %v", p.system)
 	}
 }
