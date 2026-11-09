@@ -280,15 +280,27 @@ func (s *Scheduler) execute(ctx context.Context, agentID, workspaceID, trigger s
 	}
 	defer func() { <-s.sem }()
 
-	if err := s.runner.Run(ctx, agentrunner.RunInput{
+	err := s.runner.Run(ctx, agentrunner.RunInput{
 		AgentID:     agentID,
 		WorkspaceID: workspaceID,
 		Trigger:     trigger,
 		MasterPw:    masterPw,
 		SendOutput:  sendFn,
-	}); errors.Is(err, agentrunner.ErrRunStopped) {
+	})
+	// A refused or limited run is logged, never announced from here: the runner
+	// has already told the owner once (a pause when it starts, a limit at most once
+	// a day), and repeating it every skipped slot is exactly the flood those
+	// throttles exist to prevent.
+	var blocked *agentrunner.BlockedError
+	switch {
+	case err == nil:
+	case errors.Is(err, agentrunner.ErrRunStopped):
 		slog.Info("scheduler: agent run stopped by the owner", "agent_id", agentID, "trigger", trigger)
-	} else if err != nil {
+	case errors.As(err, &blocked):
+		slog.Info("scheduler: agent run skipped", "agent_id", agentID, "trigger", trigger, "reason", blocked.Error())
+	case errors.Is(err, agentrunner.ErrRunLimited):
+		slog.Info("scheduler: agent run ended by its spending limit", "agent_id", agentID, "trigger", trigger, "err", err)
+	default:
 		slog.Error("scheduler: agent run failed", "agent_id", agentID, "trigger", trigger, "err", err)
 	}
 }

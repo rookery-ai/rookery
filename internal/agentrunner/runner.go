@@ -311,6 +311,8 @@ type coderRunContext struct {
 	stopReason string
 	// stopped is true once the owner has ended this run early.
 	stopped bool
+	// limited names the spending limit that ended this run ("" = none).
+	limited string
 	// transcript interleaves progress milestones (tool calls, verification
 	// nudges, delivered [CHAT] output) with the coder's own raw turns, in the
 	// order they happened, and is persisted with the run.
@@ -337,6 +339,7 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 		Stderr:           stderr,
 		Silent:           rctx.silentSignaled,
 		Stopped:          rctx.stopped,
+		Limited:          rctx.limited,
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,
@@ -356,6 +359,8 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 		// After the summary, so the notice is the last thing the record says.
 		if rctx.stopped {
 			rctx.transcript.add(EventProgress, runStoppedNotice)
+		} else if rctx.limited != "" {
+			rctx.transcript.add(EventProgress, limitedLine(rctx.limited))
 		}
 		out.Transcript = rctx.transcript.encode()
 	}
@@ -363,7 +368,22 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
-	ctx, untrack, release := r.trackRun(ctx, agent, input)
+	// Resolve the coder first: whether the agent's limits apply at all depends on
+	// it, and a refused run should cost neither a run row nor the prompt build.
+	// Resolved once, so the prompt's backend description, the execution and the
+	// enforcement all describe the same coder.
+	baseCoder := r.coderForAgent(input.WorkspaceID, input.AgentID)
+	enforcement := r.Enforcement(baseCoder)
+	adm, err := r.admit(agent, enforcement, input)
+	if err != nil {
+		return err
+	}
+	// Registered only after the gate, or this run would count itself as the
+	// other run that makes an agent with a period limit busy.
+	ctx, untrack, release, cancelRun, err := r.trackRun(ctx, agent, input, adm.periodLimited)
+	if err != nil {
+		return err
+	}
 	defer release()
 	defer untrack()
 
@@ -426,10 +446,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	vaultRoot := filepath.Join(r.agentsDir, input.WorkspaceID)
 	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.WorkspaceID, homeDir, declaredSkills, declaredContent),
 		r.resolveSkillEnvs(homeDir, declaredSkills, declaredContent), homeDir, vaultRoot, connectorBinPath())
-
-	// Resolve the workspace's configured coder up front so both the prompt's backend
-	// description and the actual execution use the same (correct) coder.
-	baseCoder := r.coderForWorkspace(input.WorkspaceID)
 
 	// Load the agent's bound service connections once: they feed both the runtime
 	// prompt (so the agent knows it has native typed tools) and WithConnectors below
@@ -652,6 +668,15 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)
 	}
 
+	// Metered per completion, not per Generate call: a single API turn can loop for
+	// dozens of completions, and checking only when it returned would let one run
+	// overshoot its ceiling many times over. Its cancel reuses the owner-stop path
+	// with a cause of its own.
+	var guard *runGuard
+	if !adm.ceiling.IsZero() {
+		coderSvc, guard = withRunGuard(coderSvc, adm.ceiling, enforcement.DollarsSupported, cancelRun)
+	}
+
 	runID := uuid.New().String()
 	startedAt := time.Now().UTC()
 	if err := r.db.CreateAgentRun(&db.AgentRun{
@@ -668,7 +693,29 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// its normal result. A server shutdown cancels with a different cause and stays
 	// an interrupted run, retried on the next boot.
 	untrack()
-	rctx.stopped = runErr != nil && errors.Is(context.Cause(ctx), ErrRunStopped)
+	cause := context.Cause(ctx)
+	rctx.stopped = runErr != nil && errors.Is(cause, ErrRunStopped)
+	// Decided from the cause alone, never from the error: a cancelled API turn
+	// reports ErrTimeout, which would otherwise read as "ran past its time limit".
+	// A stop wins: a cancel made first fixes the cause, so a limit reached in the
+	// same instant cannot relabel the owner's decision.
+	var lc limitCause
+	if !rctx.stopped && errors.As(cause, &lc) {
+		rctx.limited = lc.reason
+		rctx.warnings = append(rctx.warnings, limitedLine(lc.reason))
+	}
+	// Never treat an unreported cost as zero: say the dollar limit went unchecked.
+	if enforcement.DollarsSupported && hasDollarLimit(adm.limits) && rctx.usage.TotalTokens > 0 &&
+		(!rctx.usage.CostReported || guard.hadCostGap()) {
+		rctx.warnings = append(rctx.warnings,
+			"dollar limit not checked: the provider reported no cost for this run (token limits still applied)")
+	}
+	// After every finished run, whatever its outcome: what it spent counts, and the
+	// owner should hear that a period limit was reached now, not at the next slot.
+	// Deferred so the notice follows the run's own message.
+	if enforcement.Enforced && adm.periodLimited {
+		defer r.recheckPeriod(agent, input, enforcement, adm.limits, adm.loc)
+	}
 
 	// A coder that returned zero bytes did not run quietly — it did not run. Treat
 	// it as a failure so the run shows as failed, the message says what actually
@@ -676,7 +723,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	producedNothing := runErr == nil && coderProducedNothing(rctx.chatLines, rctx.rawChunks, rctx.silentSignaled)
 
 	exitCode := 0
-	if runErr != nil || producedNothing {
+	if runErr != nil || producedNothing || rctx.limited != "" {
 		exitCode = -1
 	}
 	r.reflectRun(input, agent, runID, exitCode, startedAt, rctx)
@@ -705,7 +752,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"run_id", runID, "agent_id", input.AgentID, "agent", agent.Name,
 			"trigger", input.Trigger, "exit", exitCode,
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
-			"silent", rctx.silentSignaled, "stopped", rctx.stopped, "produced_nothing", producedNothing,
+			"silent", rctx.silentSignaled, "stopped", rctx.stopped, "limited", rctx.limited, "produced_nothing", producedNothing,
 			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
 			// "n/a" rather than 0 when the provider reported nothing: a zero
 			// would read as "caching is broken", which is a finding, when the
@@ -728,6 +775,19 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			input.OnProgress(runStoppedNotice)
 		}
 		return ErrRunStopped
+	}
+
+	// Ahead of the generic failure path, which would report the cancelled turn as
+	// a timeout. Undelivered [CHAT] stays in the record, as for a stop.
+	if rctx.limited != "" {
+		_ = r.db.FinishAgentRun(runID, rctx.outcome(-1,
+			strings.Join(rctx.chatLines, "\n"),
+			strings.Join(rctx.warnings, "\n")))
+		if input.OnProgress != nil {
+			input.OnProgress(limitedLine(rctx.limited))
+		}
+		r.limitNotice(agent, input, runID, rctx.limited, adm.loc)
+		return fmt.Errorf("%w: %s", ErrRunLimited, rctx.limited)
 	}
 
 	if runErr != nil {
@@ -1023,8 +1083,17 @@ func (r *Runner) runCoderTurns(
 
 			slog.Info("agentrunner: calling child agent", "parent", agent.Name, "child", callName, "depth", input.depth+1)
 			if err := r.Run(ctx, childInput); err != nil {
-				warn := fmt.Sprintf("child agent %s failed: %v", callName, err)
-				rctx.warnings = append(rctx.warnings, warn)
+				var blocked *BlockedError
+				if errors.As(err, &blocked) {
+					// A child's limits are its own, and a paused or busy child is
+					// not a failure of the parent: it is skipped, like a cycle.
+					warn := fmt.Sprintf("skipping [CALL: %s]: %s", callName, blocked.shortReason())
+					rctx.warnings = append(rctx.warnings, warn)
+					slog.Info("agentrunner: "+warn, "agent_id", agent.ID)
+				} else {
+					warn := fmt.Sprintf("child agent %s failed: %v", callName, err)
+					rctx.warnings = append(rctx.warnings, warn)
+				}
 			}
 			// Stopped while waiting on the child. Without this a child that said
 			// nothing ends the loop normally and this run reports success.

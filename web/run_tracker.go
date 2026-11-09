@@ -183,8 +183,13 @@ func (s *Server) startManualRun(workspaceID string, agent *db.Agent, masterPw st
 			SendOutput:  send,
 		})
 
-		// A stop already closed the stream with its own notice, and it is not a failure.
-		if runErr != nil && !errors.Is(runErr, agentrunner.ErrRunStopped) {
+		// A stop or a spending limit already closed the stream with its own notice,
+		// and neither is a failure. A refused run never started, so its reason is the
+		// one line the stream has.
+		var blocked *agentrunner.BlockedError
+		if errors.As(runErr, &blocked) {
+			onProgress(blocked.Error())
+		} else if runErr != nil && !errors.Is(runErr, agentrunner.ErrRunStopped) && !errors.Is(runErr, agentrunner.ErrRunLimited) {
 			// Surface the failure on the live stream too (SendOutput already delivered
 			// the friendly message to the chat platform). Appended BEFORE finish, or a
 			// reader can observe done and stop before the line it most needs arrives.

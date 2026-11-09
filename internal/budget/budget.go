@@ -74,6 +74,10 @@ type RunCeiling struct {
 	tokSrc, usdSrc, turnSrc Period
 }
 
+// IsZero reports whether the ceiling limits nothing, so the runner can skip
+// metering a run that no limit applies to.
+func (c RunCeiling) IsZero() bool { return c.Tokens == 0 && c.USD == 0 && c.Turns == 0 }
+
 // StartDecision is whether a run may begin now.
 type StartDecision struct {
 	Allowed    bool
