@@ -711,6 +711,7 @@ load-bearing:
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth), never from AGENT.md; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; a stray `[/CHAT]` close tag weak models sometimes emit is stripped and never delivered; `[SILENT]` detected; `[STATE]` merged and saved via `agentdesigner.WriteState` into `state.md`'s json fence) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
+| `internal/budget` | Pure model behind agent limits: `Period`/`PeriodStart`/`PeriodEnd` (day and month in the workspace zone), `Enforcement`, the start decision (may a run begin, or pause the agent until when) and the per-run ceiling, plus the `Limits:` spec-line parser/formatter shared by both designers' prompts. No database, no clock — so the runner and designer both call it and tests pin every edge. See "Agent budgets and limits". |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users; `WithRecovered()`/`RecoverInterrupted()` retry runs the last shutdown killed mid-flight; runs are capped at `maxConcurrentRuns` — see "Missed runs and the laptop case" below |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here); `CleanReply`/`CleanHistory` strip agent output-protocol markers out of conversational replies — see "Chat must never show the output-protocol markers" below |
@@ -2570,6 +2571,61 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
 
 Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUser`, scheduler → chat platform) and `OnProgress` (live SSE). Parser behavior is covered by `runner_test.go`, `silent_test.go` and `emptyrun_test.go`.
 
+### Agent budgets and limits
+
+Per agent, any of: per-run (tokens, turns, dollars), per-day and per-month (tokens, dollars).
+Spec: `docs/superpowers/specs/2026-11-09-agent-budgets-design.md`. Stored in `agent_limits` (migration
+024); `internal/budget` decides, `internal/agentrunner/limits.go` enforces, `coder.WithUsageGuard`
+meters each completion inside the API tool loop.
+
+- **API coders only.** A CLI coder reports no usage Rookery can meter, so its agents KEEP their
+  limits (shown greyed, never deleted) and are not held to them; switching back re-activates them
+  unchanged. `Runner.coderForAgent` is the single seam that answers "which coder does this agent
+  run on" — the multiple-coders project replaces only that function. The designer, builds and the
+  create-build dry run are never limited.
+- **Tokens are the base unit; dollars are a bonus.** There is NO price table and no token-to-dollar
+  estimate, ever — pricing is the owner's business and a table goes stale in silence. Dollar limits
+  are offered only where `APIProvider.ReportsCost` (a static catalog flag: OpenRouter, xAI;
+  Perplexity deliberately excluded, its cost field has vanished without notice). xAI reports
+  `usage.cost_in_usd_ticks` (1 USD = 10^10 ticks), parsed in `internal/llm`. A response that does
+  not report cost is NOT `$0.00`: the dollar limit cannot be evaluated, the token limit still
+  applies.
+- **A per-run limit ends that run; a day/month limit PAUSES the agent.** The effective per-run
+  ceiling is the min of the per-run limit and the remaining day and month budget, so a run cannot
+  overshoot a period. A limited run gets its own `agent_runs.limited` column and a **Limited** chip
+  (not Failed, not Stopped) and notifies inbox + chat, throttled to one notice per agent per day
+  (`limit_notice_day`) so a 10-second agent cannot flood the inbox.
+- **Why a pause is its own state, not `active` and not the schedule.** `active` is the owner's own
+  switch: auto-resume on the 1st would switch back on an agent the owner turned off. The schedule
+  row is the owner's cron, and since #417 editing it rewrites AGENT.md's header, quoted crons and
+  the derived description — far too much side effect for a temporary pause. `budget_paused_until`
+  (UTC) expires by itself at the period end computed in the workspace zone (`profile.ScheduleZone`;
+  empty zone = host local, as schedules treat it). Checked in the runner, so it blocks EVERY
+  trigger (cron, Run button, chat `/run`, `[CALL]`); the scheduler also skips a paused agent so no
+  refused run is recorded per slot. Skipped slots are not queued: no catch-up burst on resume.
+  Saving limits (`PUT /agents/:id/limits`) clears a pause, since otherwise the owner's only exit is
+  waiting.
+- **The decision comes from `context.Cause`, never from the error type** (the #410 rule for
+  stops). The API engine reports a cancelled context as a timeout and a CLI coder's killed process
+  surfaces differently again; `ErrRunLimited` is carried as the cancel cause via `limitCause`.
+  **`limited` is only recorded when `runErr` is set** — a run that finished on its own just as
+  the guard tripped completed, and calling it limited would mislabel a success.
+- **Two messages, two names.** A mid-run stop names the limit CONFIGURED; a start-time refusal or
+  clamp names the REMAINDER of the period. Quoting the configured number when the run was ceilinged
+  by what was left of the day told owners a limit they had set was "reached" at a fraction of it.
+- **Budgeted agents do not overlap.** The registry would otherwise let a slow cron run start while
+  its predecessor spends, overshooting a period check made only at start. A second start is
+  refused as `busy`; `Runner.CheckRunnable` lets `POST /agents/:id/run` answer `409` with
+  `budget_paused` or `busy` instead of a 202 for a run that never starts.
+- **Child runs count against the child.** A `[CALL]`ed agent's spend is its own, as there is no
+  parent link in `agent_runs`; a parent's limits do not reach into a child. A parent whose `[CALL]`
+  is refused is warned in its transcript.
+- **Setting them.** The agent page's Limits card, and the designer, which asks (only when the
+  coder is an API coder; dollars only if the provider reports cost) and emits a `Limits:` line in
+  the `[TECHNICAL SPEC]`, parsed by `budget` and persisted on approve. Surfaces: paused banner on
+  the agent page, `paused_agents` in the dashboard payload (Home's Agents at a glance and Needs
+  attention), and a `"limited"` run status.
+
 ### Run transcript and the silent flag
 
 **Run history could only ever replay what the user had already read.** Tool-call
@@ -3371,6 +3427,7 @@ The base schema was consolidated into `migrations/001_initial_schema.up.sql` dur
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
 `003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind); `016_agent_run_transcript` adds `agent_runs.{transcript,silent}` (see "Run transcript and the silent flag" below); `017_agent_runs_cost` adds `agent_runs.{cached_tokens,cache_reported,cost_usd,cost_reported}` — a token count is not a price (the same 200k tokens cost different amounts on different models, and a cached prefix bills at a fraction), so "what is this agent costing me?" could not be answered from run history at all. Each figure carries a `_reported` flag rather than using 0 as a sentinel: a provider reporting zero and a provider reporting nothing are opposite findings, and a CLI coder reports neither — rendering its runs as `$0.00` would read as free rather than as unmeasured.
+`024_agent_limits` adds the `agent_limits` table (one row per agent, absent = unlimited, 0 in a column = that limit unset), `agents.{budget_paused_until,budget_pause_reason,limit_notice_day}` and `agent_runs.limited` (see "Agent budgets and limits").
 
 **`db.ListAgents` is name-ordered and must stay that way; the agents PAGE is ordered in the
 handler.** The list page shows the newest agent first — the one you just built is the one you came
@@ -3706,7 +3763,7 @@ duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
-- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, `GET`/`PUT /agents/:id/limits`, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
 - **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test
