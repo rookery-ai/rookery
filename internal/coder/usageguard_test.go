@@ -60,6 +60,31 @@ func TestUsageGuardCancelStopsBeforeToolExecution(t *testing.T) {
 	}
 }
 
+// A completion that crosses the ceiling while giving the final answer has already
+// been paid for and finishes the run; discarding it would leave the owner with the
+// cost and nothing to show for it. Only a completion asking for MORE tool turns is
+// stopped.
+func TestUsageGuardCancelOnFinalAnswerStillReturnsIt(t *testing.T) {
+	dir := t.TempDir()
+	ws := "ws1"
+	mustMkdir(t, filepath.Join(dir, "vaults", ws))
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	c := newTestCoder(t, dir).WithUsageGuard(func(llm.Usage) { cancel(context.Canceled) })
+
+	testFake.calls = 0
+	testFake.script = func(int, llm.Request) (*llm.Response, error) {
+		return &llm.Response{Usage: llm.Usage{TotalTokens: 42}, Content: "[CHAT] the answer"}, nil
+	}
+	res, err := c.Generate(ctx, ws, "p")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res == nil || res.Text != "[CHAT] the answer" || res.Usage.TotalTokens != 42 {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestProviderReportsCost(t *testing.T) {
 	for name, want := range map[string]bool{"openrouter": true, "xai": true, "openai": false, "anthropic": false, "nope": false} {
 		if got := ProviderReportsCost(name); got != want {

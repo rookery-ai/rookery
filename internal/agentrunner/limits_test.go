@@ -507,6 +507,62 @@ func TestRunFinishedOnFinalCompletionIsNotLimited(t *testing.T) {
 	}
 }
 
+// The same in the ordinary loop, not just the wrap-up turn: a final answer whose
+// completion crosses the ceiling is delivered and the run is not limited.
+func TestFinalAnswerCrossingTheLimitIsDelivered(t *testing.T) {
+	h := newStopHarness(t)
+	useBudgetProvider(t, h, func(_ context.Context, call int, _ llm.Request) (*llm.Response, error) {
+		if call == 0 {
+			return toolTurn(600), nil
+		}
+		return chatTurn(600, "final answer"), nil
+	})
+	a := h.agent("Closer", "Look once, then answer.")
+	h.setLimits(a, db.AgentLimits{RunTokens: 1000})
+
+	sent := &collector{}
+	if err := h.runOnce(a, sent, &collector{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	run := h.latest(a)
+	if run.Limited != "" || run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("limited=%q exit=%v, want a finished run", run.Limited, run.ExitCode)
+	}
+	if s := strings.Join(sent.all(), "\n"); !strings.Contains(s, "final answer") {
+		t.Errorf("the answer should be delivered: %q", s)
+	}
+	if h.inboxWith("⛔") != 0 {
+		t.Error("no limit notice for a finished run")
+	}
+}
+
+// A turn that crosses the ceiling and asks for another agent has not finished its
+// work: the child is not started (it would inherit this run's limit) and the run
+// is recorded as limited.
+func TestCallAfterLimitIsNotDispatched(t *testing.T) {
+	h := newStopHarness(t)
+	useBudgetProvider(t, h, func(_ context.Context, call int, _ llm.Request) (*llm.Response, error) {
+		if call == 0 {
+			return &llm.Response{Usage: llm.Usage{TotalTokens: 5000}, Content: "[CALL: Helper]"}, nil
+		}
+		return chatTurn(10, "should not run"), nil
+	})
+	parent := h.agent("Caller", "Ask the helper.")
+	child := h.agent("Helper", "Say hi.")
+	h.setLimits(parent, db.AgentLimits{RunTokens: 1000})
+
+	err := h.runOnce(parent, &collector{}, &collector{})
+	if !errors.Is(err, ErrRunLimited) {
+		t.Fatalf("Run returned %v, want ErrRunLimited", err)
+	}
+	if h.runCount(child) != 0 {
+		t.Error("a child must not be started after the parent's limit was reached")
+	}
+	if run := h.latest(parent); run.Limited == "" {
+		t.Errorf("the parent run should be recorded as limited: %+v", run)
+	}
+}
+
 // A dollar day limit on a provider that reports no cost is kept but never checked,
 // so it must not make the agent refuse an overlapping run.
 func TestUnenforceableDollarPeriodLimitDoesNotMakeAgentBusy(t *testing.T) {

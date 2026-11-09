@@ -180,9 +180,14 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		}
 		total = addUsage(total, resp.Usage)
 		// A guard that cancels the run must stop it before this response's tool
-		// calls execute, or a limit would be overshot by a whole tool turn.
+		// calls execute, or a limit would be overshot by a whole tool turn. A
+		// response with no tool calls is different: it is the final answer, its
+		// cost is already spent, and stopping here would throw away the one thing
+		// the run was paid to produce. It falls through and is returned as usual
+		// (a nudge branch below that `continue`s still meets the top-of-loop
+		// check, because a nudge is not an answer).
 		c.guardUsage(resp.Usage)
-		if ctx.Err() != nil {
+		if ctx.Err() != nil && len(resp.ToolCalls) > 0 {
 			return cancelledResult(ctx, total, toolTrace), fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 		}
 

@@ -698,8 +698,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// Which limit is read from the cause, never from the error: a cancelled API
 	// turn reports ErrTimeout, which would otherwise read as "ran past its time
 	// limit". Like a stop it needs runErr too: a run whose final completion crossed
-	// the ceiling and still finished (the engine's wrap-up turn returns no error)
-	// delivered its answer, and recording it as cut short would withhold that answer.
+	// the ceiling and still finished (the engine returns a tool-free final answer,
+	// and its wrap-up turn, without an error) delivered its answer, and recording it
+	// as cut short would withhold that answer. A final answer that asks for a [CALL]
+	// is not finished, and runCoderTurns returns the cause for it.
 	// A stop wins: a cancel made first fixes the cause, so a limit reached in the
 	// same instant cannot relabel the owner's decision.
 	var lc limitCause
@@ -1039,6 +1041,18 @@ func (r *Runner) runCoderTurns(
 		// Handle agent-to-agent calls.
 		if len(parsed.callAgents) == 0 {
 			break
+		}
+		// The engine returns a final answer even when its completion crossed a
+		// limit, so this turn may arrive with the run's context already cancelled.
+		// A [CALL] means the work is not finished: a child started now would
+		// inherit this run's cancel cause and be recorded as limited itself, and
+		// the follow-up turn could not run anyway. End the run with the cause so
+		// it is recorded for what stopped it.
+		if ctx.Err() != nil {
+			if errors.Is(context.Cause(ctx), ErrRunStopped) {
+				return ErrRunStopped
+			}
+			return fmt.Errorf("coder generate: %w", context.Cause(ctx))
 		}
 
 		var childOutputs []string
