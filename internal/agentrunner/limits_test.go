@@ -210,6 +210,24 @@ func TestRunnerPausesAfterMonthlySpend(t *testing.T) {
 	if n := h.inboxWith("⏸ Paused until"); n != 1 {
 		t.Fatalf("pause notices = %d, want 1", n)
 	}
+	// The notices name the limit the owner set, not the 50 tokens that were left.
+	if n := h.inboxWith("⛔ monthly limit of 1,000 tokens reached"); n != 1 {
+		t.Errorf("limit notice should name the configured limit: %q", inboxBodies(h))
+	}
+	if n := h.inboxWith("⏸ Paused until"); n == 1 && !strings.Contains(strings.Join(inboxBodies(h), "\n"), "monthly limit of 1,000 tokens reached. Scheduled") {
+		t.Errorf("pause notice should name the configured limit: %q", inboxBodies(h))
+	}
+	// Not h.latest: the seeded run and this one start in the same second.
+	runs, _ := h.db.ListAgentRuns(a.ID, 10)
+	var limited []string
+	for _, r := range runs {
+		if r.Limited != "" {
+			limited = append(limited, r.Limited)
+		}
+	}
+	if len(limited) != 1 || limited[0] != "monthly limit of 1,000 tokens" {
+		t.Errorf("limited runs = %q", limited)
+	}
 
 	// The next attempt is refused, and says nothing new.
 	runsBefore := h.runCount(a)
@@ -445,4 +463,80 @@ func mustAgent(t *testing.T, h *stopHarness, a *db.Agent) *db.Agent {
 		t.Fatal(err)
 	}
 	return got
+}
+
+func inboxBodies(h *stopHarness) []string {
+	var out []string
+	for _, m := range h.inbox() {
+		out = append(out, m.Body)
+	}
+	return out
+}
+
+// The engine's wrap-up turn returns its answer without an error even when its
+// completion crosses the ceiling. That run finished: it delivers, and is not
+// recorded as cut short.
+func TestRunFinishedOnFinalCompletionIsNotLimited(t *testing.T) {
+	h := newStopHarness(t)
+	useBudgetProvider(t, h, func(_ context.Context, _ int, req llm.Request) (*llm.Response, error) {
+		if len(req.Tools) == 0 {
+			// The grace turn: tools withdrawn, answer now. This completion crosses the limit.
+			return chatTurn(5000, "wrapped up"), nil
+		}
+		// Failing calls, so the unproductive-streak guard ends the loop.
+		return &llm.Response{Usage: llm.Usage{TotalTokens: 10}, ToolCalls: []llm.ToolCall{{
+			ID: uuid.NewString(), Name: "no_such_tool", Args: json.RawMessage(`{"n":"` + uuid.NewString() + `"}`),
+		}}}, nil
+	})
+	a := h.agent("Finisher", "Try things.")
+	h.setLimits(a, db.AgentLimits{RunTokens: 1000})
+
+	sent := &collector{}
+	if err := h.runOnce(a, sent, &collector{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	run := h.latest(a)
+	if run.Limited != "" || run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("a finished run must not be recorded as limited: limited=%q exit=%v", run.Limited, run.ExitCode)
+	}
+	if s := strings.Join(sent.all(), "\n"); !strings.Contains(s, "wrapped up") {
+		t.Errorf("the answer should be delivered: %q", s)
+	}
+	if h.inboxWith("⛔") != 0 {
+		t.Error("no limit notice for a finished run")
+	}
+}
+
+// A dollar day limit on a provider that reports no cost is kept but never checked,
+// so it must not make the agent refuse an overlapping run.
+func TestUnenforceableDollarPeriodLimitDoesNotMakeAgentBusy(t *testing.T) {
+	h := newStopHarness(t)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	useBudgetProvider(t, h, func(_ context.Context, call int, _ llm.Request) (*llm.Response, error) {
+		if call == 0 {
+			entered <- struct{}{}
+			<-release
+		}
+		return chatTurn(10, "done"), nil
+	})
+	a := h.agent("SlowDollars", "Say done.")
+	h.setLimits(a, db.AgentLimits{DayUSD: 5})
+
+	first := h.start(context.Background(), a, &collector{}, &collector{})
+	<-entered
+	if err := h.runner.CheckRunnable(mustAgent(t, h, a)); err != nil {
+		t.Errorf("CheckRunnable = %v, want nil", err)
+	}
+	second := h.runOnce(a, &collector{}, &collector{})
+	close(release)
+	if err := waitRun(t, first); err != nil {
+		t.Errorf("first run: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("second run returned %v, want it to run", second)
+	}
+	if h.runCount(a) != 2 {
+		t.Errorf("both runs should have rows, got %d", h.runCount(a))
+	}
 }

@@ -138,7 +138,10 @@ func (r *Runner) admit(agent *db.Agent, e budget.Enforcement, input RunInput) (a
 		return adm, &BlockedError{Until: d.PauseUntil, Reason: d.Reason, loc: adm.loc}
 	}
 	adm.ceiling = d.Remaining
-	adm.periodLimited = budget.HasPeriodLimit(limits)
+	// Only limits that can be checked make the agent exclusive: a dollar limit on a
+	// provider that reports no cost is kept but never evaluated, so it must not
+	// refuse an overlapping run either.
+	adm.periodLimited = budget.HasEnforceablePeriodLimit(limits, e)
 	return adm, nil
 }
 

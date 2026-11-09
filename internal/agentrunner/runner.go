@@ -695,12 +695,15 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	untrack()
 	cause := context.Cause(ctx)
 	rctx.stopped = runErr != nil && errors.Is(cause, ErrRunStopped)
-	// Decided from the cause alone, never from the error: a cancelled API turn
-	// reports ErrTimeout, which would otherwise read as "ran past its time limit".
+	// Which limit is read from the cause, never from the error: a cancelled API
+	// turn reports ErrTimeout, which would otherwise read as "ran past its time
+	// limit". Like a stop it needs runErr too: a run whose final completion crossed
+	// the ceiling and still finished (the engine's wrap-up turn returns no error)
+	// delivered its answer, and recording it as cut short would withhold that answer.
 	// A stop wins: a cancel made first fixes the cause, so a limit reached in the
 	// same instant cannot relabel the owner's decision.
 	var lc limitCause
-	if !rctx.stopped && errors.As(cause, &lc) {
+	if runErr != nil && !rctx.stopped && errors.As(cause, &lc) {
 		rctx.limited = lc.reason
 		rctx.warnings = append(rctx.warnings, limitedLine(lc.reason))
 	}

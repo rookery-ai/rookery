@@ -51,7 +51,9 @@ func TestDecideStartRemainingIsMinimum(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 	ex, why := d.Remaining.Exceeded(llm.Usage{TotalTokens: 10000}, 1, false)
-	if !ex || why != "daily limit of 10,000 tokens" {
+	// The configured limit, not the 10,000 left of it: that is the setting the
+	// owner has to change.
+	if !ex || why != "daily limit of 500,000 tokens" {
 		t.Fatalf("%v %q", ex, why)
 	}
 	d = DecideStart(l, db.Spend{}, db.Spend{}, enf, time.Now(), time.UTC)
@@ -114,5 +116,30 @@ func TestHasPeriodLimit(t *testing.T) {
 func TestFormatPauseReasonUnknownPeriod(t *testing.T) {
 	if got := FormatPauseReason(Period("week"), "1 token"); got != "week limit of 1 token reached" {
 		t.Fatal(got)
+	}
+}
+
+func TestExceededNamesConfiguredUSDLimitNotRemainder(t *testing.T) {
+	l := db.AgentLimits{MonthUSD: 30}
+	d := DecideStart(l, db.Spend{}, db.Spend{USD: 29.5}, Enforcement{Enforced: true, DollarsSupported: true}, time.Now(), time.UTC)
+	ex, why := d.Remaining.Exceeded(llm.Usage{Cost: 0.6, CostReported: true}, 1, true)
+	if !ex || why != "monthly limit of $30.00" {
+		t.Fatalf("%v %q", ex, why)
+	}
+}
+
+func TestHasEnforceablePeriodLimit(t *testing.T) {
+	usdOnly := db.AgentLimits{DayUSD: 1}
+	if HasEnforceablePeriodLimit(usdOnly, Enforcement{Enforced: true}) {
+		t.Error("a dollar limit the provider cannot report is not enforceable")
+	}
+	if !HasEnforceablePeriodLimit(usdOnly, Enforcement{Enforced: true, DollarsSupported: true}) {
+		t.Error("a dollar limit with reported cost is enforceable")
+	}
+	if !HasEnforceablePeriodLimit(db.AgentLimits{MonthTokens: 5}, Enforcement{Enforced: true}) {
+		t.Error("a token period limit is enforceable")
+	}
+	if HasEnforceablePeriodLimit(db.AgentLimits{MonthTokens: 5}, Enforcement{}) {
+		t.Error("nothing is enforceable on a CLI coder")
 	}
 }

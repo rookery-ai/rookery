@@ -72,6 +72,12 @@ type RunCeiling struct {
 	Turns  int
 
 	tokSrc, usdSrc, turnSrc Period
+	// tokLimit and usdLimit are the CONFIGURED limits behind Tokens and USD. When
+	// a ceiling is what is left of a day or month, the amount left is not the
+	// limit the owner set, and a notice naming the remainder ("monthly limit of
+	// 50 tokens") would misstate the setting they need to change.
+	tokLimit int64
+	usdLimit float64
 }
 
 // IsZero reports whether the ceiling limits nothing, so the runner can skip
@@ -84,6 +90,24 @@ type StartDecision struct {
 	PauseUntil time.Time
 	Reason     string
 	Remaining  RunCeiling
+}
+
+// configured is the limit to name: the one the owner set, or the ceiling itself
+// for a RunCeiling built by hand without one.
+func configured[T int64 | float64](limit, ceiling T) T {
+	if limit > 0 {
+		return limit
+	}
+	return ceiling
+}
+
+// HasEnforceablePeriodLimit reports whether any day or month limit can actually be
+// checked under e: a dollar limit counts only when the provider reports cost.
+func HasEnforceablePeriodLimit(l db.AgentLimits, e Enforcement) bool {
+	if !e.Enforced {
+		return false
+	}
+	return l.DayTokens != 0 || l.MonthTokens != 0 || (e.DollarsSupported && (l.DayUSD != 0 || l.MonthUSD != 0))
 }
 
 // HasPeriodLimit reports whether any day or month limit is set.
@@ -126,30 +150,30 @@ func DecideStart(l db.AgentLimits, day, month db.Spend, e Enforcement, now time.
 	}
 
 	var c RunCeiling
-	tok := func(limit int64, p Period) {
-		if limit > 0 && (c.Tokens == 0 || limit < c.Tokens) {
-			c.Tokens, c.tokSrc = limit, p
+	tok := func(left, limit int64, p Period) {
+		if left > 0 && (c.Tokens == 0 || left < c.Tokens) {
+			c.Tokens, c.tokSrc, c.tokLimit = left, p, limit
 		}
 	}
-	usd := func(limit float64, p Period) {
-		if limit > 0 && (c.USD == 0 || limit < c.USD) {
-			c.USD, c.usdSrc = limit, p
+	usd := func(left, limit float64, p Period) {
+		if left > 0 && (c.USD == 0 || left < c.USD) {
+			c.USD, c.usdSrc, c.usdLimit = left, p, limit
 		}
 	}
-	tok(l.RunTokens, PeriodRun)
+	tok(l.RunTokens, l.RunTokens, PeriodRun)
 	if l.DayTokens > 0 {
-		tok(l.DayTokens-day.Tokens, PeriodDay)
+		tok(l.DayTokens-day.Tokens, l.DayTokens, PeriodDay)
 	}
 	if l.MonthTokens > 0 {
-		tok(l.MonthTokens-month.Tokens, PeriodMonth)
+		tok(l.MonthTokens-month.Tokens, l.MonthTokens, PeriodMonth)
 	}
 	if e.DollarsSupported {
-		usd(l.RunUSD, PeriodRun)
+		usd(l.RunUSD, l.RunUSD, PeriodRun)
 		if dayUSD && l.DayUSD > 0 {
-			usd(l.DayUSD-day.USD, PeriodDay)
+			usd(l.DayUSD-day.USD, l.DayUSD, PeriodDay)
 		}
 		if monUSD && l.MonthUSD > 0 {
-			usd(l.MonthUSD-month.USD, PeriodMonth)
+			usd(l.MonthUSD-month.USD, l.MonthUSD, PeriodMonth)
 		}
 	}
 	if l.RunTurns > 0 {
@@ -163,13 +187,13 @@ func DecideStart(l db.AgentLimits, day, month db.Spend, e Enforcement, now time.
 // reported a cost for this usage.
 func (c RunCeiling) Exceeded(u llm.Usage, turns int, dollars bool) (bool, string) {
 	if c.Tokens > 0 && int64(u.TotalTokens) >= c.Tokens {
-		return true, limitName(c.tokSrc) + " of " + fmtTokens(c.Tokens)
+		return true, limitName(c.tokSrc) + " of " + fmtTokens(configured(c.tokLimit, c.Tokens))
 	}
 	if c.Turns > 0 && turns >= c.Turns {
 		return true, limitName(c.turnSrc) + fmt.Sprintf(" of %s turns", fmtInt(int64(c.Turns)))
 	}
 	if dollars && u.CostReported && c.USD > 0 && u.Cost >= c.USD {
-		return true, limitName(c.usdSrc) + " of " + fmtUSD(c.USD)
+		return true, limitName(c.usdSrc) + " of " + fmtUSD(configured(c.usdLimit, c.USD))
 	}
 	return false, ""
 }
