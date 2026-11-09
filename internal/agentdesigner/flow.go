@@ -1578,6 +1578,11 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		// — was the only one that did not.
 		BrowserAvailable: f.browser != nil && f.browser.Available().OK,
 		BackendType:      prompts.MapCoderBackend(coderSvc.BackendType()),
+		// Limits are enforced from the API engine's per-call usage, so only
+		// there is the question worth asking; dollars only where the provider
+		// reports a price.
+		LimitsAvailable: coderSvc.IsAPI(),
+		LimitsDollars:   coderSvc.IsAPI() && coder.ProviderReportsCost(coderSvc.APIProviderName()),
 	})
 
 	// The design conversation gets the READ-ONLY tool subset: it can open a note,
@@ -2952,6 +2957,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	agentNameSnap := sess.AgentName
 	destructiveApproved := sess.DestructiveApproved
 	skillRefs := sess.Skills
+	historySnap := append([]db.ChatMessage(nil), sess.History...)
 	f.mu.Unlock()
 
 	description := extractDescription(agentMD, agentNameSnap)
@@ -2982,6 +2988,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
+	f.persistLimits(agentIDSnap, historySnap)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
@@ -3039,6 +3046,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	agentNameSnap := sess.AgentName
 	destructiveApproved := sess.DestructiveApproved
 	skillRefs := sess.Skills
+	historySnap := append([]db.ChatMessage(nil), sess.History...)
 	f.mu.Unlock()
 
 	description := extractDescription(agentMD, agentNameSnap)
@@ -3056,6 +3064,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
+	f.persistLimits(agentIDSnap, historySnap)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the
