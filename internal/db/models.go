@@ -216,7 +216,7 @@ type InboxMessage struct {
 	RefID       string // run_id or reminder_id
 	Trigger     string // cron|manual|chat; empty for reminders
 	Body        string
-	Status      string     // "ok" | "error"
+	Status      string     // "ok" | "error" | "limited" (a spending-limit notice, not a failure)
 	ReadAt      *time.Time // nil = unread
 	CreatedAt   time.Time
 }

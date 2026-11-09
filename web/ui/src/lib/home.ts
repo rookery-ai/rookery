@@ -134,6 +134,7 @@ export type InboxMessage = {
   agent_id: string;
   agent_name: string;
   trigger: string;
+  // "ok" | "error" | "limited" (a spending-limit notice — a warning, not a failure).
   status: string;
   body: string;
   read: boolean;

@@ -164,6 +164,13 @@ function InboxCard({
               Failed
             </span>
           )}
+          {/* A spending limit held the agent to the owner's own cap — a warning,
+              not a failure, so it must not borrow the red "Failed" badge. */}
+          {msg.status === "limited" && (
+            <span className="shrink-0 rounded-full bg-warn-soft px-1.5 py-0.5 text-xs font-medium text-warn">
+              Limit reached
+            </span>
+          )}
           <span className="ml-auto shrink-0 text-xs text-muted-2">{timeAgo(msg.created_at)}</span>
         </span>
         {/* Body carries the primary foreground token, not muted-2 — spec §9:

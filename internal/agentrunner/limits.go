@@ -32,6 +32,11 @@ func (c limitCause) Unwrap() error { return ErrRunLimited }
 // stand in a provider that reports cost without registering under a real name.
 var providerReportsCost = coder.ProviderReportsCost
 
+// InboxStatusLimited marks an inbox row a spending limit produced — a pause or a
+// limited run. It is not "error": the agent was held to the owner's own cap, and
+// the inbox rendering it as a failure sends the owner looking for a bug.
+const InboxStatusLimited = "limited"
+
 // pauseTimeLayout is how a pause's end is written to the owner.
 const pauseTimeLayout = "Mon 2 Jan 15:04"
 
@@ -182,7 +187,7 @@ func (r *Runner) pauseAgent(agent *db.Agent, input RunInput, d budget.StartDecis
 	}
 	// No run id: a refused run has no row, and a pause found after a run belongs
 	// to the agent rather than to that run.
-	r.recordInbox(input, agent, "", msg, "error")
+	r.recordInbox(input, agent, "", msg, InboxStatusLimited)
 }
 
 // recheckPeriod pauses the agent straight after a run that took it over a daily or
@@ -272,7 +277,7 @@ func (r *Runner) limitNotice(agent *db.Agent, input RunInput, runID, reason stri
 	if input.SendOutput != nil {
 		input.SendOutput(msg)
 	}
-	r.recordInbox(input, agent, runID, msg, "error")
+	r.recordInbox(input, agent, runID, msg, InboxStatusLimited)
 }
 
 // hasDollarLimit reports whether any limit is set in dollars.

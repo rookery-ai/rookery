@@ -210,6 +210,13 @@ func TestRunnerPausesAfterMonthlySpend(t *testing.T) {
 	if n := h.inboxWith("⏸ Paused until"); n != 1 {
 		t.Fatalf("pause notices = %d, want 1", n)
 	}
+	// Both notices are a limit doing its job, not a failure: the inbox must not
+	// show them as one.
+	for _, m := range h.inbox() {
+		if m.Status != InboxStatusLimited {
+			t.Errorf("inbox %q status = %q, want %q", m.Body, m.Status, InboxStatusLimited)
+		}
+	}
 	// The notices name the limit the owner set, not the 50 tokens that were left.
 	if n := h.inboxWith("⛔ monthly limit of 1,000 tokens reached"); n != 1 {
 		t.Errorf("limit notice should name the configured limit: %q", inboxBodies(h))
