@@ -29,6 +29,7 @@ function emptyDashboard(): Dashboard {
     recent_runs: [],
     upcoming: [],
     has_connector: true,
+    paused_agents: [],
   };
 }
 

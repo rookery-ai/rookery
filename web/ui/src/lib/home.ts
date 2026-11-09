@@ -8,7 +8,7 @@ export type DashboardRun = {
   id: string;
   agent_id: string;
   agent_name: string;
-  status: "running" | "success" | "failed" | "stopped";
+  status: "running" | "success" | "failed" | "stopped" | "limited";
   trigger: string;
   started_at: string;
   finished_at: string | null;
@@ -21,6 +21,13 @@ export type DashboardUpcoming = {
   next_run_at: string | null;
 };
 
+export type PausedAgent = {
+  agent_id: string;
+  agent_name: string;
+  until: string;
+  reason: string;
+};
+
 export type Dashboard = {
   display_name: string;
   agent_count: number;
@@ -28,12 +35,18 @@ export type Dashboard = {
   recent_runs: DashboardRun[];
   upcoming: DashboardUpcoming[];
   has_connector: boolean;
+  paused_agents: PausedAgent[];
 };
 
 // normalizeDashboard guards against nil Go slices reaching a component as
 // JSON null — same convention as lib/agents.ts's normalizeAgentDetail.
 function normalizeDashboard(d: Dashboard): Dashboard {
-  return { ...d, recent_runs: d.recent_runs ?? [], upcoming: d.upcoming ?? [] };
+  return {
+    ...d,
+    recent_runs: d.recent_runs ?? [],
+    upcoming: d.upcoming ?? [],
+    paused_agents: d.paused_agents ?? [],
+  };
 }
 
 export function useDashboard() {
