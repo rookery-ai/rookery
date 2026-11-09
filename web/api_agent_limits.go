@@ -13,9 +13,10 @@ import (
 	"github.com/rookery-ai/rookery/internal/profile"
 )
 
-// maxLimitTurns is the highest per-run turn limit: the engine's hard ceiling is
-// 150 turns, so a limit of 150 or more could never be the thing that stops a run.
-const maxLimitTurns = 149
+// maxLimitTurns is the highest per-run turn limit (see budget.MaxRunTurns). One
+// constant for the API and the designer's parser, so neither can save a limit the
+// other refuses.
+const maxLimitTurns = budget.MaxRunTurns
 
 type limitRun struct {
 	Tokens int64   `json:"tokens"`

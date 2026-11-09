@@ -107,12 +107,6 @@ func TestFormatPauseReason(t *testing.T) {
 	}
 }
 
-func TestHasPeriodLimit(t *testing.T) {
-	if HasPeriodLimit(db.AgentLimits{RunTokens: 1}) || !HasPeriodLimit(db.AgentLimits{MonthUSD: 1}) {
-		t.Fatal("wrong")
-	}
-}
-
 func TestFormatPauseReasonUnknownPeriod(t *testing.T) {
 	if got := FormatPauseReason(Period("week"), "1 token"); got != "week limit of 1 token reached" {
 		t.Fatal(got)

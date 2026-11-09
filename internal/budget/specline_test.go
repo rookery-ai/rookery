@@ -98,3 +98,60 @@ func TestFormatSpecLineKeepsSubCentDollars(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+// The API refuses a turns limit of 150 or more (the engine's hard ceiling), so the
+// designer's line must too: otherwise a plan could save a limit the page then
+// rejects on its next save.
+func TestParseSpecLineRejectsTurnsAboveTheEngineCeiling(t *testing.T) {
+	if l, _, ok := ParseSpecLine("per run: 149 turns"); !ok || l.RunTurns != MaxRunTurns {
+		t.Errorf("149 turns should parse, got %+v ok=%v", l, ok)
+	}
+	for _, in := range []string{"per run: 150 turns", "per run: 1k turns"} {
+		if _, _, ok := ParseSpecLine(in); ok {
+			t.Errorf("%q should be rejected", in)
+		}
+	}
+}
+
+func TestParseSpecLineScopesNamesOnlyTheScopesWritten(t *testing.T) {
+	cases := []struct {
+		in    string
+		want  db.AgentLimits
+		named []Period
+	}{
+		{"per day: 500k tokens", db.AgentLimits{DayTokens: 500000}, []Period{PeriodDay}},
+		{"per run: 5 turns; monthly: $3", db.AgentLimits{RunTurns: 5, MonthUSD: 3}, []Period{PeriodRun, PeriodMonth}},
+		// A scope-level "none" names the scope and leaves its fields zero, so an
+		// edit can remove one period without restating the others.
+		{"per day: none", db.AgentLimits{}, []Period{PeriodDay}},
+		{"per day: none; per run: 9 turns", db.AgentLimits{RunTurns: 9}, []Period{PeriodDay, PeriodRun}},
+		{"none", db.AgentLimits{}, []Period{PeriodRun, PeriodDay, PeriodMonth}},
+	}
+	for _, c := range cases {
+		got, named, set, ok := ParseSpecLineScopes(c.in)
+		if !set || !ok || got != c.want || len(named) != len(c.named) {
+			t.Errorf("%q: %+v named=%v set=%v ok=%v", c.in, got, named, set, ok)
+			continue
+		}
+		for i := range named {
+			if named[i] != c.named[i] {
+				t.Errorf("%q: named=%v want %v", c.in, named, c.named)
+			}
+		}
+	}
+	if _, _, _, ok := ParseSpecLineScopes("per day: none, 5 tokens"); ok {
+		t.Error("none mixed with a value is ambiguous and must be rejected")
+	}
+}
+
+func TestMergeLimitScopesKeepsUnnamedScopes(t *testing.T) {
+	cur := db.AgentLimits{AgentID: "a", RunTokens: 50000, RunTurns: 20, DayTokens: 500000, DayUSD: 2, MonthUSD: 30}
+	got := MergeLimitScopes(cur, db.AgentLimits{DayTokens: 9}, []Period{PeriodDay})
+	want := db.AgentLimits{AgentID: "a", RunTokens: 50000, RunTurns: 20, DayTokens: 9, MonthUSD: 30}
+	if got != want {
+		t.Errorf("merge = %+v, want %+v", got, want)
+	}
+	if got := MergeLimitScopes(cur, db.AgentLimits{}, []Period{PeriodRun, PeriodDay, PeriodMonth}); got != (db.AgentLimits{AgentID: "a"}) {
+		t.Errorf("naming every scope must replace everything: %+v", got)
+	}
+}

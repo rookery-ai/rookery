@@ -18,13 +18,25 @@ import (
 // ok=false on anything unrecognised, and the caller ignores the whole line: a
 // half-read limit would silently be a different limit from the one approved.
 func ParseSpecLine(v string) (l db.AgentLimits, set bool, ok bool) {
+	l, _, set, ok = ParseSpecLineScopes(v)
+	return l, set, ok
+}
+
+// ParseSpecLineScopes is ParseSpecLine that also reports which scopes the line
+// named, in the order written. An edit needs it: a zero field in the parsed
+// limits means both "this scope was not mentioned" and "this scope was mentioned
+// without that unit", and only the second may overwrite what the agent has.
+// A whole-line "none" names every scope; a scope written as "per day: none"
+// names that scope with all its fields zero, which is how one period is removed
+// without restating the others.
+func ParseSpecLineScopes(v string) (l db.AgentLimits, named []Period, set bool, ok bool) {
 	// A model often ends the line with a full stop; that is not part of a value.
 	v = strings.ToLower(strings.TrimRight(strings.TrimSpace(v), ".,;! \t"))
 	switch v {
 	case "", "unchanged":
-		return l, false, true
+		return l, nil, false, true
 	case "none":
-		return l, true, true
+		return l, []Period{PeriodRun, PeriodDay, PeriodMonth}, true, true
 	}
 	seen := map[string]bool{}
 	for _, scope := range strings.Split(v, ";") {
@@ -35,21 +47,53 @@ func ParseSpecLine(v string) (l db.AgentLimits, set bool, ok bool) {
 		rawName, rest, found := strings.Cut(scope, ":")
 		name := scopeName(rawName)
 		if !found || name == "" || seen[name] {
-			return db.AgentLimits{}, false, false
+			return db.AgentLimits{}, nil, false, false
 		}
 		seen[name] = true
+		named = append(named, scopePeriod(name))
+		if strings.TrimSpace(rest) == "none" {
+			continue
+		}
 		units := map[string]bool{}
 		// Split on comma+space only: "1,000,000" is a number, not a list.
 		for _, item := range splitItems(rest) {
 			if !applyItem(&l, name, item, units) {
-				return db.AgentLimits{}, false, false
+				return db.AgentLimits{}, nil, false, false
 			}
 		}
 	}
 	if len(seen) == 0 {
-		return db.AgentLimits{}, false, false
+		return db.AgentLimits{}, nil, false, false
 	}
-	return l, true, true
+	return l, named, true, true
+}
+
+func scopePeriod(name string) Period {
+	switch name {
+	case "per run":
+		return PeriodRun
+	case "per day":
+		return PeriodDay
+	}
+	return PeriodMonth
+}
+
+// MergeLimitScopes replaces, in cur, every field of each named scope with the
+// value from next, and keeps every other scope as it was. It is the edit rule:
+// a plan that restates only the daily limit must not erase the monthly one.
+func MergeLimitScopes(cur, next db.AgentLimits, named []Period) db.AgentLimits {
+	out := cur
+	for _, p := range named {
+		switch p {
+		case PeriodRun:
+			out.RunTokens, out.RunTurns, out.RunUSD = next.RunTokens, next.RunTurns, next.RunUSD
+		case PeriodDay:
+			out.DayTokens, out.DayUSD = next.DayTokens, next.DayUSD
+		case PeriodMonth:
+			out.MonthTokens, out.MonthUSD = next.MonthTokens, next.MonthUSD
+		}
+	}
+	return out
 }
 
 // scopeName folds the spellings a model plausibly writes into the three
@@ -72,6 +116,12 @@ const (
 	maxCount = 1e12
 	maxUSD   = 1e9
 )
+
+// MaxRunTurns is the highest per-run turn limit. The engine's hard ceiling is 150
+// turns, so a limit of 150 or more could never be the thing that stops a run. The
+// web API and this parser share it so the designer cannot save a limit the
+// agent's page would then refuse.
+const MaxRunTurns = 149
 
 // plainNumber admits digits, thousands commas and one decimal point, and
 // nothing else: no exponent, nan, inf or sign.
@@ -147,6 +197,9 @@ func applyItem(l *db.AgentLimits, scope, item string, units map[string]bool) boo
 	units[unit] = true
 	n := int64(f*mult + 0.5)
 	if unit == "turns" {
+		if n > MaxRunTurns {
+			return false
+		}
 		l.RunTurns = n
 		return true
 	}

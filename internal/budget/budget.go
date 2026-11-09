@@ -110,11 +110,6 @@ func HasEnforceablePeriodLimit(l db.AgentLimits, e Enforcement) bool {
 	return l.DayTokens != 0 || l.MonthTokens != 0 || (e.DollarsSupported && (l.DayUSD != 0 || l.MonthUSD != 0))
 }
 
-// HasPeriodLimit reports whether any day or month limit is set.
-func HasPeriodLimit(l db.AgentLimits) bool {
-	return l.DayTokens != 0 || l.MonthTokens != 0 || l.DayUSD != 0 || l.MonthUSD != 0
-}
-
 // DecideStart applies the period limits to the spend so far. The month is
 // checked before the day so the longer pause wins when both are hit.
 //
