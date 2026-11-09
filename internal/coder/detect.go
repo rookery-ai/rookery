@@ -38,6 +38,20 @@ type APIProvider struct {
 	RequiresKey      bool   // false for the local tier (Group == GroupLocal)
 	Custom           bool   // true only for the Custom (generic) entry
 	Group            string // GroupHosted | GroupLocal
+	// ReportsCost: the provider states each call's price in its response, so a
+	// dollar limit can be enforced from measured spend rather than a price table.
+	ReportsCost bool
+}
+
+// ProviderReportsCost reports whether the named catalog provider returns the
+// price of each completion. False for unknown names.
+func ProviderReportsCost(name string) bool {
+	for _, p := range apiProviders {
+		if p.Name == name {
+			return p.ReportsCost
+		}
+	}
+	return false
 }
 
 // apiProviders is the catalog of direct-LLM-API coder providers (registry
@@ -46,44 +60,44 @@ type APIProvider struct {
 // (e.g. Azure OpenAI, a private gateway) and is required only for "generic"
 // (enforced by llm.New at call time, not by the form).
 var apiProviders = []APIProvider{
-	{"openai", "OpenAI", "openai", "gpt-4o", "https://platform.openai.com/api-keys", true, false, "hosted"},
-	{"anthropic", "Anthropic", "anthropic", "claude-sonnet-5", "https://console.anthropic.com/settings/keys", true, false, "hosted"},
-	{"openrouter", "OpenRouter", "openai", "anthropic/claude-3.5-sonnet", "https://openrouter.ai/keys", true, false, "hosted"},
-	{"zai", "Z.AI (GLM)", "openai", "glm-4.7", "https://z.ai/model-api", true, false, "hosted"},
-	{"ollama", "Ollama Cloud", "openai", "qwen3-coder:480b", "https://ollama.com/settings/keys", true, false, "hosted"},
-	{"ollama_local", "Ollama (Local)", "openai", "qwen2.5-coder", "https://docs.ollama.com/api/openai-compatibility", false, false, "local"},
-	{"deepseek", "DeepSeek", "openai", "deepseek-chat", "https://platform.deepseek.com/api_keys", true, false, "hosted"},
-	{"groq", "Groq", "openai", "llama-3.3-70b-versatile", "https://console.groq.com/keys", true, false, "hosted"},
-	{"xai", "xAI (Grok)", "openai", "grok-4", "https://console.x.ai", true, false, "hosted"},
-	{"mistral", "Mistral", "openai", "mistral-large-latest", "https://console.mistral.ai/api-keys", true, false, "hosted"},
-	{"gemini", "Google Gemini", "openai", "gemini-2.5-pro", "https://aistudio.google.com/apikey", true, false, "hosted"},
-	{"opencode_zen", "OpenCode Zen", "openai", "opencode/gpt-5.5", "https://opencode.ai/docs/zen/", true, false, "hosted"},
-	{"opencode_go", "OpenCode Go", "openai", "opencode/grok-code", "https://opencode.ai/docs/go/", true, false, "hosted"},
-	{"perplexity", "Perplexity", "openai", "sonar-pro", "https://www.perplexity.ai/settings/api", true, false, "hosted"},
-	{"moonshot", "Moonshot (Kimi)", "openai", "kimi-k2", "https://platform.moonshot.ai/console/api-keys", true, false, "hosted"},
+	{"openai", "OpenAI", "openai", "gpt-4o", "https://platform.openai.com/api-keys", true, false, "hosted", false},
+	{"anthropic", "Anthropic", "anthropic", "claude-sonnet-5", "https://console.anthropic.com/settings/keys", true, false, "hosted", false},
+	{"openrouter", "OpenRouter", "openai", "anthropic/claude-3.5-sonnet", "https://openrouter.ai/keys", true, false, "hosted", true},
+	{"zai", "Z.AI (GLM)", "openai", "glm-4.7", "https://z.ai/model-api", true, false, "hosted", false},
+	{"ollama", "Ollama Cloud", "openai", "qwen3-coder:480b", "https://ollama.com/settings/keys", true, false, "hosted", false},
+	{"ollama_local", "Ollama (Local)", "openai", "qwen2.5-coder", "https://docs.ollama.com/api/openai-compatibility", false, false, "local", false},
+	{"deepseek", "DeepSeek", "openai", "deepseek-chat", "https://platform.deepseek.com/api_keys", true, false, "hosted", false},
+	{"groq", "Groq", "openai", "llama-3.3-70b-versatile", "https://console.groq.com/keys", true, false, "hosted", false},
+	{"xai", "xAI (Grok)", "openai", "grok-4", "https://console.x.ai", true, false, "hosted", true},
+	{"mistral", "Mistral", "openai", "mistral-large-latest", "https://console.mistral.ai/api-keys", true, false, "hosted", false},
+	{"gemini", "Google Gemini", "openai", "gemini-2.5-pro", "https://aistudio.google.com/apikey", true, false, "hosted", false},
+	{"opencode_zen", "OpenCode Zen", "openai", "opencode/gpt-5.5", "https://opencode.ai/docs/zen/", true, false, "hosted", false},
+	{"opencode_go", "OpenCode Go", "openai", "opencode/grok-code", "https://opencode.ai/docs/go/", true, false, "hosted", false},
+	{"perplexity", "Perplexity", "openai", "sonar-pro", "https://www.perplexity.ai/settings/api", true, false, "hosted", false},
+	{"moonshot", "Moonshot (Kimi)", "openai", "kimi-k2", "https://platform.moonshot.ai/console/api-keys", true, false, "hosted", false},
 
 	// ── Wave 1 (2026-08): hosted tier ──
 	// Bedrock's Schema is "openai", not "anthropic": that field is the WIRE
 	// schema, and Bedrock serves Anthropic models over an OpenAI-shaped API.
-	{"bedrock", "AWS Bedrock", "openai", "us.anthropic.claude-sonnet-4-6", "https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html", true, false, "hosted"},
-	{"alibaba", "Alibaba Cloud (Qwen)", "openai", "qwen-max", "https://www.alibabacloud.com/help/en/model-studio/get-api-key", true, false, "hosted"},
-	{"together", "Together AI", "openai", "deepseek-ai/DeepSeek-V3", "https://api.together.xyz/settings/api-keys", true, false, "hosted"},
-	{"fireworks", "Fireworks AI", "openai", "accounts/fireworks/models/deepseek-v3", "https://fireworks.ai/account/api-keys", true, false, "hosted"},
-	{"cerebras", "Cerebras", "openai", "llama-3.3-70b", "https://cloud.cerebras.ai/platform/apikeys", true, false, "hosted"},
-	{"sambanova", "SambaNova", "openai", "Meta-Llama-3.3-70B-Instruct", "https://cloud.sambanova.ai/apis", true, false, "hosted"},
-	{"nebius", "Nebius AI Studio", "openai", "deepseek-ai/DeepSeek-V3", "https://studio.nebius.com/settings/api-keys", true, false, "hosted"},
-	{"deepinfra", "DeepInfra", "openai", "deepseek-ai/DeepSeek-V3", "https://deepinfra.com/dash/api_keys", true, false, "hosted"},
-	{"huggingface", "Hugging Face", "openai", "deepseek-ai/DeepSeek-V3", "https://huggingface.co/settings/tokens", true, false, "hosted"},
-	{"github_models", "GitHub Models", "openai", "openai/gpt-4o", "https://github.com/settings/personal-access-tokens", true, false, "hosted"},
+	{"bedrock", "AWS Bedrock", "openai", "us.anthropic.claude-sonnet-4-6", "https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html", true, false, "hosted", false},
+	{"alibaba", "Alibaba Cloud (Qwen)", "openai", "qwen-max", "https://www.alibabacloud.com/help/en/model-studio/get-api-key", true, false, "hosted", false},
+	{"together", "Together AI", "openai", "deepseek-ai/DeepSeek-V3", "https://api.together.xyz/settings/api-keys", true, false, "hosted", false},
+	{"fireworks", "Fireworks AI", "openai", "accounts/fireworks/models/deepseek-v3", "https://fireworks.ai/account/api-keys", true, false, "hosted", false},
+	{"cerebras", "Cerebras", "openai", "llama-3.3-70b", "https://cloud.cerebras.ai/platform/apikeys", true, false, "hosted", false},
+	{"sambanova", "SambaNova", "openai", "Meta-Llama-3.3-70B-Instruct", "https://cloud.sambanova.ai/apis", true, false, "hosted", false},
+	{"nebius", "Nebius AI Studio", "openai", "deepseek-ai/DeepSeek-V3", "https://studio.nebius.com/settings/api-keys", true, false, "hosted", false},
+	{"deepinfra", "DeepInfra", "openai", "deepseek-ai/DeepSeek-V3", "https://deepinfra.com/dash/api_keys", true, false, "hosted", false},
+	{"huggingface", "Hugging Face", "openai", "deepseek-ai/DeepSeek-V3", "https://huggingface.co/settings/tokens", true, false, "hosted", false},
+	{"github_models", "GitHub Models", "openai", "openai/gpt-4o", "https://github.com/settings/personal-access-tokens", true, false, "hosted", false},
 
 	// ── Wave 1 (2026-08): local tier — self-hosted OpenAI-compatible servers.
 	// RequiresKey is false: these accept any string as a bearer token, and
 	// PlanKeySecret stores a placeholder so llm.New's non-empty check passes.
-	{"lmstudio", "LM Studio (Local)", "openai", "qwen2.5-coder-7b-instruct", "https://lmstudio.ai/docs/app/api/endpoints/openai", false, false, "local"},
-	{"llamacpp", "llama.cpp (Local)", "openai", "gpt-oss-20b", "https://github.com/ggml-org/llama.cpp/tree/master/tools/server", false, false, "local"},
-	{"vllm", "vLLM (Local)", "openai", "Qwen/Qwen2.5-Coder-7B-Instruct", "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html", false, false, "local"},
-	{"localai", "LocalAI (Local)", "openai", "qwen2.5-coder-7b", "https://localai.io/features/openai-functions/", false, false, "local"},
-	{"jan", "Jan (Local)", "openai", "qwen2.5-coder-7b", "https://jan.ai/docs/desktop/api-server", false, false, "local"},
+	{"lmstudio", "LM Studio (Local)", "openai", "qwen2.5-coder-7b-instruct", "https://lmstudio.ai/docs/app/api/endpoints/openai", false, false, "local", false},
+	{"llamacpp", "llama.cpp (Local)", "openai", "gpt-oss-20b", "https://github.com/ggml-org/llama.cpp/tree/master/tools/server", false, false, "local", false},
+	{"vllm", "vLLM (Local)", "openai", "Qwen/Qwen2.5-Coder-7B-Instruct", "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html", false, false, "local", false},
+	{"localai", "LocalAI (Local)", "openai", "qwen2.5-coder-7b", "https://localai.io/features/openai-functions/", false, false, "local", false},
+	{"jan", "Jan (Local)", "openai", "qwen2.5-coder-7b", "https://jan.ai/docs/desktop/api-server", false, false, "local", false},
 
 	// ── Wave 2 (2026-08): hosted tier ──
 	// Base URLs live in llm.DefaultBaseURL and were each confirmed against the
@@ -91,14 +105,14 @@ var apiProviders = []APIProvider{
 	// /studio/v1/chat/completions endpoint exists, but nothing in AI21's own
 	// docs states OpenAI schema compatibility, and an unverified provider that
 	// authenticates and then fails on tool-calling is worse than its absence.
-	{"cohere", "Cohere", "openai", "command-a-03-2025", "https://dashboard.cohere.com/api-keys", true, false, "hosted"},
-	{"nvidia", "NVIDIA NIM", "openai", "deepseek-ai/deepseek-v3.1", "https://build.nvidia.com", true, false, "hosted"},
-	{"vercel_ai", "Vercel AI Gateway", "openai", "anthropic/claude-opus-5", "https://vercel.com/docs/ai-gateway", true, false, "hosted"},
-	{"minimax", "MiniMax", "openai", "MiniMax-M2", "https://platform.minimax.io", true, false, "hosted"},
-	{"baseten", "Baseten", "openai", "deepseek-ai/DeepSeek-V3.1", "https://app.baseten.co/settings/api_keys", true, false, "hosted"},
-	{"novita", "Novita AI", "openai", "deepseek/deepseek-v3", "https://novita.ai/settings/key-management", true, false, "hosted"},
-	{"hyperbolic", "Hyperbolic", "openai", "deepseek-ai/DeepSeek-V3", "https://app.hyperbolic.xyz/settings", true, false, "hosted"},
-	{"venice", "Venice AI", "openai", "qwen3-235b", "https://venice.ai/settings/api", true, false, "hosted"},
+	{"cohere", "Cohere", "openai", "command-a-03-2025", "https://dashboard.cohere.com/api-keys", true, false, "hosted", false},
+	{"nvidia", "NVIDIA NIM", "openai", "deepseek-ai/deepseek-v3.1", "https://build.nvidia.com", true, false, "hosted", false},
+	{"vercel_ai", "Vercel AI Gateway", "openai", "anthropic/claude-opus-5", "https://vercel.com/docs/ai-gateway", true, false, "hosted", false},
+	{"minimax", "MiniMax", "openai", "MiniMax-M2", "https://platform.minimax.io", true, false, "hosted", false},
+	{"baseten", "Baseten", "openai", "deepseek-ai/DeepSeek-V3.1", "https://app.baseten.co/settings/api_keys", true, false, "hosted", false},
+	{"novita", "Novita AI", "openai", "deepseek/deepseek-v3", "https://novita.ai/settings/key-management", true, false, "hosted", false},
+	{"hyperbolic", "Hyperbolic", "openai", "deepseek-ai/DeepSeek-V3", "https://app.hyperbolic.xyz/settings", true, false, "hosted", false},
+	{"venice", "Venice AI", "openai", "qwen3-235b", "https://venice.ai/settings/api", true, false, "hosted", false},
 
 	// Chutes and a LiteLLM-proxy local entry were scoped for this wave and
 	// DROPPED at the last step: neither has a mark in lobehub or simple-icons,
@@ -107,7 +121,7 @@ var apiProviders = []APIProvider{
 	// meant growing allowNoLogo purely to make a count. Both are worth adding
 	// once an UPSTREAM_SVG entry points at each publisher's own asset.
 
-	{"generic", "Custom (OpenAI-compatible)", "openai", "", "", true, true, "hosted"},
+	{"generic", "Custom (OpenAI-compatible)", "openai", "", "", true, true, "hosted", false},
 }
 
 // APIProviders returns the available direct-LLM-API coder providers.

@@ -6,7 +6,7 @@ import { useAgents } from "@/lib/agents";
 import { useRecentFiles } from "@/pages/kb/useRecentFiles";
 import { cn, formatMessageTime } from "@/lib/utils";
 import { useTimeZone } from "@/lib/timezone";
-import type { DashboardRun, DashboardUpcoming } from "@/lib/home";
+import type { DashboardRun, DashboardUpcoming, PausedAgent } from "@/lib/home";
 
 // The homepage cards that fill what was a half-empty dashboard.
 //
@@ -61,6 +61,7 @@ function statusDot(status: DashboardRun["status"]): string {
   if (status === "failed") return "bg-danger";
   if (status === "running") return "bg-warn";
   if (status === "stopped") return "bg-muted-2";
+  if (status === "limited") return "bg-warn";
   return "bg-ok";
 }
 
@@ -96,6 +97,7 @@ export function RecentActivityCard({ runs }: { runs: DashboardRun[] }) {
                   {r.trigger}
                   {r.status === "failed" && <span className="text-danger"> · failed</span>}
                   {r.status === "stopped" && <span> · stopped</span>}
+                  {r.status === "limited" && <span className="text-warn"> · limited</span>}
                 </span>
               </span>
               <span className="shrink-0 text-xs text-muted-2">
@@ -111,13 +113,20 @@ export function RecentActivityCard({ runs }: { runs: DashboardRun[] }) {
 
 // ── Agents at a glance ──────────────────────────────────────────────────────
 
-export function AgentsAtAGlanceCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
+export function AgentsAtAGlanceCard({
+  upcoming,
+  paused = [],
+}: {
+  upcoming: DashboardUpcoming[];
+  paused?: PausedAgent[];
+}) {
   // useAgents returns { agents, draft } — the draft is the designer's
   // in-progress session and has no place on a dashboard.
   const { data } = useAgents();
   const list = data?.agents ?? [];
   // Next-run times arrive keyed by agent, not on the agent row itself.
   const nextRun = new Map(upcoming.map((u) => [u.agent_id, u]));
+  const pausedBy = new Map(paused.map((p) => [p.agent_id, p]));
 
   return (
     <section aria-label="Agents at a glance" className={cardClass}>
@@ -146,6 +155,7 @@ export function AgentsAtAGlanceCard({ upcoming }: { upcoming: DashboardUpcoming[
             <tbody>
               {list.map((a) => {
                 const next = nextRun.get(a.id);
+                const limit = pausedBy.get(a.id);
                 return (
                   <tr key={a.id} className="border-t border-border">
                     <td className="py-2 pr-3">
@@ -157,7 +167,17 @@ export function AgentsAtAGlanceCard({ upcoming }: { upcoming: DashboardUpcoming[
                       </Link>
                     </td>
                     <td className="py-2 pr-3 text-muted-2">
-                      {a.running ? (
+                      {limit ? (
+                        // A spending-limit pause is not the owner's "Paused"
+                        // switch (the last branch below), so it carries its own
+                        // label, and the reason rides along as the tooltip.
+                        <span
+                          title={limit.reason}
+                          className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn"
+                        >
+                          Limit reached
+                        </span>
+                      ) : a.running ? (
                         <span className="text-warn">Running</span>
                       ) : a.active ? (
                         <span className="text-ok">Active</span>

@@ -156,6 +156,12 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 		return
 	}
 
+	// A budget-paused agent is deliberately NOT filtered out of ListDueSchedules: it
+	// stays due so the slot claimed above advances next_run_at (the run is skipped,
+	// not queued up to fire the moment the pause lifts), and the runner is what
+	// refuses it. Filtering it out of the due list would leave next_run_at in the
+	// past and fire a catch-up run the instant the pause expired.
+
 	// A missing chat platform is NOT a reason to skip the run. This used to return early
 	// on the rationale that "the agent cannot deliver output and running it wastes API
 	// quota" — true when written, false since the inbox landed: the runner records every
@@ -274,15 +280,27 @@ func (s *Scheduler) execute(ctx context.Context, agentID, workspaceID, trigger s
 	}
 	defer func() { <-s.sem }()
 
-	if err := s.runner.Run(ctx, agentrunner.RunInput{
+	err := s.runner.Run(ctx, agentrunner.RunInput{
 		AgentID:     agentID,
 		WorkspaceID: workspaceID,
 		Trigger:     trigger,
 		MasterPw:    masterPw,
 		SendOutput:  sendFn,
-	}); errors.Is(err, agentrunner.ErrRunStopped) {
+	})
+	// A refused or limited run is logged, never announced from here: the runner
+	// has already told the owner once (a pause when it starts, a limit at most once
+	// a day), and repeating it every skipped slot is exactly the flood those
+	// throttles exist to prevent.
+	var blocked *agentrunner.BlockedError
+	switch {
+	case err == nil:
+	case errors.Is(err, agentrunner.ErrRunStopped):
 		slog.Info("scheduler: agent run stopped by the owner", "agent_id", agentID, "trigger", trigger)
-	} else if err != nil {
+	case errors.As(err, &blocked):
+		slog.Info("scheduler: agent run skipped", "agent_id", agentID, "trigger", trigger, "reason", blocked.Error())
+	case errors.Is(err, agentrunner.ErrRunLimited):
+		slog.Info("scheduler: agent run ended by its spending limit", "agent_id", agentID, "trigger", trigger, "err", err)
+	default:
 		slog.Error("scheduler: agent run failed", "agent_id", agentID, "trigger", trigger, "err", err)
 	}
 }

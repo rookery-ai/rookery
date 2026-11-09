@@ -78,6 +78,12 @@ type Agent struct {
 	// presents its owner with a switch about payments.
 	BrowserIrreversible      bool
 	BrowserNeedsIrreversible bool
+
+	// BudgetPausedUntil is set while the agent is paused for exceeding a spending
+	// limit; nil when not paused. It is separate from Active and from the schedule
+	// so the pause lifts itself and never overwrites an owner's choice.
+	BudgetPausedUntil *time.Time
+	BudgetPauseReason string
 }
 
 type Skill struct {
@@ -137,6 +143,8 @@ type AgentRun struct {
 	// Stopped records that the owner ended this run early. exit_code is -1 as for
 	// a failure, so this is the only thing telling the two apart.
 	Stopped bool
+	// Limited is why a spending limit ended this run ("" = not limited).
+	Limited string
 	// Token usage, populated by the API coder (direct LLM provider). Zero for
 	// CLI coders (claude-code/opencode/codex/cursor), which don't report it.
 	PromptTokens     int
@@ -208,7 +216,7 @@ type InboxMessage struct {
 	RefID       string // run_id or reminder_id
 	Trigger     string // cron|manual|chat; empty for reminders
 	Body        string
-	Status      string     // "ok" | "error"
+	Status      string     // "ok" | "error" | "limited" (a spending-limit notice, not a failure)
 	ReadAt      *time.Time // nil = unread
 	CreatedAt   time.Time
 }

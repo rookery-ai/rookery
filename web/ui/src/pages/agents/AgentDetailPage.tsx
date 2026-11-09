@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pause, Pencil, Trash2 } from "lucide-react";
+import { pauseSentence } from "@/lib/limits";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { RenameDialog } from "@/components/RenameDialog";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn, timeAgo } from "@/lib/utils";
+import { timeAgo } from "@/lib/utils";
 import {
   useAgentActions,
   useAgentDetail,
@@ -25,43 +26,13 @@ import {
   type AgentRun,
   type AgentRunDetail,
 } from "@/lib/agents";
-import { StatusChip } from "./StatusChip";
+import { StatusChip, RunStatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
 import { AgentMDCard } from "./AgentMDCard";
 import { ScheduleCard } from "./ScheduleCard";
 import { SkillsCard, ConnectionsCard, MCPServersCard } from "./AttachmentCards";
 import { BrowserCard } from "./BrowserCard";
-
-function RunStatusChip({ status }: { status: AgentRun["status"] }) {
-  if (status === "running") {
-    return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn">
-        <span className="size-1.5 animate-pulse rounded-full bg-warn" />
-        Running
-      </span>
-    );
-  }
-  // Neutral, not red: the owner chose this, and nothing went wrong.
-  if (status === "stopped") {
-    return (
-      <span className="shrink-0 rounded-full bg-muted-surface px-2 py-0.5 text-xs font-medium text-foreground">
-        Stopped
-      </span>
-    );
-  }
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-        status === "success"
-          ? "bg-ok-soft text-ok"
-          : "bg-danger-soft text-danger",
-      )}
-    >
-      {status === "success" ? "OK" : "Failed"}
-    </span>
-  );
-}
+import { LimitsCard } from "./LimitsCard";
 
 // mm:ss between two ISO timestamps, or "" if either is unparsable — a run's
 // duration is only shown once it has a finished_at.
@@ -200,7 +171,7 @@ function RunRow({ agentId, run }: { agentId: string; run: AgentRun }) {
     <li className="flex flex-col gap-1.5 py-2.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <RunStatusChip status={run.status} />
+          <RunStatusChip status={run.status} reason={run.limited} />
           {run.silent && <SilentChip />}
           <span className="text-xs text-muted-2">{run.trigger}</span>
           <span className="text-xs text-muted-2">
@@ -248,7 +219,9 @@ export default function AgentDetailPage() {
     workspace_connections,
     attached_connection_ids,
     browser,
+    limits,
   } = detail;
+  const pausedUntil = limits?.paused_until ?? null;
 
   async function handleDelete() {
     setDeleting(true);
@@ -304,9 +277,36 @@ export default function AgentDetailPage() {
         </p>
       )}
 
+      {pausedUntil && (
+        <div
+          role="status"
+          className="mt-4 flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn"
+        >
+          <Pause className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {pauseSentence(limits?.pause_reason ?? "", pausedUntil)}{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={() =>
+                document.getElementById("limits-card")?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              Change limits
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_320px] md:mt-6">
         <div className="flex min-w-0 flex-col gap-6">
-          <RunPanel agentId={id} agentName={agent.name} liveRun={live_run} running={running} />
+          <RunPanel
+            agentId={id}
+            agentName={agent.name}
+            liveRun={live_run}
+            running={running}
+            pausedUntil={pausedUntil}
+          />
 
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4">
             <h2 className="text-sm font-semibold">Run history</h2>
@@ -338,6 +338,7 @@ export default function AgentDetailPage() {
             grants={browser ?? { available: false, irreversible: false, needs_irreversible: false }}
           />
           <ScheduleCard agentId={id} schedule={schedule} sync={detail.schedule_sync} />
+          {limits && <LimitsCard agentId={id} limits={limits} />}
           <SkillsCard
             agentId={id}
             attachedSkills={attached_skills}
