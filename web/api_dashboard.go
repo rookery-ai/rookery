@@ -45,6 +45,9 @@ func toAPIDashboardRun(r *db.AgentRunWithName) apiDashboardRun {
 	if r.Stopped {
 		status = "stopped"
 	}
+	if r.Limited != "" && !r.Stopped {
+		status = "limited"
+	}
 	// RecentAgentRunsWithNames LEFT JOINs agents and COALESCEs a missing name to
 	// "", so a run whose agent is gone arrives nameless and renders as a blank
 	// line — the reported symptom. Migration 015 sweeps the rows the pre-#214
@@ -92,6 +95,15 @@ type apiDashboardResponse struct {
 	RecentRuns       []apiDashboardRun      `json:"recent_runs"`
 	Upcoming         []apiDashboardUpcoming `json:"upcoming"`
 	HasConnector     bool                   `json:"has_connector"`
+	PausedAgents     []apiPausedAgent       `json:"paused_agents"`
+}
+
+// apiPausedAgent is an agent a spending limit has stopped, for Home's banner.
+type apiPausedAgent struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	Until     string `json:"until"`
+	Reason    string `json:"reason"`
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -107,7 +119,12 @@ func (s *Server) apiGetDashboard(c echo.Context) error {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
 	activeCount := 0
+	pausedOut := []apiPausedAgent{}
+	now := time.Now()
 	for _, a := range agents {
+		if until, reason, ok := activePause(a, now); ok {
+			pausedOut = append(pausedOut, apiPausedAgent{AgentID: a.ID, AgentName: a.Name, Until: until.UTC().Format(time.RFC3339), Reason: reason})
+		}
 		if a.Active {
 			activeCount++
 		}
@@ -153,5 +170,6 @@ func (s *Server) apiGetDashboard(c echo.Context) error {
 		RecentRuns:       orEmpty(runsOut),
 		Upcoming:         orEmpty(upcomingOut),
 		HasConnector:     hasConnector,
+		PausedAgents:     pausedOut,
 	})
 }

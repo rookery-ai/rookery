@@ -1517,7 +1517,7 @@ type AgentRunWithName struct {
 
 // RecentAgentRunsWithNames returns the N most recent runs with the agent name joined in.
 func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRunWithName, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.stopped,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at, COALESCE(a.name,'')
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.stopped,r.limited,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at, COALESCE(a.name,'')
 		FROM agent_runs r LEFT JOIN agents a ON a.id=r.agent_id
 		WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
@@ -1530,7 +1530,7 @@ func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRu
 		var exitCode sql.NullInt64
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &rn.Stopped, &rn.PromptTokens, &rn.CompletionTokens, &rn.TotalTokens, &startedAt, &finishedAt, &rn.AgentName); err != nil {
+		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &rn.Stopped, &rn.Limited, &rn.PromptTokens, &rn.CompletionTokens, &rn.TotalTokens, &startedAt, &finishedAt, &rn.AgentName); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {

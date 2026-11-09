@@ -540,3 +540,10 @@ func TestUnenforceableDollarPeriodLimitDoesNotMakeAgentBusy(t *testing.T) {
 		t.Errorf("both runs should have rows, got %d", h.runCount(a))
 	}
 }
+
+func TestAgentEnforcementFollowsTheCoder(t *testing.T) {
+	r := &Runner{}
+	if e := r.AgentEnforcement("ws", "a"); e.Enforced {
+		t.Errorf("a runner with no API coder must not enforce: %+v", e)
+	}
+}

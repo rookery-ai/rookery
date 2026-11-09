@@ -277,3 +277,9 @@ func (r *Runner) limitNotice(agent *db.Agent, input RunInput, runID, reason stri
 
 // hasDollarLimit reports whether any limit is set in dollars.
 func hasDollarLimit(l db.AgentLimits) bool { return l.RunUSD > 0 || l.DayUSD > 0 || l.MonthUSD > 0 }
+
+// AgentEnforcement is Enforcement for the coder this agent would run on, for
+// callers (the web API) that hold ids rather than a coder.
+func (r *Runner) AgentEnforcement(workspaceID, agentID string) budget.Enforcement {
+	return r.Enforcement(r.coderForAgent(workspaceID, agentID))
+}
