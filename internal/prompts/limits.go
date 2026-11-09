@@ -54,9 +54,19 @@ func createLimitsSpecLine(p DesignSystemParams) string {
 	return "Limits: none | " + limitsGrammar(p) + " — only the limits the user agreed to, written in exactly this form (turns apply to a run only); \"none\" when they want no limits.\n"
 }
 
+// editLimitsSpecLine matches how an edit saves the line: each period written
+// (per run / per day / per month) replaces that period's limits, and a period
+// left out keeps what it has. That is why the agent's current limits are stated —
+// so the designer can see what survives — and why removing ONE period needs its
+// own "per day: none" rather than an omission.
 func editLimitsSpecLine(p DesignSystemParams) string {
 	if !p.LimitsAvailable {
 		return ""
 	}
-	return "Limits: unchanged | none | " + limitsGrammar(p) + " — write \"unchanged\" unless the user asked to change the spending limits in this conversation; then write the complete new set (\"none\" removes them all).\n"
+	current := p.CurrentLimits
+	if current == "" {
+		current = "none"
+	}
+	return "Limits: unchanged | none | " + limitsGrammar(p) + " — the assistant's limits are currently: " + current +
+		". Write \"unchanged\" unless the user asked to change the spending limits in this conversation. Otherwise write only the periods that change: each period you write replaces that period's limits, a period you leave out keeps its current limits, \"per day: none\" removes just that period's limits, and \"none\" alone removes them all.\n"
 }

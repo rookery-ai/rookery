@@ -1583,6 +1583,9 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		// reports a price.
 		LimitsAvailable: coderSvc.IsAPI(),
 		LimitsDollars:   coderSvc.IsAPI() && coder.ProviderReportsCost(coderSvc.APIProviderName()),
+		// An edit's Limits: line changes only the periods it names, so the
+		// designer must see what the agent has to know what it is keeping.
+		CurrentLimits: f.editCurrentLimits(sess),
 	})
 
 	// The design conversation gets the READ-ONLY tool subset: it can open a note,
@@ -2988,7 +2991,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
-	f.persistLimits(agentIDSnap, historySnap)
+	f.persistLimits(agentIDSnap, historySnap, false)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
@@ -3064,7 +3067,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 	f.persistIrreversible(agentIDSnap, agentMD, destructiveApproved)
-	f.persistLimits(agentIDSnap, historySnap)
+	f.persistLimits(agentIDSnap, historySnap, true)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the

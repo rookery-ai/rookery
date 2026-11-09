@@ -45,3 +45,27 @@ func TestEditPromptDefaultsLimitsUnchanged(t *testing.T) {
 		t.Fatal("edit prompt mentions limits when unavailable")
 	}
 }
+
+// An edit that changes one limit must not erase the others, so the designer is
+// told what the agent has now and that only the periods it writes change.
+func TestEditPromptStatesCurrentLimitsAndPerPeriodRule(t *testing.T) {
+	p := BuildDesignSystemPrompt(DesignSystemParams{
+		AgentName: "x", IsEdit: true, ExistingAgentMD: "# x",
+		LimitsAvailable: true, CurrentLimits: "per day: 500000 tokens; per month: $30.00",
+	})
+	if !strings.Contains(p, "currently: per day: 500000 tokens; per month: $30.00") {
+		t.Fatal("edit prompt must state the agent's current limits")
+	}
+	if !strings.Contains(p, "per day: none") || strings.Contains(p, "complete new set") {
+		t.Fatal("edit prompt must describe the per-period rule, not a full replacement")
+	}
+	none := BuildDesignSystemPrompt(DesignSystemParams{
+		AgentName: "x", IsEdit: true, ExistingAgentMD: "# x", LimitsAvailable: true,
+	})
+	if !strings.Contains(none, "currently: none") {
+		t.Fatal("an agent with no limits must read as none, not a blank")
+	}
+	if strings.Contains(designPrompt(false, true, false), "currently:") {
+		t.Fatal("a create has no current limits to state")
+	}
+}

@@ -121,6 +121,11 @@ type DesignSystemParams struct {
 	// Dollar limits are offered only then — a limit the host cannot measure
 	// would never trip.
 	LimitsDollars bool
+	// CurrentLimits is the edited agent's limits as a Limits: value
+	// (budget.FormatSpecLine; "" reads as none). Edit only: without it the
+	// designer cannot restate what the agent has, and a plan touching one
+	// period would read as if the others did not exist.
+	CurrentLimits string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
