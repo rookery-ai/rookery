@@ -22,7 +22,7 @@ import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
 import { useDeferredDelete } from "@/lib/useDeferredDelete";
 import { useListNav } from "@/lib/useKeyboardNav";
-import { formatResumes } from "@/lib/limits";
+import { formatResumes, pauseReason } from "@/lib/limits";
 import {
   useDashboard,
   greeting,
@@ -581,7 +581,7 @@ function NeedsAttentionCard({ runs, paused = [] }: { runs: DashboardRun[]; pause
                 <Link to={`/agents/${p.agent_id}`} className="font-medium text-foreground hover:underline">
                   {p.agent_name}
                 </Link>
-                {` paused — ${p.reason}. Resumes ${formatResumes(p.until)}. `}
+                {` paused — ${pauseReason(p.reason)}. Resumes ${formatResumes(p.until)}. `}
                 <Link to={`/agents/${p.agent_id}`} className="underline hover:text-foreground">
                   change limits
                 </Link>

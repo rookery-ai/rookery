@@ -19,7 +19,13 @@ export function formatResumes(iso: string): string {
 }
 
 // The reason arrives as a lowercase fragment ("monthly limit of $30.00 reached").
+// An empty one (a pause stored without a reason) falls back to a generic clause
+// so every surface still reads as a sentence rather than "paused — .".
+export function pauseReason(reason: string): string {
+  return reason || "a spending limit was reached";
+}
+
 export function pauseSentence(reason: string, until: string): string {
   const resumes = formatResumes(until);
-  return `Paused — ${reason || "a spending limit was reached"}.${resumes ? ` Resumes ${resumes}.` : ""}`;
+  return `Paused — ${pauseReason(reason)}.${resumes ? ` Resumes ${resumes}.` : ""}`;
 }

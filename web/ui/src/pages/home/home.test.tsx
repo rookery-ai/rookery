@@ -560,7 +560,7 @@ test("quick actions use the same button treatment as the Agents page", async () 
   expect(secondary.className).not.toContain("bg-primary");
 });
 
-test("Needs attention lists a paused agent and the glance card flags it Paused", async () => {
+test("Needs attention lists a paused agent and the glance card flags it Limit reached", async () => {
   dashboard = {
     ...dashboard,
     paused_agents: [
@@ -574,8 +574,22 @@ test("Needs attention lists a paused agent and the glance card flags it Paused",
   await waitFor(() => expect(card.textContent).toContain("paused — monthly limit of $30.00 reached"));
   expect(within(card).getByRole("link", { name: "change limits" })).toHaveAttribute("href", "/agents/agent-2");
 
+  // "Paused" is the owner's own off switch on that card; a spending-limit pause
+  // must read differently or the two are indistinguishable.
   const glance = screen.getByRole("region", { name: "Agents at a glance" });
-  expect(await within(glance).findByText("Paused")).toBeInTheDocument();
+  expect(await within(glance).findByText("Limit reached")).toBeInTheDocument();
+});
+
+test("a paused agent with no stored reason still reads as a sentence", async () => {
+  dashboard = {
+    ...dashboard,
+    paused_agents: [{ agent_id: "agent-2", agent_name: "Backup Bot", until: "2026-12-01T00:00:00Z", reason: "" }],
+  };
+  mockFetch();
+  wrap();
+  const heading = await screen.findByText("Needs attention");
+  const card = heading.parentElement!;
+  await waitFor(() => expect(card.textContent).toContain("paused — a spending limit was reached."));
 });
 
 test("Needs attention lists the latest limited run once per agent", async () => {

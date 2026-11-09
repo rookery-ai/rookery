@@ -169,12 +169,13 @@ export function AgentsAtAGlanceCard({
                     <td className="py-2 pr-3 text-muted-2">
                       {limit ? (
                         // A spending-limit pause is not the owner's "Paused"
-                        // switch, so the reason rides along as the tooltip.
+                        // switch (the last branch below), so it carries its own
+                        // label, and the reason rides along as the tooltip.
                         <span
                           title={limit.reason}
                           className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn"
                         >
-                          Paused
+                          Limit reached
                         </span>
                       ) : a.running ? (
                         <span className="text-warn">Running</span>

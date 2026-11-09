@@ -47,8 +47,9 @@ export type AgentScheduleSync = {
 export type AgentRun = {
   id: string;
   trigger: string;
-  // "limited" is a run a spending limit stopped (or refused to start); `limited`
-  // below carries the sentence naming which limit.
+  // "limited" is a run a spending limit ended mid-run; `limited` below carries
+  // the sentence naming which limit. A run refused before it started (a pause,
+  // or a busy agent) has no row at all, so it never appears here.
   status: "running" | "success" | "failed" | "stopped" | "limited";
   limited?: string;
   // The run emitted [SILENT] — it chose to say nothing, as distinct from
