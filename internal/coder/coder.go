@@ -172,6 +172,11 @@ type Coder struct {
 	// Nil on every surface that does not set it, in which case a tool asking to
 	// notify simply says it could not.
 	notifyUser func(string)
+
+	// usageGuard sees every billed completion's usage. The runner uses it to
+	// enforce per-run limits by cancelling the run context; the engine only
+	// re-checks ctx afterwards.
+	usageGuard func(llm.Usage)
 	buildSpec  BuildSpec // what a BUILD must produce; zero value = AgentBuildSpec
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
@@ -246,6 +251,22 @@ func (c *Coder) WithNotifier(f func(string)) *Coder {
 	c2 := *c
 	c2.notifyUser = f
 	return &c2
+}
+
+// WithUsageGuard installs a callback invoked once per provider completion with
+// that completion's usage. The engine re-checks its context straight after, so a
+// guard that cancels it stops the run before the response's tool calls execute.
+func (c *Coder) WithUsageGuard(f func(delta llm.Usage)) *Coder {
+	c2 := *c
+	c2.usageGuard = f
+	return &c2
+}
+
+// guardUsage reports one completion's usage to the installed guard, if any.
+func (c *Coder) guardUsage(u llm.Usage) {
+	if c.usageGuard != nil {
+		c.usageGuard(u)
+	}
 }
 
 func (c *Coder) WithBrowser(b browser.Renderer, pol browser.Policy) *Coder {
