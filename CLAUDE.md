@@ -711,7 +711,7 @@ load-bearing:
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth), never from AGENT.md; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; a stray `[/CHAT]` close tag weak models sometimes emit is stripped and never delivered; `[SILENT]` detected; `[STATE]` merged and saved via `agentdesigner.WriteState` into `state.md`'s json fence) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
-| `internal/budget` | Pure model behind agent limits: `Period`/`PeriodStart`/`PeriodEnd` (day and month in the workspace zone), `Enforcement`, the start decision (may a run begin, or pause the agent until when) and the per-run ceiling, plus the `Limits:` spec-line parser/formatter shared by both designers' prompts. No database, no clock — so the runner and designer both call it and tests pin every edge. See "Agent budgets and limits". |
+| `internal/budget` | Pure model behind agent limits: `Period`/`PeriodStart`/`PeriodEnd` (day and month in the workspace zone), `Enforcement`, the start decision (may a run begin, or pause the agent until when) and the per-run ceiling, plus the `Limits:` spec-line parser (the agent designer's approved plan; the skill designer has no limits) and its formatter (the agent's current limits, stated in the edit design prompt). No database, no clock — so the runner and designer both call it and tests pin every edge. See "Agent budgets and limits". |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users; `WithRecovered()`/`RecoverInterrupted()` retry runs the last shutdown killed mid-flight; runs are capped at `maxConcurrentRuns` — see "Missed runs and the laptop case" below |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here); `CleanReply`/`CleanHistory` strip agent output-protocol markers out of conversational replies — see "Chat must never show the output-protocol markers" below |
@@ -2594,37 +2594,61 @@ meters each completion inside the API tool loop.
   ceiling is the min of the per-run limit and the remaining day and month budget, so a run cannot
   overshoot a period. A limited run gets its own `agent_runs.limited` column and a **Limited** chip
   (not Failed, not Stopped) and notifies inbox + chat, throttled to one notice per agent per day
-  (`limit_notice_day`) so a 10-second agent cannot flood the inbox.
+  (`limit_notice_day`) so a 10-second agent cannot flood the inbox. Pause and limit notices are
+  inbox rows with status **`limited`** (`agentrunner.InboxStatusLimited`), rendered as a warn
+  "Limit reached" badge — never `error`, which the inbox renders as a red "Failed" and which sent
+  owners looking for a bug in an agent that had done exactly what it was told.
 - **Why a pause is its own state, not `active` and not the schedule.** `active` is the owner's own
   switch: auto-resume on the 1st would switch back on an agent the owner turned off. The schedule
   row is the owner's cron, and since #417 editing it rewrites AGENT.md's header, quoted crons and
   the derived description — far too much side effect for a temporary pause. `budget_paused_until`
   (UTC) expires by itself at the period end computed in the workspace zone (`profile.ScheduleZone`;
   empty zone = host local, as schedules treat it). Checked in the runner, so it blocks EVERY
-  trigger (cron, Run button, chat `/run`, `[CALL]`); the scheduler also skips a paused agent so no
-  refused run is recorded per slot. Skipped slots are not queued: no catch-up burst on resume.
+  trigger (cron, Run button, chat `/run`, `[CALL]`). The scheduler deliberately does NOT filter a
+  paused agent out: it fires the slot and advances `next_run_at` as usual, and the runner refuses
+  the run without writing a row, so a skipped slot leaves no run record. Skipped slots are not
+  queued: no catch-up burst on resume. A pause is reported (agent page `paused_until`, dashboard
+  `paused_agents`) only while the agent's coder enforces limits — on a CLI coder nothing enforces,
+  re-checks or lifts it, so showing it would be a banner the owner can do nothing about.
   Saving limits (`PUT /agents/:id/limits`) clears a pause, since otherwise the owner's only exit is
   waiting.
 - **The decision comes from `context.Cause`, never from the error type** (the #410 rule for
   stops). The API engine reports a cancelled context as a timeout and a CLI coder's killed process
   surfaces differently again; `ErrRunLimited` is carried as the cancel cause via `limitCause`.
   **`limited` is only recorded when `runErr` is set** — a run that finished on its own just as
-  the guard tripped completed, and calling it limited would mislabel a success.
-- **Two messages, two names.** A mid-run stop names the limit CONFIGURED; a start-time refusal or
-  clamp names the REMAINDER of the period. Quoting the configured number when the run was ceilinged
-  by what was left of the day told owners a limit they had set was "reached" at a fraction of it.
-- **Budgeted agents do not overlap.** The registry would otherwise let a slow cron run start while
-  its predecessor spends, overshooting a period check made only at start. A second start is
-  refused as `busy`; `Runner.CheckRunnable` lets `POST /agents/:id/run` answer `409` with
+  the guard tripped completed, and calling it limited would mislabel a success. The engine makes
+  that the common case on purpose: a completion that crosses the ceiling while giving the FINAL
+  answer (no tool calls) is returned normally, because its cost is already spent and discarding it
+  leaves the owner paying for nothing; only a completion asking for more tool calls is stopped.
+  A crossing turn that emits `[CALL]` has not finished, so the child is not started (it would
+  inherit the parent's limit cause) and the parent is recorded as limited.
+- **Every message names the CONFIGURED limit.** A mid-run stop, a start-time refusal and a pause
+  all quote the number the owner set, never what was left of the period: when a run is ceilinged
+  by the remainder of the day, `RunCeiling` remembers the configured limit behind that remainder
+  (`tokLimit`/`usdLimit`) so the notice names the setting the owner would have to change. Quoting
+  the remainder ("monthly limit of 50 tokens") misstated a limit they had set at 1,000.
+- **Agents with an ENFORCEABLE day or month limit do not overlap.** The registry would otherwise
+  let a slow cron run start while its predecessor spends, overshooting a period check made only at
+  start. Only a limit that can actually be checked counts (`budget.HasEnforceablePeriodLimit`): a
+  per-run limit alone, or a dollar period limit on a provider that reports no cost, does not make
+  the agent exclusive. A second start is refused as `busy`; `Runner.CheckRunnable` lets `POST /agents/:id/run` answer `409` with
   `budget_paused` or `busy` instead of a 202 for a run that never starts.
 - **Child runs count against the child.** A `[CALL]`ed agent's spend is its own, as there is no
   parent link in `agent_runs`; a parent's limits do not reach into a child. A parent whose `[CALL]`
   is refused is warned in its transcript.
 - **Setting them.** The agent page's Limits card, and the designer, which asks (only when the
   coder is an API coder; dollars only if the provider reports cost) and emits a `Limits:` line in
-  the `[TECHNICAL SPEC]`, parsed by `budget` and persisted on approve. Surfaces: paused banner on
-  the agent page, `paused_agents` in the dashboard payload (Home's Agents at a glance and Needs
-  attention), and a `"limited"` run status.
+  the `[TECHNICAL SPEC]`, parsed by `budget` and persisted on approve. A create takes the line as
+  the whole set. **An edit merges per period**: the edit prompt states the agent's current limits
+  (`DesignSystemParams.CurrentLimits`, via `budget.FormatSpecLine`), each period the line names
+  (`budget.ParseSpecLineScopes`) replaces that period's limits, a period left out keeps its own,
+  `per day: none` clears one period and `none` alone clears all — a designer restating only the
+  daily limit used to erase a monthly one nobody mentioned. The label is read through list markers
+  and bold (`- Limits:`, `**Limits:**`); a turns limit above `budget.MaxRunTurns` (149, shared with
+  the API) is rejected. Surfaces: paused banner on
+  the agent page, `paused_agents` in the dashboard payload (Home's Agents at a glance, labelled
+  "Limit reached" because "Paused" there is the owner's off switch, and Needs attention), and a
+  `"limited"` run status.
 
 ### Run transcript and the silent flag
 
