@@ -156,6 +156,12 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 		return
 	}
 
+	// A budget-paused agent is deliberately NOT filtered out of ListDueSchedules: it
+	// stays due so the slot claimed above advances next_run_at (the run is skipped,
+	// not queued up to fire the moment the pause lifts), and the runner is what
+	// refuses it. Filtering it out of the due list would leave next_run_at in the
+	// past and fire a catch-up run the instant the pause expired.
+
 	// A missing chat platform is NOT a reason to skip the run. This used to return early
 	// on the rationale that "the agent cannot deliver output and running it wastes API
 	// quota" — true when written, false since the inbox landed: the runner records every
