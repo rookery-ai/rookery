@@ -128,7 +128,7 @@ func serveCmd() *cli.Command {
 			}
 			installLock, err := backup.AcquireLock(cfg.Data.Dir)
 			if err != nil {
-				return err
+				return serveLockError(cfg.Data.Dir, err)
 			}
 			defer installLock.Release()
 

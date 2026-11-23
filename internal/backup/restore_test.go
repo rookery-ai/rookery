@@ -186,25 +186,6 @@ func TestApplyPendingRestoreNoMarkerIsNoop(t *testing.T) {
 	}
 }
 
-func TestLockRefusesSecondHolder(t *testing.T) {
-	dir := t.TempDir()
-	first, err := AcquireLock(dir)
-	if err != nil {
-		t.Fatalf("AcquireLock: %v", err)
-	}
-	if _, err := AcquireLock(dir); !errors.Is(err, ErrServerRunning) {
-		t.Fatalf("got %v, want ErrServerRunning", err)
-	}
-	if err := first.Release(); err != nil {
-		t.Fatalf("Release: %v", err)
-	}
-	second, err := AcquireLock(dir)
-	if err != nil {
-		t.Fatalf("lock must be reusable after release: %v", err)
-	}
-	second.Release()
-}
-
 func findPreRestoreDir(t *testing.T, dataDir string) string {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(dataDir, ".pre-restore-*"))

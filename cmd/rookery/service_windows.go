@@ -18,11 +18,11 @@ import (
 // directory under the signing-in user's own profile. That is the same reason
 // the Linux side uses a systemd USER unit rather than a system one.
 //
-// None of this is exercised on a real host — there is no Windows machine in
-// this project and none in CI. What checks it is the cross-compile gate and the
-// unit tests over the generated XML, which is the artifact all the platform
-// knowledge lives in. The same position this repository already records for
-// swap_windows.go and echo_windows.go.
+// The `Windows smoke test` CI job runs this for real on windows-latest:
+// `service install`, a hard kill of the server it started, and `schtasks /Run`,
+// asserting /healthz answers each time. The unit tests over the generated XML
+// still carry the platform knowledge itself (the four defaults that are wrong
+// for a server). swap_windows.go and echo_windows.go remain unexercised.
 
 func installAutostart(env serviceEnv, out io.Writer) error {
 	xml := onboard.TaskXMLFor(
