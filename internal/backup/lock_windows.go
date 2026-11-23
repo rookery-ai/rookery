@@ -43,6 +43,41 @@ const (
 	lockLen        = 1
 )
 
+// openLockFile opens the lock file for read and write, sharing it with READERS
+// only.
+//
+// The share mode is the second half of the lock, and it exists for one case:
+// a server from the build before this one. That build held rookery.pid open
+// for writing and took no byte-range lock, so after `rookery upgrade` replaces
+// the binary while it is still running, LockFileEx alone would find nothing
+// held, and a second serve or a `backup restore` would run against its live
+// database. Refusing to share WRITE makes Windows fail this open with
+// ERROR_SHARING_VIOLATION while any other process has the file open for
+// writing. That covers the old build, and a second server of this one too.
+// Readers that share write access (Go's os.Open, PowerShell's Get-Content) can
+// still read the pid. A handle closes when its process dies, so this half
+// cannot go stale either.
+//
+// The handle is not inheritable (nil security attributes), so no child process
+// (a coder, Chromium) can keep it alive after the server dies.
+func openLockFile(path string) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(p,
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ,
+		nil,
+		windows.OPEN_ALWAYS,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 // LockPath is the lock file for an install.
 func LockPath(dataDir string) string {
 	return filepath.Join(dataDir, "rookery.pid")
@@ -53,8 +88,11 @@ func AcquireLock(dataDir string) (*Lock, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	f, err := os.OpenFile(LockPath(dataDir), os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := openLockFile(LockPath(dataDir))
 	if err != nil {
+		if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			return nil, ErrServerRunning
+		}
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
 	ol := &windows.Overlapped{OffsetHigh: lockOffsetHigh}

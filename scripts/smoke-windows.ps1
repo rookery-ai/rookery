@@ -57,6 +57,10 @@ function Start-Serve {
     $p = Start-Process -FilePath $Exe -ArgumentList 'serve' -WorkingDirectory $Root -PassThru -NoNewWindow `
         -RedirectStandardOutput (Join-Path $Root "$Name.out.log") `
         -RedirectStandardError  (Join-Path $Root "$Name.err.log")
+    # Open the process handle NOW. Without it, a process that exits before the
+    # first HasExited/WaitForExit call can report a null ExitCode — and the
+    # second serve below exits in well under a second by design.
+    $null = $p.Handle
     $script:Started += $p
     return $p
 }

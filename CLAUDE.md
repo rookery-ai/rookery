@@ -357,7 +357,19 @@ platforms finally agree. Three details are load-bearing:
 
 - **The locked range sits far past end-of-file, not over the pid text.** Windows
   enforces byte-range locks against other processes' READS, so locking the
-  content would make `Get-Content rookery.pid` fail during triage.
+  content would make `Get-Content rookery.pid` fail during triage. Even so, only
+  a reader that itself shares WRITE access can open the file (Go's `os.Open`,
+  `Get-Content`); one asking for `FileShare.Read` alone gets a sharing
+  violation, because the holder has write access.
+- **The file is opened sharing READ only (`openLockFile`), and that is the
+  second half of the lock.** It exists for a server from the build BEFORE this
+  fix: that build held the file open for writing and took no byte-range lock, so
+  after `rookery upgrade` replaced the binary under a still-running server,
+  `LockFileEx` alone saw nothing held. A second `serve` or a `backup restore`
+  would then have run against its live database. Refusing to share WRITE makes
+  the open fail with `ERROR_SHARING_VIOLATION` (mapped to `ErrServerRunning`)
+  while any process holds it for writing. `TestLockRefusesAnOldBuildHolder`
+  (Windows-only) pins it.
 - **A leftover file is simply reopened and locked**, which is what heals an
   install already wedged by the old code — upgrading is the whole repair.
   `Release` no longer deletes the file, matching Unix.
