@@ -448,6 +448,7 @@ jobs:
           cache: true
 
       - name: Build
+        id: build
         env:
           CGO_ENABLED: "0"
         run: go build -o rookery.exe ./cmd/rookery
@@ -458,7 +459,11 @@ jobs:
       - name: Install lock tests
         run: go test ./internal/backup/ -run Lock -count=1 -v
 
+      # The three checks are independent, so each runs even when an earlier one
+      # failed: a red unit test should not hide whether the real binary and the
+      # real logon task recover. Only the build gates them.
       - name: Serve restarts after a hard kill
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: ./scripts/smoke-windows.ps1 -Exe ./rookery.exe
 
       # The path a real install takes: the logon task `rookery service install`
@@ -466,6 +471,7 @@ jobs:
       # Task Scheduler. Default data directory and port, because a scheduled
       # task does not inherit this step's environment.
       - name: Logon task restarts after a hard kill
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = (Resolve-Path ./rookery.exe).Path
