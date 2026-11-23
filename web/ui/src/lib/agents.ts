@@ -47,7 +47,11 @@ export type AgentScheduleSync = {
 export type AgentRun = {
   id: string;
   trigger: string;
-  status: "running" | "success" | "failed" | "stopped";
+  // "limited" is a run a spending limit ended mid-run; `limited` below carries
+  // the sentence naming which limit. A run refused before it started (a pause,
+  // or a busy agent) has no row at all, so it never appears here.
+  status: "running" | "success" | "failed" | "stopped" | "limited";
+  limited?: string;
   // The run emitted [SILENT] — it chose to say nothing, as distinct from
   // having nothing to say because it broke. Optional because a run recorded
   // before the column existed reports nothing here.
@@ -142,6 +146,9 @@ export type AgentDetail = {
   // read-only: defaulting a PERMISSION to true would grant, on a version
   // mismatch, exactly the thing the owner never agreed to.
   browser?: AgentBrowserGrants;
+  // Optional for the same reason as `browser`: an older server omits it, and
+  // the page then simply shows no limits card.
+  limits?: AgentLimits;
 };
 
 export type AgentBrowserGrants = {
@@ -151,6 +158,27 @@ export type AgentBrowserGrants = {
   irreversible: boolean;
   needs_irreversible: boolean;
 };
+
+// Mirrors web/api_agent_limits.go's agentLimitsDTO. 0 means "no limit" on every
+// figure, so an empty input saves as 0 rather than being omitted (the PUT is a
+// full replace).
+export type AgentLimits = {
+  run: { tokens: number; turns: number; usd: number };
+  day: { tokens: number; usd: number };
+  month: { tokens: number; usd: number };
+  // false when the agent runs on a CLI coder: the limits are kept but nothing
+  // enforces them.
+  enforced: boolean;
+  dollars_supported: boolean;
+  spend: {
+    day: { tokens: number; usd: number; usd_reported: boolean };
+    month: { tokens: number; usd: number; usd_reported: boolean };
+  };
+  paused_until: string | null;
+  pause_reason: string;
+};
+
+export type AgentLimitsBody = Pick<AgentLimits, "run" | "day" | "month">;
 
 const RUNNING_POLL_MS = 5000;
 const SCHEDULE_SYNC_POLL_MS = 2000;
@@ -292,4 +320,20 @@ export function useAgentActions() {
     saveBrowserGrants: (id: string, grants: { irreversible?: boolean }) =>
       saveBrowserGrantsMut.mutateAsync({ id, ...grants }),
   };
+}
+
+// Saving clears any pause on the server, so the dashboard (paused_agents) is
+// invalidated along with the agent: otherwise Home keeps flagging an agent the
+// owner has just un-paused.
+export function useSaveAgentLimits() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: AgentLimitsBody }) =>
+      api.put<AgentLimits>(`/api/v1/agents/${id}/limits`, body),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["agent", id] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
 }

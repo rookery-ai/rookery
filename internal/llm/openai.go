@@ -202,6 +202,8 @@ type openAIResponse struct {
 		// response, with and without its `usage: {include: true}` flag).
 		// Plain OpenAI and most compatible gateways omit it.
 		Cost *float64 `json:"cost"`
+		// xAI reports the price in 1e-10 USD ticks instead of `cost`.
+		CostInUSDTicks *int64 `json:"cost_in_usd_ticks"`
 	} `json:"usage"`
 }
 
@@ -219,6 +221,9 @@ func (r openAIResponse) usage() Usage {
 	}
 	if c := r.Usage.Cost; c != nil {
 		u.Cost = *c
+		u.CostReported = true
+	} else if t := r.Usage.CostInUSDTicks; t != nil {
+		u.Cost = float64(*t) / 1e10
 		u.CostReported = true
 	}
 	return u

@@ -78,6 +78,7 @@ const TECHNICAL_SPEC_FIELDS = [
   "Connections",
   "Skills",
   "MCP servers",
+  "Limits",
 ] as const;
 
 export type SpecField = { label: string; value: string };

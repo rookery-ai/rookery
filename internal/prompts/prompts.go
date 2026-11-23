@@ -112,6 +112,20 @@ type DesignSystemParams struct {
 	// values. Without them the designer told a user to create secrets that
 	// already existed; with them it can name the right one in the plan.
 	SecretNames []string
+	// LimitsAvailable is true when the workspace's coder is an API coder: only
+	// there does the platform see per-call usage, so only there can a limit be
+	// enforced. Without it the designer neither asks about limits nor writes a
+	// Limits: line it could not honour.
+	LimitsAvailable bool
+	// LimitsDollars is true when that coder's provider reports a price per call.
+	// Dollar limits are offered only then — a limit the host cannot measure
+	// would never trip.
+	LimitsDollars bool
+	// CurrentLimits is the edited agent's limits as a Limits: value
+	// (budget.FormatSpecLine; "" reads as none). Edit only: without it the
+	// designer cannot restate what the agent has, and a plan touching one
+	// period would read as if the others did not exist.
+	CurrentLimits string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -1033,7 +1047,9 @@ NEVER do any of the following — no exceptions:
 - Ask more than two questions in a single reply.
 - Use technical jargon with the user. FORBIDDEN terms to use unexplained: AGENT.md,
   Python, script, vault, cron, JSON, shell, subprocess, Bash, webhook, endpoint, API key
-  (unless you immediately explain it in one plain sentence). Translate everything:
+  (unless you immediately explain it in one plain sentence). The word "token" is allowed
+  when you talk about how much the assistant uses, but explain it once in plain words (a token
+  is roughly three-quarters of a word). Translate everything:
   "run schedule" not "cron"; "your notes" not "vault"; "the assistant will remember this"
   not "write to state.md".
 </constraints>
@@ -1257,7 +1273,7 @@ before the user sees your message, so never refer to it in your prose):
 Change: <one sentence describing what changes technically>
 Root cause: <what was actually wrong, if a bug>
 Tier change: same | 1→2 | 2→1 | etc. — prefer collapsing toward Tier 1 where the change removes the need for a script.
-[/TECHNICAL SPEC]
+` + editLimitsSpecLine(p) + `[/TECHNICAL SPEC]
 </your_job>
 
 `)
@@ -1275,7 +1291,7 @@ simple, friendly questions — one or two at a time. Your goal is to understand:
    you need it?" ("only when I ask" / manual is a valid answer.)
 5. Where results should go (a message? your notes? both?) and any accounts or services
    needed (and what credentials those require, explained step by step).
-
+` + limitsQuestion(p) + `
 When you have a complete picture, propose your plan in ONLY plain English (no technical
 terms) — bullet points, not paragraphs:
 - What the assistant will do each run (one sentence per action)
@@ -1283,7 +1299,7 @@ terms) — bullet points, not paragraphs:
 - Whether it will notify you (yes — and what the message looks like — or no, silent)
 - Where results are saved ("your notes under Daily Quotes")
 - Any accounts/services needed and exactly how to set them up, step by step
-
+` + limitsPlanBullet(p) + `
 Then tell the user to type "approve" when they are happy with the proposal, and that you
 will build it as soon as they do.
 
@@ -1309,7 +1325,7 @@ Connections: none | <the provider/label accounts from <available_connections> th
 Skills: none | <the skill names from <available_skills> this needs, comma-separated>
 MCP servers: none | <the server names from <available_mcp_servers> this will call, comma-separated>
 Irreversible actions: no | yes — <what exactly cannot be undone: what it pays, orders, transfers or deletes>
-[/TECHNICAL SPEC]
+` + createLimitsSpecLine(p) + `[/TECHNICAL SPEC]
 </your_job>
 
 `)

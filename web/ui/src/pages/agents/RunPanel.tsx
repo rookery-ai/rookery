@@ -20,6 +20,9 @@ type RunPanelProps = {
   // AgentDetail.running — true for ANY run in flight, including a scheduled one
   // that has no stream to attach to. This, not the stream, is what offers Stop.
   running?: boolean;
+  // AgentDetail.limits.paused_until — a spending limit has stopped this agent.
+  // Run now is disabled rather than hidden: the server would refuse it anyway.
+  pausedUntil?: string | null;
 };
 
 // "▶ Run now" + the live SSE activity card for a manual run. useAgentActions'
@@ -27,7 +30,7 @@ type RunPanelProps = {
 // (run just started, status flipped to running); this component invalidates
 // again when the SSE stream reports done so the run-history list picks up
 // the finished run without a manual refresh.
-export function RunPanel({ agentId, agentName, liveRun, running = false }: RunPanelProps) {
+export function RunPanel({ agentId, agentName, liveRun, running = false, pausedUntil = null }: RunPanelProps) {
   const { run, stopRun } = useAgentActions();
   const [stopping, setStopping] = useState(false);
   const qc = useQueryClient();
@@ -144,7 +147,15 @@ export function RunPanel({ agentId, agentName, liveRun, running = false }: RunPa
       }
     } catch (err) {
       if (unmountedRef.current) return;
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      // 409 "busy" is the same situation as an already_running answer: a run is
+      // in flight, so attach to it. "budget_paused" is a real refusal and its
+      // message names the limit.
+      if (err instanceof ApiError && err.status === 409 && err.code === "busy") {
+        setNote("A run is already in progress");
+        attach("collision");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Something went wrong");
+      }
     } finally {
       if (!unmountedRef.current) setIsRunning(false);
     }
@@ -180,7 +191,12 @@ export function RunPanel({ agentId, agentName, liveRun, running = false }: RunPa
             {stopping ? "Stopping…" : "Stop"}
           </Button>
         ) : (
-          <Button size="sm" onClick={() => void handleRun()}>
+          <Button
+            size="sm"
+            onClick={() => void handleRun()}
+            disabled={!!pausedUntil}
+            title={pausedUntil ? "Paused by a spending limit — change the limits to run now." : undefined}
+          >
             <Play />
             Run now
           </Button>

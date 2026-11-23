@@ -73,3 +73,8 @@ test("parseTechnicalSpec reads the bindings", () => {
   expect(byLabel["Skills"]).toBe("web-research, pdf");
   expect(byLabel["MCP servers"]).toBe("weather");
 });
+
+test("parseTechnicalSpec reads the Limits line", () => {
+  const fields = parseTechnicalSpec("Tier: 1\nLimits: per run: 50000 tokens; per month: $30");
+  expect(fields).toContainEqual({ label: "Limits", value: "per run: 50000 tokens; per month: $30" });
+});

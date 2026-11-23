@@ -75,3 +75,12 @@ func (c *Coder) WithProgress(f func(string)) *Coder {
 	c2.progress = f
 	return &c2
 }
+
+// APIProviderName is the llm registry name of the API engine's provider, or ""
+// for a CLI coder.
+func (c *Coder) APIProviderName() string {
+	if c.api == nil {
+		return ""
+	}
+	return c.api.provider
+}

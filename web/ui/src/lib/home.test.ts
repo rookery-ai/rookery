@@ -61,6 +61,7 @@ test("useDashboard fetches from the right URL and normalizes nil arrays", async 
         recent_runs: null,
         upcoming: null,
         has_connector: false,
+        paused_agents: [],
       }),
     ),
   );
