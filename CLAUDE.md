@@ -149,8 +149,12 @@ image pushes.**
 3. **Open a PR.** Its **title** must itself be a valid Conventional Commit —
    merges are squashes, so the title becomes the commit that lands on `main` and
    is what release-please reads to compute the next version.
-4. **PR checks must pass** (`.github/workflows/pr.yml`, seven jobs):
+4. **PR checks must pass** (`.github/workflows/pr.yml`, ten jobs):
    - `Conventional commit title`
+   - `Branch name` — `^(feat|fix|docs|refactor|test|chore|perf|build|ci)/…`;
+     release-please and Dependabot branches are exempt
+   - `PR description scan` — the commit-msg hook's credential patterns, applied to
+     the PR body (push protection never reads it)
    - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
      not 600s: the `web` package alone measures ~343s under `-race`, 13× its
      non-race time)
@@ -169,25 +173,34 @@ image pushes.**
      peer: no `IPExtractor` is set, so behind a reverse proxy it is the proxy's address.
    - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
      asserts `/healthz`, the SPA root and the session endpoint all answer. **One
-     of the project's two end-to-end gates** — this one covers the container
+     of the project's three end-to-end gates** — this one covers the container
      image.
    - `Package smoke test` — builds a goreleaser snapshot, then installs the
      **rpm** (in a Fedora container), the **deb** (in a Debian container) and
      extracts the **tar.gz**, running `owner bootstrap` + `serve` + `healthcheck`
-     from a working directory unrelated to the source tree. **The project's other
+     from a working directory unrelated to the source tree. **The second
      end-to-end gate** — this one covers the native deb/rpm/tar.gz artifacts;
      nothing had ever installed one before it existed, which is exactly how they
      shipped unable to open their own database. Run it locally with
      `make ci-package` — it takes minutes, because a snapshot rebuilds the SPA
      and all six binaries.
+   - `Windows smoke test` — the **only job that runs anything on Windows**, and
+     the third end-to-end gate. On `windows-latest` it runs the install-lock
+     tests, then `scripts/smoke-windows.ps1`: start `serve`, check a second
+     server is refused, `Stop-Process -Force` the first, and assert the next
+     start answers `/healthz`. It then does the same through the real logon
+     task (`rookery service install`, kill, `schtasks /Run`). **Every check
+     kills the server and restarts it, because a single start passes on the
+     bug this job exists for** (see "The Windows install lock" below).
+     Cross-compile proves the binary links, never that it runs.
 5. **There is no aggregate `ci` target, and reproducing the pipeline locally is
    not a step.** The gate runs here, on push. The removed target took ~15
    minutes (the `web` package alone measures ~343s under `-race`, 13× its
    non-race time) and every one of those minutes was spent again on the runner.
 
-   It also never covered four of the seven jobs: `Conventional commit title`
-   (needs the pull request, not anything runnable locally), `Security scan`,
-   `Container smoke test` and `Package smoke test`. So a green local run never
+   It also never covered most of the jobs: the three that read the pull request
+   itself (title, branch name, description), `Security scan`, and every smoke
+   test, including the Windows one, which needs a Windows host. So a green local run never
    meant a green PR — which is the real reason it is gone, not merely the
    duration. Nothing in `.github/workflows` invokes `make`; each job runs its
    own steps, so removing the target changed no gate.
@@ -197,8 +210,7 @@ image pushes.**
    `go test ./internal/<pkg>/` is the fast inner loop. Those catch the
    formatting and obvious-breakage class of failure without paying for a
    full-matrix run. The documentation check (`ci-docs`) runs as a step inside
-   the `Go build and test` job rather than as a job of its own, so the gate
-   count stays at seven.
+   the `Go build and test` job rather than as a job of its own.
 
    **The one exception is a stacked pull request** — one based on another branch
    rather than `main` runs zero checks, so there the local targets are the only
@@ -327,6 +339,39 @@ whether a second server is started that cannot bind the port. The XML is written
 **UTF-16 with a BOM** because the declaration says UTF-16 — schtasks rejects a
 mismatch with an "incorrectly formatted" error that names nothing useful — and
 paths and account names are XML-escaped, since `&` is legal in both.
+
+**The Windows install lock is a `LockFileEx` byte-range lock, and it used to be
+the existence of a file — which made autostart work exactly once.**
+`internal/backup/lock_windows.go` created `<data_dir>/rookery.pid` with `O_EXCL`
+and only `Release` removed it. `serve` has no shutdown path at all: no signal
+handler, and `srv.Start` blocks until the process is killed. So `Release` never
+ran on ANY stop — a reboot, a closed console window, Ctrl+C or `schtasks /End` —
+and the file outlived every one of them. Every later start then refused with
+`ErrServerRunning`, `RestartOnFailure` retried three times into the same wall,
+and the task's console closed before anyone could read why. A fresh install on a
+real laptop finished, served once, and then left `localhost:8899` dead. Linux
+never had this because `flock` is dropped by the kernel with its holder, which is
+the property `lock.go`'s own comment names. The lock is now a byte-range lock on
+a file held open, which Windows also releases on process death, so the two
+platforms finally agree. Three details are load-bearing:
+
+- **The locked range sits far past end-of-file, not over the pid text.** Windows
+  enforces byte-range locks against other processes' READS, so locking the
+  content would make `Get-Content rookery.pid` fail during triage.
+- **A leftover file is simply reopened and locked**, which is what heals an
+  install already wedged by the old code — upgrading is the whole repair.
+  `Release` no longer deletes the file, matching Unix.
+- **Do not replace this with "is the recorded pid alive?".** Windows reuses pids,
+  so that heuristic is wrong in both directions: a reused pid keeps a dead lock
+  held, and a wrong guess the other way lets two servers share one database.
+
+`serve` wraps the refusal in `serveLockError`, because `ErrServerRunning`'s text is
+worded for `backup restore` ("stop it before restoring") and that is what a user
+running `rookery serve` to find out why nothing answers used to be shown. The
+`Windows smoke test` CI job pins all of it by killing the server and starting it
+again. A single start passes on the old code, which is why the job does more.
+Graceful shutdown in `serve` is still not built. It is no longer needed for
+correctness, since nothing now depends on a clean exit.
 
 **`ServiceSupport.Restart` is a field, not a string built at the call site.**
 `rookery upgrade` hardcoded `systemctl --user restart` behind `if svc.Managed`,
@@ -4037,8 +4082,9 @@ shared constant.
 
 **Restore only ever runs against a dead install.** `serve` calls
 `ApplyPendingRestore` at the very top — *before* the database is opened or
-migrated — then holds an exclusive `flock` on `<data_dir>/rookery.pid` for
-its whole lifetime. The offline CLI takes the same lock and refuses when the
+migrated — then holds an exclusive lock on `<data_dir>/rookery.pid` for
+its whole lifetime (`flock` on Unix, `LockFileEx` on Windows — both released by
+the OS if the server dies, see "The Windows install lock"). The offline CLI takes the same lock and refuses when the
 server holds it. The settings button does not swap anything itself: it stages,
 writes a `.restore-pending` marker, and shuts the server down, so the swap
 happens on the next boot through the identical code path. **The CLI does not
@@ -4137,7 +4183,7 @@ cannot be pruned.
   sandbox's granted paths — an agent reaching for `/tmp/cookies.txt` is denied
   and has to be steered to `$TMPDIR`, which cost several wasted tool calls on
   that same run.
-- **Thin e2e coverage.** CI has two end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer, and the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
+- **Thin e2e coverage.** CI has three end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer; the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each; and the Windows smoke test (`pr.yml` → `Windows smoke test`) kills and restarts `serve` on `windows-latest`, directly and through the logon task. macOS still has no job that runs anything, and `install.ps1` itself is still never executed. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
 - **Codex, Gemini CLI and Cursor are authored-but-unverified.** All five CLI coders are detected (`knownCoders`) and all five now receive a model, but only `claude` and `opencode` have been exercised end-to-end on a real host. The other three backends were authored from their published flags and have never completed a `Coder.Smoke` round trip; closing this needs a host with the binaries installed and accounts behind them. (The *previous* gap here — no Model field for a local coder, which made `CoderModel` unsettable through the UI and actively wiped it on every save, blocking OpenCode out of the box — was fixed in 2026-08: `#coder_local` has a Model input, both save paths persist it, and `selectBackend` passes it to codex and gemini as well as opencode and cursor.)
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
