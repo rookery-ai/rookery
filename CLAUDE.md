@@ -3153,6 +3153,39 @@ version compiled in), so a version hardcoded in shell would silently stop
 matching at the next dependency bump, and the symptom would be "installed and
 Rookery cannot see it" — the exact class of bug this work removes.
 
+**An upgrade that bumps playwright-go strands the browser, and nothing used to
+notice.** The driver directory is `ms-playwright-go/<version>`, named after the
+Playwright version compiled into the binary (`probeVersion`), and the managed
+Chromium is `chromium_headless_shell-<revision>`, named after what that driver
+launches. A release moving the driver (1.62.1 → 1.64.1 was the trigger) looks in
+a directory the owner never populated, `Resolve` reports the runtime missing, and
+the browser tools silently stop being offered — "no browser" is a legitimate state
+on most installs, so nothing flags it. `browser.CheckRuntime` tells the two apart:
+OUTDATED only when there is evidence of a previous install AND this build cannot
+launch a browser. Never "outdated" on a host that never opted in — that would put a
+warning on every default install. **The evidence is Rookery's own
+`ms-playwright-go/<any version>` directory, never a build in `ms-playwright`**:
+that cache is shared by every Playwright binding, so a developer's Python or Node
+test project fills it, and counting it made `upgrade` download ~200 MB onto a host
+that never asked (`TestAnotherProjectsPlaywrightCacheIsNotOurs`). Three things are
+load-bearing:
+
+- **`rookery upgrade` repairs, `serve` only reports.** The packaged unit runs with
+  `ProtectHome=read-only`, so the server cannot write the cache it reads. `upgrade`
+  runs as the owner, unconfined, and after the swap runs the NEW binary's
+  `browser install --if-outdated` (only the new binary knows which version it
+  needs). `serve` logs a warning, sets `/healthz` `tools.browser_outdated`, and
+  writes one `source: "system"` inbox notice per workspace, deduplicated per needed
+  driver version in `system_settings` (`browser.outdated_notice`) so restarts do not
+  repeat it. Both halves are needed: deb/rpm upgrades never run `rookery upgrade`.
+- **`Resolve` now accepts a managed Chromium only at the revision the driver's
+  `browsers.json` names.** Any `chromium-*` directory used to count, and Playwright
+  leaves old builds behind, so a stale build was chosen ahead of the owner's own
+  Chrome and every launch failed. An unreadable `browsers.json` keeps the old rule.
+- **This is the browser's problem alone.** python3, ripgrep, Poppler and Tesseract
+  are OS packages resolved on PATH and are not keyed to Rookery's version; `upgrade`
+  merely lists any that are missing, since a release can start relying on one.
+
 **`browser.Resolve` decides what is launched, and it is why an owner with Chrome
 is no longer asked to download one.** Rookery used to launch exactly one thing,
 Playwright's managed Chromium, so a machine with Chrome or Edge already on it

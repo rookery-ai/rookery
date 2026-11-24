@@ -70,3 +70,17 @@ func TestNoWarningsWhenHealthy(t *testing.T) {
 		t.Errorf("healthy report produced warnings: %v", w)
 	}
 }
+
+// A browser an upgrade stranded is a deviation worth a warning, unlike an
+// absent one: TestNoWarningsWhenHealthy stays green with Browser=false.
+func TestAnOutdatedBrowserWarnsAndNamesTheFix(t *testing.T) {
+	r := Report{
+		Status:  "ok",
+		Sandbox: Sandbox{Supported: true, Enabled: true, ABI: 8},
+		Tools:   Tools{Python3: true, Ripgrep: true, PDFToText: true, Tesseract: true, BrowserOutdated: true},
+	}
+	warns := strings.Join(r.Warnings(), "\n")
+	if !strings.Contains(warns, "rookery browser install") {
+		t.Errorf("an outdated browser must warn and name the fix, got: %q", warns)
+	}
+}

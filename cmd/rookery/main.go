@@ -140,6 +140,12 @@ func serveCmd() *cli.Command {
 
 			slog.Info("database ready", "path", cfg.Database.Path)
 
+			// A browser an upgrade stranded is already in rep.Warnings above;
+			// this puts it where the owner will actually see it.
+			if rep.Tools.BrowserOutdated {
+				noticeOutdatedBrowser(database, browser.CheckRuntime())
+			}
+
 			// The workspace count decides how a first-run key is derived: an
 			// install that already holds encrypted data must keep its legacy
 			// hostname-derived key byte-for-byte, while a fresh one gets random

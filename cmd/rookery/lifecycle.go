@@ -354,6 +354,7 @@ func runUpgrade(ctx context.Context, o upgradeOpts) error {
 	if out, err := exec.CommandContext(ctx, self, "version").Output(); err == nil {
 		fmt.Fprintf(o.out, "Now running: %s", out)
 	}
+	refreshTools(ctx, self, o.out)
 	// The restart command comes from the platform, never from here. Printing
 	// systemctl on macOS and Windows told people to run a command that does not
 	// exist; hardcoding it behind `if svc.Managed` fixed that only for as long
@@ -386,4 +387,50 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 // v, a -dev suffix, or the literal "dev" in a local build.
 func sameVersion(a, b string) bool {
 	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
+}
+
+// refreshTools brings what the NEW binary depends on up to date after a swap.
+//
+// The browser is the reason this exists. Its driver directory is named after
+// the Playwright version compiled into the binary, so a release that bumps
+// playwright-go looks for a runtime the owner never installed and the browser
+// silently stops being offered. Only the new binary knows which version it
+// needs, so it is asked — `browser install --if-outdated` does nothing unless a
+// browser installed for an earlier build no longer matches.
+//
+// This runs here rather than in `serve` because the packaged systemd unit gives
+// the server a read-only home (ProtectHome=read-only), so the server cannot
+// repair the cache it reads; `serve` reports the problem instead. Upgrade runs
+// as the owner, in a terminal, unconfined.
+//
+// Neither step fails the upgrade: the binary is already replaced, and a tool
+// that could not be refreshed is a capability to restore, not a broken install.
+func refreshTools(ctx context.Context, self string, out io.Writer) {
+	cmd := exec.CommandContext(ctx, self, "browser", "install", "--if-outdated")
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(out, "\nThe browser could not be updated to match this build (%v).\n"+
+			"Agents that use it will not be able to until you run:\n    rookery browser install\n", err)
+	}
+
+	// Host tools are ordinary OS packages and an upgrade cannot break them, but
+	// a release can start relying on one the owner skipped, so say which are
+	// missing while the owner is at a terminal to act on it.
+	missing := onboard.Missing(nil)
+	if len(missing) == 0 {
+		return
+	}
+	names := make([]string, len(missing))
+	for i, t := range missing {
+		names[i] = t.Bin
+	}
+	fmt.Fprintf(out, "\nMissing host tools: %s\n", strings.Join(names, ", "))
+	if cmds := onboard.InstallCommands(onboard.DetectManager(nil), missing); len(cmds) > 0 {
+		fmt.Fprintln(out, "Install them with:")
+		for _, c := range cmds {
+			fmt.Fprintf(out, "    %s\n", c)
+		}
+	} else {
+		fmt.Fprintln(out, "Run `rookery onboard` to see how to install them.")
+	}
 }

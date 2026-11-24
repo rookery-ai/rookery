@@ -306,3 +306,20 @@ test("a connection alert reads as a connection, not as an agent", async () => {
   expect(screen.queryByRole("link", { name: /view agent/i })).toBeNull();
   expect(screen.getByRole("link", { name: /reconnect/i })).toHaveAttribute("href", "/connections");
 });
+
+// A maintenance notice about the install (an upgrade stranded the browser) is
+// not from an agent either, and must not borrow the robot or the generic label.
+test("a system notice reads as Rookery, not as an agent", async () => {
+  messages = [
+    msg({
+      id: "s1",
+      source: "system",
+      body: "⚠️ Action required — the browser on this machine was installed for an earlier Rookery build — run `rookery browser install`.",
+    }),
+  ];
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText("Rookery")).toBeInTheDocument();
+  expect(screen.queryByText("Notification")).toBeNull();
+});
