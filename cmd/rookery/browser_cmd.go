@@ -41,9 +41,22 @@ func browserCmd() *cli.Command {
 						Name:  "with-deps",
 						Usage: "also install the system libraries Chromium needs (requires root)",
 					},
+					&cli.BoolFlag{
+						Name: "if-outdated",
+						Usage: "only install when a browser installed for an earlier Rookery build no longer " +
+							"matches this one; do nothing otherwise (run by `rookery upgrade`)",
+					},
 				},
 				Action: func(_ context.Context, cmd *cli.Command) error {
-					fmt.Println("Downloading the browser runtime. This is a few hundred megabytes and runs once.")
+					if cmd.Bool("if-outdated") {
+						st := browser.CheckRuntime()
+						if !st.Outdated {
+							return nil
+						}
+						fmt.Println("The browser was installed for an earlier Rookery build; updating it to match this one.")
+					} else {
+						fmt.Println("Downloading the browser runtime. This is a few hundred megabytes and runs once.")
+					}
 					if err := browser.Install(os.Stdout, cmd.Bool("with-deps")); err != nil {
 						return err
 					}
@@ -67,6 +80,12 @@ func browserCmd() *cli.Command {
 					if av.OK {
 						fmt.Println("browser runtime: installed")
 						return nil
+					}
+					// Name the upgrade case rather than the generic "not installed":
+					// an owner who installed it once would otherwise be told it was
+					// never there.
+					if st := browser.CheckRuntime(); st.Outdated {
+						return fmt.Errorf("browser runtime: outdated — %s", st.Reason)
 					}
 					return fmt.Errorf("browser runtime: not available — %s", av.Reason)
 				},

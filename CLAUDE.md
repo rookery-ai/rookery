@@ -155,9 +155,9 @@ image pushes.**
      release-please and Dependabot branches are exempt
    - `PR description scan` — the commit-msg hook's credential patterns, applied to
      the PR body (push protection never reads it)
-   - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
-     not 600s: the `web` package alone measures ~343s under `-race`, 13× its
-     non-race time)
+   - `Go build and test` — gofmt, `go vet`, `go test -race` (**1500s timeout**:
+     the `web` package alone took 626–787s under `-race` on green runners by
+     2026-11, and slower ones crossed the old 900s)
    - `Cross-compile` — all six GOOS/GOARCH pairs. **This is the guard that keeps
      `GOOS=windows` compiling**; it was broken for the repo's entire history
      precisely because nothing ever built it.
@@ -401,14 +401,14 @@ tested once and also serves the operator who installed from an rpm, a deb or a
 tarball and never ran a script. `packaging/autostart_test.go` fails if either
 script starts writing a unit or calling `schtasks` itself, because the tempting
 fix when something misbehaves is to inline it into the shell, where nothing can
-exercise it — `install.ps1` is not even syntax-checked here.
+exercise it — `install.ps1` is only parsed in CI, never run.
 
 **Everything after first install is a Go subcommand, not a third and fourth shell
 script.** `rookery upgrade` and `rookery uninstall` follow the rule above: the
 installers' job is identical in both dialects, but removal has to decide what a
 package manager owns, what a service manager owns, and what is unrecoverable user
 data — and `install.ps1` cannot even be syntax-checked on the development host, so
-two more PowerShell files would double a surface nothing verifies. Four things are
+two more PowerShell files would double a surface nothing but a parse check verifies. Four things are
 load-bearing:
 
 - **`onboard.OwnerOf` gates both commands.** `rm /usr/bin/rookery` under a deb or
@@ -486,9 +486,29 @@ file itself and pinned, because a parameter nobody can reach reads as supported.
 all (the website advertised them for the repo's whole life while neither did),
 that both build goreleaser's `rookery_<version>_<os>_<arch>` archive name and
 strip the tag's leading `v`, that all four host tools appear on all four delivery
-surfaces, and that both refuse a checksum mismatch. Neither script can be
-executed in CI, and `install.ps1` is not even syntax-checked — there is no
-PowerShell on the development host. That is a real gap, recorded as one.
+surfaces, and that both refuse a checksum mismatch. Neither script is
+executed in CI. `install.ps1` is at least PARSED there now: the `Windows smoke
+test` job runs PowerShell's own parser over it under both pwsh and Windows
+PowerShell 5.1 — the second matters because `irm | iex` from a stock Windows
+terminal runs 5.1 — with `ParseInput` on the text, as `iex` receives it. Parsing
+is not running: a script that parses can still fail on the path it takes.
+
+**Tesseract is the one host tool that needs Windows administrator permission,
+and both setup surfaces now say so before installing it.** Its winget package
+(`UB-Mannheim.TesseractOCR`) is an NSIS installer writing to `C:\Program Files`,
+while ripgrep and Poppler are portable zips unpacked into the user's profile and
+python.org's Python installs per-user. So on a real install Tesseract alone
+raised a permission prompt; missed or declined, it failed with `failed: … (exit
+status 1)` and nothing more. `HostTool.WindowsNeedsAdmin` (Go) and `Admin =
+$true` (`install.ps1`) mark it, pinned equal by
+`TestTheWindowsInstallerFlagsTheSameElevatedPackagesAsOnboard`; both print a
+notice before installing and, on failure, the exact command to run from an
+administrator PowerShell. Running the whole installer elevated is deliberately
+NOT the advice: it would put Rookery's per-user files under the wrong account.
+`onboard`'s host-tool step also no longer stops at the first failed install —
+winget ids sort uppercase first, so `UB-Mannheim.TesseractOCR` ran before
+`oschwartz10612.Poppler`, and a missed prompt silently skipped Poppler too
+(`runInstallSteps`, `TestInstallStepsContinuePastAFailure`).
 
 **The nfpms `recommends` list must be declared per format.** A single list
 shipped the Debian spelling to both, and Fedora has no `tesseract-ocr` — its
@@ -3132,6 +3152,39 @@ version-MATCHED to the binary (the cache directory is named after the Playwright
 version compiled in), so a version hardcoded in shell would silently stop
 matching at the next dependency bump, and the symptom would be "installed and
 Rookery cannot see it" — the exact class of bug this work removes.
+
+**An upgrade that bumps playwright-go strands the browser, and nothing used to
+notice.** The driver directory is `ms-playwright-go/<version>`, named after the
+Playwright version compiled into the binary (`probeVersion`), and the managed
+Chromium is `chromium_headless_shell-<revision>`, named after what that driver
+launches. A release moving the driver (1.62.1 → 1.64.1 was the trigger) looks in
+a directory the owner never populated, `Resolve` reports the runtime missing, and
+the browser tools silently stop being offered — "no browser" is a legitimate state
+on most installs, so nothing flags it. `browser.CheckRuntime` tells the two apart:
+OUTDATED only when there is evidence of a previous install AND this build cannot
+launch a browser. Never "outdated" on a host that never opted in — that would put a
+warning on every default install. **The evidence is Rookery's own
+`ms-playwright-go/<any version>` directory, never a build in `ms-playwright`**:
+that cache is shared by every Playwright binding, so a developer's Python or Node
+test project fills it, and counting it made `upgrade` download ~200 MB onto a host
+that never asked (`TestAnotherProjectsPlaywrightCacheIsNotOurs`). Three things are
+load-bearing:
+
+- **`rookery upgrade` repairs, `serve` only reports.** The packaged unit runs with
+  `ProtectHome=read-only`, so the server cannot write the cache it reads. `upgrade`
+  runs as the owner, unconfined, and after the swap runs the NEW binary's
+  `browser install --if-outdated` (only the new binary knows which version it
+  needs). `serve` logs a warning, sets `/healthz` `tools.browser_outdated`, and
+  writes one `source: "system"` inbox notice per workspace, deduplicated per needed
+  driver version in `system_settings` (`browser.outdated_notice`) so restarts do not
+  repeat it. Both halves are needed: deb/rpm upgrades never run `rookery upgrade`.
+- **`Resolve` now accepts a managed Chromium only at the revision the driver's
+  `browsers.json` names.** Any `chromium-*` directory used to count, and Playwright
+  leaves old builds behind, so a stale build was chosen ahead of the owner's own
+  Chrome and every launch failed. An unreadable `browsers.json` keeps the old rule.
+- **This is the browser's problem alone.** python3, ripgrep, Poppler and Tesseract
+  are OS packages resolved on PATH and are not keyed to Rookery's version; `upgrade`
+  merely lists any that are missing, since a release can start relying on one.
 
 **`browser.Resolve` decides what is launched, and it is why an owner with Chrome
 is no longer asked to download one.** Rookery used to launch exactly one thing,

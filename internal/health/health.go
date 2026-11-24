@@ -30,6 +30,10 @@ type Tools struct {
 	// NOT an onboard.HostTool — that type probes a binary on PATH, and the
 	// "four host tools" count is asserted across four delivery surfaces.
 	Browser bool `json:"browser"`
+	// BrowserOutdated means a browser WAS installed, for an earlier Rookery
+	// build, and this build cannot use it — see browser.CheckRuntime. Distinct
+	// from Browser=false, which on most installs just means "never opted in".
+	BrowserOutdated bool `json:"browser_outdated"`
 }
 
 // Sandbox separates the operator's setting (Enabled) from the kernel's answer
@@ -69,6 +73,8 @@ func Detect(sandboxEnabled bool, coderMode string) Report {
 			PDFToText: have("pdftotext"),
 			Tesseract: have("tesseract"),
 			Browser:   browser.Probe().OK,
+			// One more stat pass over the cache; side-effect free like Probe.
+			BrowserOutdated: browser.CheckRuntime().Outdated,
 		},
 	}
 }
@@ -113,5 +119,14 @@ func (r Report) Warnings() []string {
 	// warnings list stops being read, and it would devalue the four that mean
 	// something. Absence is reported as a plain fact in Tools.Browser, offered
 	// during onboarding, and logged once at startup.
+	//
+	// An OUTDATED browser is the exception, and the reasoning above is why it
+	// can be: it fires only where the owner installed the browser and an
+	// upgrade stranded it, which is a deviation by definition and never the
+	// default state.
+	if r.Tools.BrowserOutdated {
+		w = append(w, "the browser was installed for an earlier Rookery build and this build cannot use it — "+
+			"browser tools are not offered until you run `rookery browser install`")
+	}
 	return w
 }

@@ -129,10 +129,12 @@ jobs:
 
       # -race is the point of this job: the scheduler, gateway manager and
       # connector bridge all run concurrent goroutines against shared state.
-      # 900s per test binary, not 600s — the web package measures ~343s locally
-      # under -race and a slower runner needs the headroom.
+      # 1500s per test binary. The web package measured ~343s under -race when
+      # this was 900s; by 2026-11 green runs took 626-787s on the runner and
+      # slower ones crossed 900s, failing PRs whose diff never touched Go. The
+      # job's own 30-minute limit still bounds a genuine hang.
       - name: go test -race
-        run: go test ./... -race -count=1 -timeout 900s
+        run: go test ./... -race -count=1 -timeout 1500s
 
       # Proves each docs-sync assertion can actually fail before trusting the
       # real run below — a previously-fixed defect let an unpinned assertion
@@ -452,6 +454,27 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go build -o rookery.exe ./cmd/rookery
+
+      # install.ps1 had never been parsed by PowerShell anywhere — the development
+      # host has none. Parsed by BOTH editions: `irm | iex` from a stock Windows
+      # terminal runs Windows PowerShell 5.1, not pwsh, and the two disagree on
+      # syntax 5.1 lacks. ParseInput on the text mirrors `iex`, which is handed
+      # a string rather than a file.
+      - name: install.ps1 parses (pwsh and Windows PowerShell 5.1)
+        if: ${{ !cancelled() }}
+        run: |
+          $check = @'
+          $errs = $null
+          $text = [System.IO.File]::ReadAllText((Resolve-Path ./install.ps1))
+          [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs) { $errs | ForEach-Object { Write-Host "line $($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion): install.ps1 parses"
+          '@
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($check))
+          pwsh -NoProfile -EncodedCommand $encoded
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 does not parse under pwsh" }
+          powershell.exe -NoProfile -EncodedCommand $encoded
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 does not parse under Windows PowerShell 5.1" }
 
       # Includes killing a real lock holder with TerminateProcess. Scoped to the
       # lock tests: the rest of the suite has never been run on Windows, and this
