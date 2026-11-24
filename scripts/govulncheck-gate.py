@@ -21,18 +21,7 @@ import sys
 
 # advisory -> (module, first fixed release, where that release is stated).
 # Remove an entry once the gate reports it as no longer needed.
-EXEMPT = {
-    "GO-2026-6872": (
-        "github.com/labstack/echo/v4",
-        "v4.16.3",
-        "Echo's v4.16.3 changelog; the database lists no fixed v4 version",
-    ),
-    "GO-2026-6875": (
-        "github.com/labstack/echo/v4",
-        "v4.16.3",
-        "Echo's v4.16.3 changelog and GHSA-99jh-6h7p-pp36; the database lists no fixed v4 version",
-    ),
-}
+EXEMPT = {}
 
 
 def parse_version(version):
