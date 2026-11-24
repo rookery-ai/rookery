@@ -155,9 +155,9 @@ image pushes.**
      release-please and Dependabot branches are exempt
    - `PR description scan` — the commit-msg hook's credential patterns, applied to
      the PR body (push protection never reads it)
-   - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
-     not 600s: the `web` package alone measures ~343s under `-race`, 13× its
-     non-race time)
+   - `Go build and test` — gofmt, `go vet`, `go test -race` (**1500s timeout**:
+     the `web` package alone took 626–787s under `-race` on green runners by
+     2026-11, and slower ones crossed the old 900s)
    - `Cross-compile` — all six GOOS/GOARCH pairs. **This is the guard that keeps
      `GOOS=windows` compiling**; it was broken for the repo's entire history
      precisely because nothing ever built it.

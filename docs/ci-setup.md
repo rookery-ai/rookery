@@ -161,8 +161,9 @@ Measured locally on a 4-thread i5-6200U; GitHub runners are typically faster.
 | Cross-compile (each) | <1 min |
 | Security scan | ~3 min |
 
-`go test -timeout` is set to **900s**, not 600s: the `web` package measures
-~343s under `-race` locally and a slower runner needs the headroom. Keep this in
+`go test -timeout` is set to **1500s**. It was 900s when the `web` package
+measured ~343s under `-race`; by 2026-11 green runs took 626–787s on the runner
+and slower ones crossed 900s, failing pull requests that never touched Go. Keep this in
 sync with the `ci-test` target in the `Makefile`.
 
 ### A note on Actions minutes
