@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.1](https://github.com/rookery-ai/rookery/compare/v0.24.0...v0.24.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **browser:** repair a browser an upgrade stranded, and say so when it cannot ([#434](https://github.com/rookery-ai/rookery/issues/434)) ([3cbaaa0](https://github.com/rookery-ai/rookery/commit/3cbaaa0554da6ade37d56da8fb399713727ddc44))
+* **deps:** pin gorilla/websocket to the commit fixing GO-2026-6278 ([#431](https://github.com/rookery-ai/rookery/issues/431)) ([f566455](https://github.com/rookery-ai/rookery/commit/f566455eb3528614365b39f09d3fa3d246263bcb))
+* **onboard:** explain Tesseract's Windows admin prompt and keep installing past a failure ([#430](https://github.com/rookery-ai/rookery/issues/430)) ([e1cf3ee](https://github.com/rookery-ai/rookery/commit/e1cf3ee730acbf45144826937f246bba979f90e5))
+
 ## [0.24.0](https://github.com/rookery-ai/rookery/compare/v0.23.1...v0.24.0) (2026-11-23)
 
 
