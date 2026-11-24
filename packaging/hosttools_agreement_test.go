@@ -64,3 +64,51 @@ func TestTheWindowsInstallerVerifiesPythonByRunningIt(t *testing.T) {
 		t.Error("internal/onboard stopped verifying python3 by running it; the Store stub will be accepted")
 	}
 }
+
+// Tesseract's winget package is a machine-wide installer and raises a Windows
+// permission prompt; the other three are not. Both surfaces must warn about the
+// same packages, or the installer and setup give contradicting advice about the
+// one install that needs it.
+func TestTheWindowsInstallerFlagsTheSameElevatedPackagesAsOnboard(t *testing.T) {
+	ps1 := repoFile(t, "install.ps1")
+
+	want := map[string]bool{}
+	for _, tool := range onboard.HostTools {
+		if !tool.WindowsNeedsAdmin {
+			continue
+		}
+		id, ok := onboard.PackageFor(onboard.ManagerWinget, tool.Bin)
+		if !ok {
+			t.Fatalf("%s needs admin on Windows but has no winget package", tool.Bin)
+		}
+		want[id] = true
+	}
+
+	got := map[string]bool{}
+	for _, line := range strings.Split(ps1, "\n") {
+		if !strings.Contains(line, "Admin = $true") {
+			continue
+		}
+		i := strings.Index(line, "Winget = '")
+		if i < 0 {
+			t.Errorf("install.ps1 marks a line Admin without a winget id: %q", strings.TrimSpace(line))
+			continue
+		}
+		rest := line[i+len("Winget = '"):]
+		got[rest[:strings.Index(rest, "'")]] = true
+	}
+
+	for id := range want {
+		if !got[id] {
+			t.Errorf("internal/onboard says %s needs administrator permission; install.ps1 does not mark it Admin", id)
+		}
+	}
+	for id := range got {
+		if !want[id] {
+			t.Errorf("install.ps1 marks %s Admin; internal/onboard does not", id)
+		}
+	}
+	if !strings.Contains(ps1, "Run as administrator") {
+		t.Error("install.ps1 must tell the user how to retry an elevated install that failed")
+	}
+}
