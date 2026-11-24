@@ -7,6 +7,12 @@
 
 * **security:** drop the echo govulncheck exemptions 4.16.6 made unnecessary ([#436](https://github.com/rookery-ai/rookery/issues/436)) ([3266177](https://github.com/rookery-ai/rookery/commit/3266177f147544721a6489d49607caae77013ee4))
 
+### Dependencies
+
+* **deps:** echo v4.16.6, carrying upstream security fixes for proxy path bypass (GHSA-w5j2-g3fc-pwr6), static-prefix bypass (GHSA-76qj-xf66-r429), X-Forwarded-Proto stripping (GHSA-h6x5-phvw-c55c) and redirect-middleware open redirect (GHSA-3f6j-cw5h-qw9c); none of the affected middleware is used by Rookery ([#429](https://github.com/rookery-ai/rookery/issues/429))
+* **deps:** playwright-go v0.6401.0 (Playwright driver 1.64.1). An installed browser must be updated to match: `rookery upgrade` from 0.24.1 or later does this automatically; after any other upgrade path (`dnf`, `apt`, a manual binary swap) run `rookery browser install` once. The server warns at startup, in `/healthz` and in the inbox until you do ([#429](https://github.com/rookery-ai/rookery/issues/429), [#434](https://github.com/rookery-ai/rookery/issues/434))
+* **deps:** slack-go v0.36.0, modernc.org/sqlite v1.62.0, golang.org/x/{crypto,net,sys} and goldmark patch updates ([#429](https://github.com/rookery-ai/rookery/issues/429))
+
 ## [0.24.1](https://github.com/rookery-ai/rookery/compare/v0.24.0...v0.24.1) (2026-11-24)
 
 
