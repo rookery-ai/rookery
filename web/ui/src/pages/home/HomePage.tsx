@@ -126,19 +126,25 @@ function InboxCard({
   // A connection alert is neither an agent run nor a reminder. Without its own
   // branch it fell through to the robot icon and the generic label
   // "Notification", which reads as an agent that has no name.
+  // "system" is a maintenance notice about the install itself (e.g. a browser
+  // an upgrade left behind), so it borrows the settings icon, not the robot.
   const Icon =
     msg.source === "reminder"
       ? Bell
       : msg.source === "connection"
         ? ENTITY_ICONS.connections
-        : Bot;
+        : msg.source === "system"
+          ? ENTITY_ICONS.settings
+          : Bot;
   const name =
     msg.agent_name ||
     (msg.source === "reminder"
       ? "Reminder"
       : msg.source === "connection"
         ? "Connection"
-        : "Notification");
+        : msg.source === "system"
+          ? "Rookery"
+          : "Notification");
 
   return (
     <div

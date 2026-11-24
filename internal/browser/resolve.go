@@ -109,7 +109,7 @@ func resolveWith(driver, browsers string, h resolveHost) Choice {
 	// A managed Chromium first: it is what every existing install has, it is
 	// what the loopback-proxy hardening was verified against, and it is the one
 	// engine internal/export can also use for PDF.
-	if chromiumExecutableIn(browsers) != "" {
+	if managedChromiumReady(driver, browsers) {
 		return Choice{OK: true, Engine: EngineChromium, Source: SourceManaged}
 	}
 	// Then a browser the operator already has. This is the case that removes
