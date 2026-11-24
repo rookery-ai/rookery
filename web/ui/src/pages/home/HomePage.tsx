@@ -7,7 +7,7 @@ import { cardClass } from "@/components/ui/card";
 import {
   AgentsAtAGlanceCard, QuickActions, RecentActivityCard, RecentNotesCard,
 } from "./cards";
-import { AlertTriangle, Bell, Bot, Check, CheckCheck, Clock, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Bell, Bot, Check, CheckCheck, Clock, Gauge, Loader2, Pause, Plus, Trash2 } from "lucide-react";
 import { ENTITY_ICONS } from "@/lib/entityIcons";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
@@ -22,6 +22,7 @@ import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
 import { useDeferredDelete } from "@/lib/useDeferredDelete";
 import { useListNav } from "@/lib/useKeyboardNav";
+import { formatResumes, pauseReason } from "@/lib/limits";
 import {
   useDashboard,
   greeting,
@@ -37,6 +38,7 @@ import {
   type Reminder,
   type DashboardRun,
   type DashboardUpcoming,
+  type PausedAgent,
 } from "@/lib/home";
 
 // ── Context pane: Inbox ─────────────────────────────────────────────────────
@@ -160,6 +162,13 @@ function InboxCard({
           {msg.status === "error" && (
             <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-xs font-medium text-danger">
               Failed
+            </span>
+          )}
+          {/* A spending limit held the agent to the owner's own cap — a warning,
+              not a failure, so it must not borrow the red "Failed" badge. */}
+          {msg.status === "limited" && (
+            <span className="shrink-0 rounded-full bg-warn-soft px-1.5 py-0.5 text-xs font-medium text-warn">
+              Limit reached
             </span>
           )}
           <span className="ml-auto shrink-0 text-xs text-muted-2">{timeAgo(msg.created_at)}</span>
@@ -543,17 +552,56 @@ function NextUpCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
 
 // ── Content: Needs attention ─────────────────────────────────────────────────
 
-function NeedsAttentionCard({ runs }: { runs: DashboardRun[] }) {
+function NeedsAttentionCard({ runs, paused = [] }: { runs: DashboardRun[]; paused?: PausedAgent[] }) {
   const failed = runs.filter((r) => r.status === "failed");
+  // Newest limited run per agent: recent_runs is newest-first, and an agent
+  // that hit its limit three times today needs one line, not three. An agent
+  // already listed as paused is skipped for the same reason.
+  const pausedIds = new Set(paused.map((p) => p.agent_id));
+  const limited = new Map<string, DashboardRun>();
+  for (const r of runs) {
+    if (r.status === "limited" && !pausedIds.has(r.agent_id) && !limited.has(r.agent_id)) {
+      limited.set(r.agent_id, r);
+    }
+  }
+  const empty = failed.length === 0 && paused.length === 0 && limited.size === 0;
   return (
     <div className={cardClass}>
       <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">
         Needs attention
       </h3>
-      {failed.length === 0 ? (
+      {empty ? (
         <p className="text-sm text-muted-2">All caught up — no failed runs.</p>
       ) : (
         <ul className="space-y-2 text-sm">
+          {paused.map((p) => (
+            <li key={`paused-${p.agent_id}`} className="flex items-start gap-2">
+              <Pause className="mt-0.5 size-3.5 shrink-0 text-warn" />
+              <span className="text-muted-2">
+                <Link to={`/agents/${p.agent_id}`} className="font-medium text-foreground hover:underline">
+                  {p.agent_name}
+                </Link>
+                {` paused — ${pauseReason(p.reason)}. Resumes ${formatResumes(p.until)}. `}
+                <Link to={`/agents/${p.agent_id}`} className="underline hover:text-foreground">
+                  change limits
+                </Link>
+              </span>
+            </li>
+          ))}
+          {[...limited.values()].map((r) => (
+            <li key={`limited-${r.id}`} className="flex items-start gap-2">
+              <Gauge className="mt-0.5 size-3.5 shrink-0 text-warn" />
+              <span className="text-muted-2">
+                <Link to={`/agents/${r.agent_id}`} className="font-medium text-foreground hover:underline">
+                  {r.agent_name}
+                </Link>
+                {" hit a limit — "}
+                <Link to={`/agents/${r.agent_id}`} className="underline hover:text-foreground">
+                  view run
+                </Link>
+              </span>
+            </li>
+          ))}
           {failed.map((r) => (
             <li key={r.id} className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" />
@@ -680,11 +728,11 @@ export default function HomePage() {
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <div className="flex flex-col gap-4">
             <RecentActivityCard runs={runs} />
-            <AgentsAtAGlanceCard upcoming={dash?.upcoming ?? []} />
+            <AgentsAtAGlanceCard upcoming={dash?.upcoming ?? []} paused={dash?.paused_agents ?? []} />
           </div>
           <div className="flex flex-col gap-4">
             <NextUpCard upcoming={dash?.upcoming ?? []} />
-            <NeedsAttentionCard runs={runs} />
+            <NeedsAttentionCard runs={runs} paused={dash?.paused_agents ?? []} />
             <RemindersCard view={remindersView} />
             <RecentNotesCard />
           </div>

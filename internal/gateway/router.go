@@ -655,6 +655,28 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 			sendProgress(fmt.Sprintf("⏹ **%s** was stopped.", name))
 			return nil
 		}
+		// Refused before it started. When this attempt is what set the pause, its
+		// notice was already delivered, so the header only needs to stop reading as
+		// running; otherwise the reason is the answer.
+		var blocked *agentrunner.BlockedError
+		if errors.As(err, &blocked) {
+			trace.Pause()
+			if delivered {
+				sendProgress(fmt.Sprintf("⏸ **%s** did not run.", name))
+			} else {
+				sendProgress(blocked.Error())
+			}
+			return nil
+		}
+		// Ended by its limit: the notice went through SendOutput unless one was
+		// already sent today, in which case the header is all that says so.
+		if errors.Is(err, agentrunner.ErrRunLimited) {
+			trace.Pause()
+			if !delivered {
+				sendProgress(fmt.Sprintf("⛔ **%s** was ended by its spending limit.", name))
+			}
+			return nil
+		}
 		// The runner already delivered FriendlyRunError through SendOutput.
 		// Returning the error as well would make GatewayManager.dispatch append
 		// "An error occurred: …" — the same failure posted to the user twice.

@@ -284,27 +284,42 @@ func (o *onboarder) stepHostTools() {
 	}
 
 	mgr := onboard.DetectManager(nil)
-	cmds := onboard.InstallCommands(mgr, missing)
-	if len(cmds) == 0 {
+	steps := onboard.InstallSteps(mgr, missing)
+	if len(steps) == 0 {
 		o.info("No supported package manager found — install these with your own tools.")
 		o.later("install the missing host tools")
 		return
 	}
 
 	fmt.Println()
-	for _, c := range cmds {
-		o.info("%s", c)
+	for _, s := range steps {
+		o.info("%s", s.Command)
+	}
+	if notice := adminNotice(steps); len(notice) > 0 {
+		fmt.Println()
+		for _, line := range notice {
+			o.info("%s", line)
+		}
 	}
 	if !o.ask("Run this now?") {
 		o.later("install the missing host tools")
 		return
 	}
-	for _, c := range cmds {
-		if err := runShell(c); err != nil {
-			o.info("failed: %s (%v)", c, err)
-			o.later("install the missing host tools")
-			return
+	failedErrs := map[string]error{}
+	failed := runInstallSteps(steps, func(c string) error {
+		err := runShell(c)
+		if err != nil {
+			failedErrs[c] = err
 		}
+		return err
+	})
+	for _, s := range failed {
+		for _, line := range failureAdvice(s, failedErrs[s.Command]) {
+			o.info("%s", line)
+		}
+	}
+	if len(failed) > 0 {
+		o.later("install the missing host tools")
 	}
 
 	// Re-resolve rather than announcing success and moving on.

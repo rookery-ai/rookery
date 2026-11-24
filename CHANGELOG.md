@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.0](https://github.com/rookery-ai/rookery/compare/v0.23.1...v0.24.0) (2026-11-23)
+
+
+### Features
+
+* **agents:** per-agent budgets and limits ([#419](https://github.com/rookery-ai/rookery/issues/419)) ([ca0b925](https://github.com/rookery-ai/rookery/commit/ca0b925f121696a097fca69a02e1b93e308e5a74))
+
+
+### Bug Fixes
+
+* **backup:** Windows server starts again after an unclean stop ([#427](https://github.com/rookery-ai/rookery/issues/427)) ([12c7443](https://github.com/rookery-ai/rookery/commit/12c7443b33152b999a143acd91ac737161701f59))
+* **deps:** build with Go 1.26.11 for GO-2026-6859 ([#428](https://github.com/rookery-ai/rookery/issues/428)) ([54bd1d8](https://github.com/rookery-ai/rookery/commit/54bd1d8a838eb04e184947c981596038a0123a0d))
+
 ## [0.23.1](https://github.com/rookery-ai/rookery/compare/v0.23.0...v0.23.1) (2026-11-06)
 
 

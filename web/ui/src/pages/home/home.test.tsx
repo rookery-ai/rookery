@@ -51,6 +51,7 @@ function resetFixtures() {
       { agent_id: "agent-2", agent_name: "Backup Bot", cron_expr: "0 8 * * *", next_run_at: "2026-07-18T08:00:00Z" },
     ],
     has_connector: true,
+    paused_agents: [],
   };
   messages = [
     {
@@ -557,4 +558,55 @@ test("quick actions use the same button treatment as the Agents page", async () 
   const secondary = await screen.findByRole("link", { name: /new note/i });
   expect(secondary.className).toContain("h-10");
   expect(secondary.className).not.toContain("bg-primary");
+});
+
+test("Needs attention lists a paused agent and the glance card flags it Limit reached", async () => {
+  dashboard = {
+    ...dashboard,
+    paused_agents: [
+      { agent_id: "agent-2", agent_name: "Backup Bot", until: "2026-12-01T00:00:00Z", reason: "monthly limit of $30.00 reached" },
+    ],
+  };
+  mockFetch();
+  wrap();
+  const heading = await screen.findByText("Needs attention");
+  const card = heading.parentElement!;
+  await waitFor(() => expect(card.textContent).toContain("paused — monthly limit of $30.00 reached"));
+  expect(within(card).getByRole("link", { name: "change limits" })).toHaveAttribute("href", "/agents/agent-2");
+
+  // "Paused" is the owner's own off switch on that card; a spending-limit pause
+  // must read differently or the two are indistinguishable.
+  const glance = screen.getByRole("region", { name: "Agents at a glance" });
+  expect(await within(glance).findByText("Limit reached")).toBeInTheDocument();
+});
+
+test("a paused agent with no stored reason still reads as a sentence", async () => {
+  dashboard = {
+    ...dashboard,
+    paused_agents: [{ agent_id: "agent-2", agent_name: "Backup Bot", until: "2026-12-01T00:00:00Z", reason: "" }],
+  };
+  mockFetch();
+  wrap();
+  const heading = await screen.findByText("Needs attention");
+  const card = heading.parentElement!;
+  await waitFor(() => expect(card.textContent).toContain("paused — a spending limit was reached."));
+});
+
+test("Needs attention lists the latest limited run once per agent", async () => {
+  const limited = (id: string) => ({
+    id,
+    agent_id: "agent-2",
+    agent_name: "Backup Bot",
+    status: "limited" as const,
+    trigger: "cron",
+    started_at: "2026-07-17T05:00:00Z",
+    finished_at: null,
+  });
+  dashboard = { ...dashboard, recent_runs: [limited("l1"), limited("l2")] };
+  mockFetch();
+  wrap();
+  const heading = await screen.findByText("Needs attention");
+  const card = heading.parentElement!;
+  await waitFor(() => expect(card.textContent).toContain("hit a limit"));
+  expect(card.textContent?.match(/hit a limit/g)).toHaveLength(1);
 });

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -32,6 +33,8 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.PUT("/agents/:id/name", s.apiRenameAgent)
 	g.POST("/agents/:id/run", s.apiRunAgent)
 	g.POST("/agents/:id/run/stop", s.apiStopAgentRun)
+	g.GET("/agents/:id/limits", s.apiGetAgentLimits)
+	g.PUT("/agents/:id/limits", s.apiSaveAgentLimits)
 	g.PUT("/agents/:id/schedule", s.apiSaveSchedule)
 	g.DELETE("/agents/:id/schedule", s.apiDeleteSchedule)
 	g.PUT("/agents/:id/agent-md", s.apiSaveAgentMD)
@@ -120,6 +123,10 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 	if r.Stopped {
 		status = "stopped"
 	}
+	// A run a spending limit ended also exits non-zero, but it did not fail.
+	if r.Limited != "" && !r.Stopped {
+		status = "limited"
+	}
 	return map[string]any{
 		"id":      r.ID,
 		"trigger": r.Trigger,
@@ -129,6 +136,7 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 		// broke, and renders the same empty row for both. Carried on the LIST
 		// (not just the detail) so the chip costs no extra request per row.
 		"silent":            r.Silent,
+		"limited":           r.Limited,
 		"exit_code":         r.ExitCode,
 		"stdout":            r.Stdout,
 		"stderr":            r.Stderr,
@@ -209,6 +217,7 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 		"agent":                   s.toAPIAgent(d.Agent),
 		"schedule":                toAPISchedule(d.Schedule),
 		"schedule_sync":           s.scheduleSyncStatus(d.Agent.ID),
+		"limits":                  s.agentLimitsDTO(context.Background(), d.Agent, d.Agent.WorkspaceID),
 		"runs":                    runs,
 		"agent_md":                d.AgentMD,
 		"state":                   d.State,
@@ -399,6 +408,17 @@ func (s *Server) apiRunAgent(c echo.Context) error {
 		if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
 			masterPw = pw
 		}
+	}
+
+	// Refuse up front what the runner would refuse anyway: a 202 followed by a
+	// run that never starts leaves the owner watching a stream that never opens.
+	if err := s.runner.CheckRunnable(agent); err != nil {
+		var be *agentrunner.BlockedError
+		code := "budget_paused"
+		if errors.As(err, &be) && be.Busy {
+			code = "busy"
+		}
+		return jsonErr(c, http.StatusConflict, code, err.Error())
 	}
 
 	if !s.startManualRun(u.ID, agent, masterPw) {

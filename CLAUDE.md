@@ -149,8 +149,12 @@ image pushes.**
 3. **Open a PR.** Its **title** must itself be a valid Conventional Commit —
    merges are squashes, so the title becomes the commit that lands on `main` and
    is what release-please reads to compute the next version.
-4. **PR checks must pass** (`.github/workflows/pr.yml`, seven jobs):
+4. **PR checks must pass** (`.github/workflows/pr.yml`, ten jobs):
    - `Conventional commit title`
+   - `Branch name` — `^(feat|fix|docs|refactor|test|chore|perf|build|ci)/…`;
+     release-please and Dependabot branches are exempt
+   - `PR description scan` — the commit-msg hook's credential patterns, applied to
+     the PR body (push protection never reads it)
    - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
      not 600s: the `web` package alone measures ~343s under `-race`, 13× its
      non-race time)
@@ -169,25 +173,34 @@ image pushes.**
      peer: no `IPExtractor` is set, so behind a reverse proxy it is the proxy's address.
    - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
      asserts `/healthz`, the SPA root and the session endpoint all answer. **One
-     of the project's two end-to-end gates** — this one covers the container
+     of the project's three end-to-end gates** — this one covers the container
      image.
    - `Package smoke test` — builds a goreleaser snapshot, then installs the
      **rpm** (in a Fedora container), the **deb** (in a Debian container) and
      extracts the **tar.gz**, running `owner bootstrap` + `serve` + `healthcheck`
-     from a working directory unrelated to the source tree. **The project's other
+     from a working directory unrelated to the source tree. **The second
      end-to-end gate** — this one covers the native deb/rpm/tar.gz artifacts;
      nothing had ever installed one before it existed, which is exactly how they
      shipped unable to open their own database. Run it locally with
      `make ci-package` — it takes minutes, because a snapshot rebuilds the SPA
      and all six binaries.
+   - `Windows smoke test` — the **only job that runs anything on Windows**, and
+     the third end-to-end gate. On `windows-latest` it runs the install-lock
+     tests, then `scripts/smoke-windows.ps1`: start `serve`, check a second
+     server is refused, `Stop-Process -Force` the first, and assert the next
+     start answers `/healthz`. It then does the same through the real logon
+     task (`rookery service install`, kill, `schtasks /Run`). **Every check
+     kills the server and restarts it, because a single start passes on the
+     bug this job exists for** (see "The Windows install lock" below).
+     Cross-compile proves the binary links, never that it runs.
 5. **There is no aggregate `ci` target, and reproducing the pipeline locally is
    not a step.** The gate runs here, on push. The removed target took ~15
    minutes (the `web` package alone measures ~343s under `-race`, 13× its
    non-race time) and every one of those minutes was spent again on the runner.
 
-   It also never covered four of the seven jobs: `Conventional commit title`
-   (needs the pull request, not anything runnable locally), `Security scan`,
-   `Container smoke test` and `Package smoke test`. So a green local run never
+   It also never covered most of the jobs: the three that read the pull request
+   itself (title, branch name, description), `Security scan`, and every smoke
+   test, including the Windows one, which needs a Windows host. So a green local run never
    meant a green PR — which is the real reason it is gone, not merely the
    duration. Nothing in `.github/workflows` invokes `make`; each job runs its
    own steps, so removing the target changed no gate.
@@ -197,8 +210,7 @@ image pushes.**
    `go test ./internal/<pkg>/` is the fast inner loop. Those catch the
    formatting and obvious-breakage class of failure without paying for a
    full-matrix run. The documentation check (`ci-docs`) runs as a step inside
-   the `Go build and test` job rather than as a job of its own, so the gate
-   count stays at seven.
+   the `Go build and test` job rather than as a job of its own.
 
    **The one exception is a stacked pull request** — one based on another branch
    rather than `main` runs zero checks, so there the local targets are the only
@@ -328,6 +340,51 @@ whether a second server is started that cannot bind the port. The XML is written
 mismatch with an "incorrectly formatted" error that names nothing useful — and
 paths and account names are XML-escaped, since `&` is legal in both.
 
+**The Windows install lock is a `LockFileEx` byte-range lock, and it used to be
+the existence of a file — which made autostart work exactly once.**
+`internal/backup/lock_windows.go` created `<data_dir>/rookery.pid` with `O_EXCL`
+and only `Release` removed it. `serve` has no shutdown path at all: no signal
+handler, and `srv.Start` blocks until the process is killed. So `Release` never
+ran on ANY stop — a reboot, a closed console window, Ctrl+C or `schtasks /End` —
+and the file outlived every one of them. Every later start then refused with
+`ErrServerRunning`, `RestartOnFailure` retried three times into the same wall,
+and the task's console closed before anyone could read why. A fresh install on a
+real laptop finished, served once, and then left `localhost:8899` dead. Linux
+never had this because `flock` is dropped by the kernel with its holder, which is
+the property `lock.go`'s own comment names. The lock is now a byte-range lock on
+a file held open, which Windows also releases on process death, so the two
+platforms finally agree. Three details are load-bearing:
+
+- **The locked range sits far past end-of-file, not over the pid text.** Windows
+  enforces byte-range locks against other processes' READS, so locking the
+  content would make `Get-Content rookery.pid` fail during triage. Even so, only
+  a reader that itself shares WRITE access can open the file (Go's `os.Open`,
+  `Get-Content`); one asking for `FileShare.Read` alone gets a sharing
+  violation, because the holder has write access.
+- **The file is opened sharing READ only (`openLockFile`), and that is the
+  second half of the lock.** It exists for a server from the build BEFORE this
+  fix: that build held the file open for writing and took no byte-range lock, so
+  after `rookery upgrade` replaced the binary under a still-running server,
+  `LockFileEx` alone saw nothing held. A second `serve` or a `backup restore`
+  would then have run against its live database. Refusing to share WRITE makes
+  the open fail with `ERROR_SHARING_VIOLATION` (mapped to `ErrServerRunning`)
+  while any process holds it for writing. `TestLockRefusesAnOldBuildHolder`
+  (Windows-only) pins it.
+- **A leftover file is simply reopened and locked**, which is what heals an
+  install already wedged by the old code — upgrading is the whole repair.
+  `Release` no longer deletes the file, matching Unix.
+- **Do not replace this with "is the recorded pid alive?".** Windows reuses pids,
+  so that heuristic is wrong in both directions: a reused pid keeps a dead lock
+  held, and a wrong guess the other way lets two servers share one database.
+
+`serve` wraps the refusal in `serveLockError`, because `ErrServerRunning`'s text is
+worded for `backup restore` ("stop it before restoring") and that is what a user
+running `rookery serve` to find out why nothing answers used to be shown. The
+`Windows smoke test` CI job pins all of it by killing the server and starting it
+again. A single start passes on the old code, which is why the job does more.
+Graceful shutdown in `serve` is still not built. It is no longer needed for
+correctness, since nothing now depends on a clean exit.
+
 **`ServiceSupport.Restart` is a field, not a string built at the call site.**
 `rookery upgrade` hardcoded `systemctl --user restart` behind `if svc.Managed`,
 which was correct only while Linux was the sole managed platform; the moment
@@ -344,14 +401,14 @@ tested once and also serves the operator who installed from an rpm, a deb or a
 tarball and never ran a script. `packaging/autostart_test.go` fails if either
 script starts writing a unit or calling `schtasks` itself, because the tempting
 fix when something misbehaves is to inline it into the shell, where nothing can
-exercise it — `install.ps1` is not even syntax-checked here.
+exercise it — `install.ps1` is only parsed in CI, never run.
 
 **Everything after first install is a Go subcommand, not a third and fourth shell
 script.** `rookery upgrade` and `rookery uninstall` follow the rule above: the
 installers' job is identical in both dialects, but removal has to decide what a
 package manager owns, what a service manager owns, and what is unrecoverable user
 data — and `install.ps1` cannot even be syntax-checked on the development host, so
-two more PowerShell files would double a surface nothing verifies. Four things are
+two more PowerShell files would double a surface nothing but a parse check verifies. Four things are
 load-bearing:
 
 - **`onboard.OwnerOf` gates both commands.** `rm /usr/bin/rookery` under a deb or
@@ -429,9 +486,29 @@ file itself and pinned, because a parameter nobody can reach reads as supported.
 all (the website advertised them for the repo's whole life while neither did),
 that both build goreleaser's `rookery_<version>_<os>_<arch>` archive name and
 strip the tag's leading `v`, that all four host tools appear on all four delivery
-surfaces, and that both refuse a checksum mismatch. Neither script can be
-executed in CI, and `install.ps1` is not even syntax-checked — there is no
-PowerShell on the development host. That is a real gap, recorded as one.
+surfaces, and that both refuse a checksum mismatch. Neither script is
+executed in CI. `install.ps1` is at least PARSED there now: the `Windows smoke
+test` job runs PowerShell's own parser over it under both pwsh and Windows
+PowerShell 5.1 — the second matters because `irm | iex` from a stock Windows
+terminal runs 5.1 — with `ParseInput` on the text, as `iex` receives it. Parsing
+is not running: a script that parses can still fail on the path it takes.
+
+**Tesseract is the one host tool that needs Windows administrator permission,
+and both setup surfaces now say so before installing it.** Its winget package
+(`UB-Mannheim.TesseractOCR`) is an NSIS installer writing to `C:\Program Files`,
+while ripgrep and Poppler are portable zips unpacked into the user's profile and
+python.org's Python installs per-user. So on a real install Tesseract alone
+raised a permission prompt; missed or declined, it failed with `failed: … (exit
+status 1)` and nothing more. `HostTool.WindowsNeedsAdmin` (Go) and `Admin =
+$true` (`install.ps1`) mark it, pinned equal by
+`TestTheWindowsInstallerFlagsTheSameElevatedPackagesAsOnboard`; both print a
+notice before installing and, on failure, the exact command to run from an
+administrator PowerShell. Running the whole installer elevated is deliberately
+NOT the advice: it would put Rookery's per-user files under the wrong account.
+`onboard`'s host-tool step also no longer stops at the first failed install —
+winget ids sort uppercase first, so `UB-Mannheim.TesseractOCR` ran before
+`oschwartz10612.Poppler`, and a missed prompt silently skipped Poppler too
+(`runInstallSteps`, `TestInstallStepsContinuePastAFailure`).
 
 **The nfpms `recommends` list must be declared per format.** A single list
 shipped the Debian spelling to both, and Fedora has no `tesseract-ocr` — its
@@ -711,6 +788,7 @@ load-bearing:
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth), never from AGENT.md; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; a stray `[/CHAT]` close tag weak models sometimes emit is stripped and never delivered; `[SILENT]` detected; `[STATE]` merged and saved via `agentdesigner.WriteState` into `state.md`'s json fence) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
+| `internal/budget` | Pure model behind agent limits: `Period`/`PeriodStart`/`PeriodEnd` (day and month in the workspace zone), `Enforcement`, the start decision (may a run begin, or pause the agent until when) and the per-run ceiling, plus the `Limits:` spec-line parser (the agent designer's approved plan; the skill designer has no limits) and its formatter (the agent's current limits, stated in the edit design prompt). No database, no clock — so the runner and designer both call it and tests pin every edge. See "Agent budgets and limits". |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users; `WithRecovered()`/`RecoverInterrupted()` retry runs the last shutdown killed mid-flight; runs are capped at `maxConcurrentRuns` — see "Missed runs and the laptop case" below |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here); `CleanReply`/`CleanHistory` strip agent output-protocol markers out of conversational replies — see "Chat must never show the output-protocol markers" below |
@@ -2570,6 +2648,85 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
 
 Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUser`, scheduler → chat platform) and `OnProgress` (live SSE). Parser behavior is covered by `runner_test.go`, `silent_test.go` and `emptyrun_test.go`.
 
+### Agent budgets and limits
+
+Per agent, any of: per-run (tokens, turns, dollars), per-day and per-month (tokens, dollars).
+Spec: `docs/superpowers/specs/2026-11-09-agent-budgets-design.md`. Stored in `agent_limits` (migration
+024); `internal/budget` decides, `internal/agentrunner/limits.go` enforces, `coder.WithUsageGuard`
+meters each completion inside the API tool loop.
+
+- **API coders only.** A CLI coder reports no usage Rookery can meter, so its agents KEEP their
+  limits (shown greyed, never deleted) and are not held to them; switching back re-activates them
+  unchanged. `Runner.coderForAgent` is the single seam that answers "which coder does this agent
+  run on" — the multiple-coders project replaces only that function. The designer, builds and the
+  create-build dry run are never limited.
+- **Tokens are the base unit; dollars are a bonus.** There is NO price table and no token-to-dollar
+  estimate, ever — pricing is the owner's business and a table goes stale in silence. Dollar limits
+  are offered only where `APIProvider.ReportsCost` (a static catalog flag: OpenRouter, xAI;
+  Perplexity deliberately excluded, its cost field has vanished without notice). xAI reports
+  `usage.cost_in_usd_ticks` (1 USD = 10^10 ticks), parsed in `internal/llm`. A response that does
+  not report cost is NOT `$0.00`: the dollar limit cannot be evaluated, the token limit still
+  applies.
+- **A per-run limit ends that run; a day/month limit PAUSES the agent.** The effective per-run
+  ceiling is the min of the per-run limit and the remaining day and month budget, so a run cannot
+  overshoot a period. A limited run gets its own `agent_runs.limited` column and a **Limited** chip
+  (not Failed, not Stopped) and notifies inbox + chat, throttled to one notice per agent per day
+  (`limit_notice_day`) so a 10-second agent cannot flood the inbox. Pause and limit notices are
+  inbox rows with status **`limited`** (`agentrunner.InboxStatusLimited`), rendered as a warn
+  "Limit reached" badge — never `error`, which the inbox renders as a red "Failed" and which sent
+  owners looking for a bug in an agent that had done exactly what it was told.
+- **Why a pause is its own state, not `active` and not the schedule.** `active` is the owner's own
+  switch: auto-resume on the 1st would switch back on an agent the owner turned off. The schedule
+  row is the owner's cron, and since #417 editing it rewrites AGENT.md's header, quoted crons and
+  the derived description — far too much side effect for a temporary pause. `budget_paused_until`
+  (UTC) expires by itself at the period end computed in the workspace zone (`profile.ScheduleZone`;
+  empty zone = host local, as schedules treat it). Checked in the runner, so it blocks EVERY
+  trigger (cron, Run button, chat `/run`, `[CALL]`). The scheduler deliberately does NOT filter a
+  paused agent out: it fires the slot and advances `next_run_at` as usual, and the runner refuses
+  the run without writing a row, so a skipped slot leaves no run record. Skipped slots are not
+  queued: no catch-up burst on resume. A pause is reported (agent page `paused_until`, dashboard
+  `paused_agents`) only while the agent's coder enforces limits — on a CLI coder nothing enforces,
+  re-checks or lifts it, so showing it would be a banner the owner can do nothing about.
+  Saving limits (`PUT /agents/:id/limits`) clears a pause, since otherwise the owner's only exit is
+  waiting.
+- **The decision comes from `context.Cause`, never from the error type** (the #410 rule for
+  stops). The API engine reports a cancelled context as a timeout and a CLI coder's killed process
+  surfaces differently again; `ErrRunLimited` is carried as the cancel cause via `limitCause`.
+  **`limited` is only recorded when `runErr` is set** — a run that finished on its own just as
+  the guard tripped completed, and calling it limited would mislabel a success. The engine makes
+  that the common case on purpose: a completion that crosses the ceiling while giving the FINAL
+  answer (no tool calls) is returned normally, because its cost is already spent and discarding it
+  leaves the owner paying for nothing; only a completion asking for more tool calls is stopped.
+  A crossing turn that emits `[CALL]` has not finished, so the child is not started (it would
+  inherit the parent's limit cause) and the parent is recorded as limited.
+- **Every message names the CONFIGURED limit.** A mid-run stop, a start-time refusal and a pause
+  all quote the number the owner set, never what was left of the period: when a run is ceilinged
+  by the remainder of the day, `RunCeiling` remembers the configured limit behind that remainder
+  (`tokLimit`/`usdLimit`) so the notice names the setting the owner would have to change. Quoting
+  the remainder ("monthly limit of 50 tokens") misstated a limit they had set at 1,000.
+- **Agents with an ENFORCEABLE day or month limit do not overlap.** The registry would otherwise
+  let a slow cron run start while its predecessor spends, overshooting a period check made only at
+  start. Only a limit that can actually be checked counts (`budget.HasEnforceablePeriodLimit`): a
+  per-run limit alone, or a dollar period limit on a provider that reports no cost, does not make
+  the agent exclusive. A second start is refused as `busy`; `Runner.CheckRunnable` lets `POST /agents/:id/run` answer `409` with
+  `budget_paused` or `busy` instead of a 202 for a run that never starts.
+- **Child runs count against the child.** A `[CALL]`ed agent's spend is its own, as there is no
+  parent link in `agent_runs`; a parent's limits do not reach into a child. A parent whose `[CALL]`
+  is refused is warned in its transcript.
+- **Setting them.** The agent page's Limits card, and the designer, which asks (only when the
+  coder is an API coder; dollars only if the provider reports cost) and emits a `Limits:` line in
+  the `[TECHNICAL SPEC]`, parsed by `budget` and persisted on approve. A create takes the line as
+  the whole set. **An edit merges per period**: the edit prompt states the agent's current limits
+  (`DesignSystemParams.CurrentLimits`, via `budget.FormatSpecLine`), each period the line names
+  (`budget.ParseSpecLineScopes`) replaces that period's limits, a period left out keeps its own,
+  `per day: none` clears one period and `none` alone clears all — a designer restating only the
+  daily limit used to erase a monthly one nobody mentioned. The label is read through list markers
+  and bold (`- Limits:`, `**Limits:**`); a turns limit above `budget.MaxRunTurns` (149, shared with
+  the API) is rejected. Surfaces: paused banner on
+  the agent page, `paused_agents` in the dashboard payload (Home's Agents at a glance, labelled
+  "Limit reached" because "Paused" there is the owner's off switch, and Needs attention), and a
+  `"limited"` run status.
+
 ### Run transcript and the silent flag
 
 **Run history could only ever replay what the user had already read.** Tool-call
@@ -3371,6 +3528,7 @@ The base schema was consolidated into `migrations/001_initial_schema.up.sql` dur
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
 `003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind); `016_agent_run_transcript` adds `agent_runs.{transcript,silent}` (see "Run transcript and the silent flag" below); `017_agent_runs_cost` adds `agent_runs.{cached_tokens,cache_reported,cost_usd,cost_reported}` — a token count is not a price (the same 200k tokens cost different amounts on different models, and a cached prefix bills at a fraction), so "what is this agent costing me?" could not be answered from run history at all. Each figure carries a `_reported` flag rather than using 0 as a sentinel: a provider reporting zero and a provider reporting nothing are opposite findings, and a CLI coder reports neither — rendering its runs as `$0.00` would read as free rather than as unmeasured.
+`024_agent_limits` adds the `agent_limits` table (one row per agent, absent = unlimited, 0 in a column = that limit unset), `agents.{budget_paused_until,budget_pause_reason,limit_notice_day}` and `agent_runs.limited` (see "Agent budgets and limits").
 
 **`db.ListAgents` is name-ordered and must stay that way; the agents PAGE is ordered in the
 handler.** The list page shows the newest agent first — the one you just built is the one you came
@@ -3630,7 +3788,7 @@ click; Undo cancels the timer so the call is never made at all. No soft-delete s
 
 Home's inbox (`pages/home/HomePage.tsx`) groups notifications under calendar-day headers
 (Today/Yesterday/`Weekday, D Mon`, bucketed in local time), flags a failed agent run with a "Failed"
-status badge, marks unread rows with a left accent bar, and deep-links each card to its source agent;
+status badge (and a spending-limit notice, status `limited`, with a warn "Limit reached" one), marks unread rows with a left accent bar, and deep-links each card to its source agent;
 deleting a message or a reminder goes through the deferred-delete/undo flow above.
 
 **Chat message chrome.** Every `ChatMessageBubble` (`components/chat/Bubbles.tsx`) renders a
@@ -3706,7 +3864,7 @@ duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
-- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **agents + design** — CRUD, run + stop + run-progress SSE, per-run transcript detail, schedule, `GET`/`PUT /agents/:id/limits`, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
 - **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test
@@ -3956,8 +4114,9 @@ shared constant.
 
 **Restore only ever runs against a dead install.** `serve` calls
 `ApplyPendingRestore` at the very top — *before* the database is opened or
-migrated — then holds an exclusive `flock` on `<data_dir>/rookery.pid` for
-its whole lifetime. The offline CLI takes the same lock and refuses when the
+migrated — then holds an exclusive lock on `<data_dir>/rookery.pid` for
+its whole lifetime (`flock` on Unix, `LockFileEx` on Windows — both released by
+the OS if the server dies, see "The Windows install lock"). The offline CLI takes the same lock and refuses when the
 server holds it. The settings button does not swap anything itself: it stages,
 writes a `.restore-pending` marker, and shuts the server down, so the swap
 happens on the next boot through the identical code path. **The CLI does not
@@ -4056,7 +4215,7 @@ cannot be pruned.
   sandbox's granted paths — an agent reaching for `/tmp/cookies.txt` is denied
   and has to be steered to `$TMPDIR`, which cost several wasted tool calls on
   that same run.
-- **Thin e2e coverage.** CI has two end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer, and the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
+- **Thin e2e coverage.** CI has three end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer; the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each; and the Windows smoke test (`pr.yml` → `Windows smoke test`) kills and restarts `serve` on `windows-latest`, directly and through the logon task. macOS still has no job that runs anything, and `install.ps1` itself is still never executed. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
 - **Codex, Gemini CLI and Cursor are authored-but-unverified.** All five CLI coders are detected (`knownCoders`) and all five now receive a model, but only `claude` and `opencode` have been exercised end-to-end on a real host. The other three backends were authored from their published flags and have never completed a `Coder.Smoke` round trip; closing this needs a host with the binaries installed and accounts behind them. (The *previous* gap here — no Model field for a local coder, which made `CoderModel` unsettable through the UI and actively wiped it on every save, blocking OpenCode out of the box — was fixed in 2026-08: `#coder_local` has a Model input, both save paths persist it, and `selectBackend` passes it to codex and gemini as well as opencode and cursor.)
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.

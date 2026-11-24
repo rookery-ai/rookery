@@ -28,13 +28,19 @@ type activeRun struct {
 }
 
 // trackRun makes a run stoppable. untrack removes it from the registry and is safe
-// to call twice; release frees the context and must always run.
+// to call twice; release frees the context and must always run. cancel is the
+// run's own cancel, for a spending limit to end it with a cause of its own.
 //
 // The cancel cause, not the error the coder comes back with, is what later says the
 // run was stopped: a cancelled API turn can report ErrTimeout and a killed CLI coder
 // reports "signal: killed". Children inherit the cause through their context.
-func (r *Runner) trackRun(ctx context.Context, agent *db.Agent, input RunInput) (runCtx context.Context, untrack, release func()) {
-	runCtx, cancel := context.WithCancelCause(ctx)
+//
+// exclusive refuses the run when another run of the same agent is in flight, and
+// the count and the insert share one lock: checked separately, two cron fires of an
+// agent with a daily or monthly limit could both see none running, both start, and
+// together overshoot a period limit each was admitted under.
+func (r *Runner) trackRun(ctx context.Context, agent *db.Agent, input RunInput, exclusive bool) (runCtx context.Context, untrack, release func(), cancel context.CancelCauseFunc, err error) {
+	runCtx, cancel = context.WithCancelCause(ctx)
 	run := &activeRun{
 		workspaceID: input.WorkspaceID,
 		agentID:     input.AgentID,
@@ -43,6 +49,11 @@ func (r *Runner) trackRun(ctx context.Context, agent *db.Agent, input RunInput) 
 		cancel:      cancel,
 	}
 	r.activeMu.Lock()
+	if exclusive && r.runningCountLocked(input.AgentID) > 0 {
+		r.activeMu.Unlock()
+		cancel(nil)
+		return nil, nil, nil, nil, &BlockedError{Busy: true}
+	}
 	if r.active == nil {
 		r.active = make(map[*activeRun]struct{})
 	}
@@ -55,7 +66,24 @@ func (r *Runner) trackRun(ctx context.Context, agent *db.Agent, input RunInput) 
 		r.activeMu.Unlock()
 	}
 	release = func() { cancel(nil) }
-	return runCtx, untrack, release
+	return runCtx, untrack, release, cancel, nil
+}
+
+// runningCount is how many runs of the agent are in flight right now.
+func (r *Runner) runningCount(agentID string) int {
+	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	return r.runningCountLocked(agentID)
+}
+
+func (r *Runner) runningCountLocked(agentID string) int {
+	n := 0
+	for run := range r.active {
+		if run.agentID == agentID {
+			n++
+		}
+	}
+	return n
 }
 
 // stopMatching cancels every registered run the predicate selects, under the lock.

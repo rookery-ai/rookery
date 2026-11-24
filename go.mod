@@ -1,6 +1,6 @@
 module github.com/rookery-ai/rookery
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
@@ -30,7 +30,7 @@ require (
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

@@ -179,6 +179,17 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			return cancelledResult(ctx, total, toolTrace), c.mapProviderErr(err)
 		}
 		total = addUsage(total, resp.Usage)
+		// A guard that cancels the run must stop it before this response's tool
+		// calls execute, or a limit would be overshot by a whole tool turn. A
+		// response with no tool calls is different: it is the final answer, its
+		// cost is already spent, and stopping here would throw away the one thing
+		// the run was paid to produce. It falls through and is returned as usual
+		// (a nudge branch below that `continue`s still meets the top-of-loop
+		// check, because a nudge is not an answer).
+		c.guardUsage(resp.Usage)
+		if ctx.Err() != nil && len(resp.ToolCalls) > 0 {
+			return cancelledResult(ctx, total, toolTrace), fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
+		}
 
 		if len(resp.ToolCalls) == 0 {
 			// The model wants to finish. During a build, refuse to accept a "done" that
@@ -440,6 +451,7 @@ func (c *Coder) graceTurnOnBudgetExhausted(ctx context.Context, prov llm.Provide
 		return &Result{Text: fallback, Duration: time.Since(start), Usage: total}, nil
 	}
 	total = addUsage(total, resp.Usage)
+	c.guardUsage(resp.Usage)
 	text := strings.TrimSpace(resp.Content)
 	// Best-effort garnish. We removed the model's structured tool channel a moment
 	// ago while it still had work queued, so a reply expressing that work as raw
@@ -543,6 +555,7 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 		return nil, c.mapProviderErr(err)
 	}
 	usage := resp.Usage
+	c.guardUsage(resp.Usage)
 	// A reasoning model bills its thinking against the same completion cap as its answer,
 	// so a large input (the skill vetter reviewing a whole skill) can spend the default cap
 	// before one content token: empty content, finish_reason "length". The tool loop has
@@ -555,6 +568,7 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 		if retry, rerr := prov.Complete(ctx, req); rerr == nil {
 			resp = retry
 			usage = usage.Add(retry.Usage)
+			c.guardUsage(retry.Usage)
 		} else {
 			return nil, c.mapProviderErr(rerr)
 		}

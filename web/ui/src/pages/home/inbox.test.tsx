@@ -29,6 +29,7 @@ function emptyDashboard(): Dashboard {
     recent_runs: [],
     upcoming: [],
     has_connector: true,
+    paused_agents: [],
   };
 }
 
@@ -186,6 +187,22 @@ test("error status renders a badge; ok status does not", async () => {
   // so a loose /failed/i match would false-positive there too.
   expect(screen.getByText("Failed")).toBeInTheDocument();
   expect(screen.getAllByText("Failed")).toHaveLength(1);
+});
+
+// A spending limit is not a failure: the agent did what it was told to and was
+// held to the owner's own cap. Rendering it as a red "Failed" sends the owner
+// looking for a bug that is not there.
+test("limited status renders a warn 'Limit reached' badge, not Failed", async () => {
+  messages = [
+    msg({ id: "m1", agent_name: "Capped Agent", status: "limited", body: "⛔ per-run limit reached" }),
+  ];
+  mockFetch();
+  wrap();
+
+  await screen.findByText("Capped Agent");
+  const badge = screen.getByText("Limit reached");
+  expect(badge.className).toContain("text-warn");
+  expect(screen.queryByText("Failed")).toBeNull();
 });
 
 test("expanding reveals full body and the View agent link", async () => {
