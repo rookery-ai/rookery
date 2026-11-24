@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/rookery-ai/rookery/compare/v0.24.1...v0.24.2) (2026-11-24)
+
+
+### Chores
+
+* **security:** drop the echo govulncheck exemptions 4.16.6 made unnecessary ([#436](https://github.com/rookery-ai/rookery/issues/436)) ([3266177](https://github.com/rookery-ai/rookery/commit/3266177f147544721a6489d49607caae77013ee4))
+
 ## [0.24.1](https://github.com/rookery-ai/rookery/compare/v0.24.0...v0.24.1) (2026-11-24)
 
 
