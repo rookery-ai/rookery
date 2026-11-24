@@ -57,9 +57,13 @@ func staleWith(driverRoot, version, browsers string, h resolveHost) Staleness {
 		// to reinstall for nothing.
 		return Staleness{}
 	}
+	// Evidence of a previous install is Rookery's OWN driver directory, at any
+	// version including this one. ~/.cache/ms-playwright is shared by every
+	// Playwright binding, so a developer's Python or Node test project fills it
+	// too — builds there say nothing about whether this owner opted in.
 	prior := priorDrivers(driverRoot, version)
-	installedBefore := len(prior) > 0 || hasBuild(browsers, "chromium") || hasBuild(browsers, "firefox-")
-	if !installedBefore {
+	_, curErr := os.Stat(filepath.Join(driverRoot, version, "package", "cli.js"))
+	if len(prior) == 0 && curErr != nil {
 		return Staleness{}
 	}
 	if resolveWith(filepath.Join(driverRoot, version), browsers, h).OK {
@@ -92,12 +96,13 @@ func priorDrivers(driverRoot, version string) []string {
 	return out
 }
 
-// expectedChromiumRevision reads the headless-shell revision the driver
-// launches from its own browsers.json, or "" when it cannot be read.
+// expectedChromiumBuild reads, from the driver's own browsers.json, the build
+// directory it launches — "chromium_headless_shell-<rev>", or "chromium-<rev>"
+// for a driver that predates the headless shell — or "" when it cannot be read.
 //
-// The headless shell, not the full browser: Playwright launches it for
-// headless Chromium, which is the only way Rookery launches it.
-func expectedChromiumRevision(driver string) string {
+// The headless shell is preferred: Playwright launches it for headless
+// Chromium, which is the only way Rookery launches it.
+func expectedChromiumBuild(driver string) string {
 	data, err := os.ReadFile(filepath.Join(driver, "package", "browsers.json"))
 	if err != nil {
 		return ""
@@ -115,9 +120,13 @@ func expectedChromiumRevision(driver string) string {
 	for _, b := range doc.Browsers {
 		switch b.Name {
 		case "chromium-headless-shell":
-			return b.Revision
+			if b.Revision != "" {
+				return "chromium_headless_shell-" + b.Revision
+			}
 		case "chromium":
-			full = b.Revision
+			if b.Revision != "" {
+				full = "chromium-" + b.Revision
+			}
 		}
 	}
 	return full
@@ -132,9 +141,9 @@ func expectedChromiumRevision(driver string) string {
 // a revision that had never been downloaded. When the driver's browsers.json
 // cannot be read the old rule applies, since there is nothing better to go on.
 func managedChromiumReady(driver, browsers string) bool {
-	rev := expectedChromiumRevision(driver)
-	if rev == "" {
+	build := expectedChromiumBuild(driver)
+	if build == "" {
 		return chromiumExecutableIn(browsers) != ""
 	}
-	return findChromiumBinary(filepath.Join(browsers, "chromium_headless_shell-"+rev)) != ""
+	return findChromiumBinary(filepath.Join(browsers, build)) != ""
 }

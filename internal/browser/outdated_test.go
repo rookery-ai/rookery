@@ -148,6 +148,37 @@ func TestAStaleChromiumFallsBackToTheSystemChrome(t *testing.T) {
 	}
 }
 
+// ~/.cache/ms-playwright is shared by every Playwright binding — a developer's
+// Python or Node test project fills it too. Builds there are not evidence the
+// owner ever installed Rookery's browser; only Rookery's own driver directory
+// (ms-playwright-go) is. Counting them flagged such machines as "outdated" and
+// let `upgrade` download ~200 MB onto a host that never opted in.
+func TestAnotherProjectsPlaywrightCacheIsNotOurs(t *testing.T) {
+	root, browsers := playwrightCache(t, cacheSpec{
+		builds: []string{"chromium-1100", "chromium_headless_shell-1100", "firefox-1400"},
+	})
+	if s := staleWith(root, "1.64.1", browsers, bareHost()); s.Outdated {
+		t.Fatalf("another project's Playwright cache was read as Rookery's own install: %s", s.Reason)
+	}
+}
+
+// A driver whose browsers.json names only the full Chromium (no headless-shell
+// entry) must be checked against chromium-<rev>, not a shell directory that the
+// driver would never have downloaded.
+func TestAFullChromiumOnlyDriverChecksTheFullBuild(t *testing.T) {
+	root, browsers := playwrightCache(t, cacheSpec{builds: []string{"chromium-1234"}})
+	pkg := filepath.Join(root, "1.50.0", "package")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(pkg, "cli.js"), []byte("//"), 0o644)
+	_ = os.WriteFile(filepath.Join(pkg, "browsers.json"),
+		[]byte(`{"browsers":[{"name":"chromium","revision":"1234"}]}`), 0o644)
+	if !managedChromiumReady(filepath.Join(root, "1.50.0"), browsers) {
+		t.Fatal("chromium-1234 is exactly what this driver launches and should count")
+	}
+}
+
 // An unknown driver version means the probe itself failed; claiming the runtime
 // is outdated on no evidence would send the owner off to reinstall for nothing.
 func TestAnUnknownVersionIsNeverOutdated(t *testing.T) {

@@ -3161,10 +3161,14 @@ launches. A release moving the driver (1.62.1 → 1.64.1 was the trigger) looks 
 a directory the owner never populated, `Resolve` reports the runtime missing, and
 the browser tools silently stop being offered — "no browser" is a legitimate state
 on most installs, so nothing flags it. `browser.CheckRuntime` tells the two apart:
-OUTDATED only when there is evidence of a previous install (another driver version,
-or a Playwright build in the cache) AND this build cannot launch a browser. Never
-"outdated" on a host that never opted in — that would put a warning on every
-default install. Three things are load-bearing:
+OUTDATED only when there is evidence of a previous install AND this build cannot
+launch a browser. Never "outdated" on a host that never opted in — that would put a
+warning on every default install. **The evidence is Rookery's own
+`ms-playwright-go/<any version>` directory, never a build in `ms-playwright`**:
+that cache is shared by every Playwright binding, so a developer's Python or Node
+test project fills it, and counting it made `upgrade` download ~200 MB onto a host
+that never asked (`TestAnotherProjectsPlaywrightCacheIsNotOurs`). Three things are
+load-bearing:
 
 - **`rookery upgrade` repairs, `serve` only reports.** The packaged unit runs with
   `ProtectHome=read-only`, so the server cannot write the cache it reads. `upgrade`
