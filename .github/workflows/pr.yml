@@ -129,10 +129,12 @@ jobs:
 
       # -race is the point of this job: the scheduler, gateway manager and
       # connector bridge all run concurrent goroutines against shared state.
-      # 900s per test binary, not 600s — the web package measures ~343s locally
-      # under -race and a slower runner needs the headroom.
+      # 1500s per test binary. The web package measured ~343s under -race when
+      # this was 900s; by 2026-11 green runs took 626-787s on the runner and
+      # slower ones crossed 900s, failing PRs whose diff never touched Go. The
+      # job's own 30-minute limit still bounds a genuine hang.
       - name: go test -race
-        run: go test ./... -race -count=1 -timeout 900s
+        run: go test ./... -race -count=1 -timeout 1500s
 
       # Proves each docs-sync assertion can actually fail before trusting the
       # real run below — a previously-fixed defect let an unpinned assertion

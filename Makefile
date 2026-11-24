@@ -29,7 +29,7 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2
 
 # Keep in sync with .github/workflows/pr.yml. The web package measures ~343s
 # under -race, so 600s leaves no headroom on a slower machine.
-GOTEST_TIMEOUT ?= 900s
+GOTEST_TIMEOUT ?= 1500s
 
 .PHONY: ui build-go build stop start deploy restart logs status clean test \
         ci-fmt ci-vet ci-test ci-cross ci-ui ci-docs ci-package docker-build docker-run hooks
