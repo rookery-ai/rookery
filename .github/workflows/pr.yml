@@ -453,6 +453,27 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -o rookery.exe ./cmd/rookery
 
+      # install.ps1 had never been parsed by PowerShell anywhere — the development
+      # host has none. Parsed by BOTH editions: `irm | iex` from a stock Windows
+      # terminal runs Windows PowerShell 5.1, not pwsh, and the two disagree on
+      # syntax 5.1 lacks. ParseInput on the text mirrors `iex`, which is handed
+      # a string rather than a file.
+      - name: install.ps1 parses (pwsh and Windows PowerShell 5.1)
+        if: ${{ !cancelled() }}
+        run: |
+          $check = @'
+          $errs = $null
+          $text = [System.IO.File]::ReadAllText((Resolve-Path ./install.ps1))
+          [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs) { $errs | ForEach-Object { Write-Host "line $($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion): install.ps1 parses"
+          '@
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($check))
+          pwsh -NoProfile -EncodedCommand $encoded
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 does not parse under pwsh" }
+          powershell.exe -NoProfile -EncodedCommand $encoded
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 does not parse under Windows PowerShell 5.1" }
+
       # Includes killing a real lock holder with TerminateProcess. Scoped to the
       # lock tests: the rest of the suite has never been run on Windows, and this
       # job is not the place to discover that.

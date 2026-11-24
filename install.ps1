@@ -125,8 +125,15 @@ $HostTools = @(
     @{ Names = @('python', 'python3', 'py'); Winget = 'Python.Python.3.13';       Purpose = 'agent-tool AST guardrail (without it, generated scripts run unchecked)'; Verify = $true }
     @{ Names = @('rg');                      Winget = 'BurntSushi.ripgrep.MSVC';  Purpose = 'knowledge-base search' }
     @{ Names = @('pdftotext');               Winget = 'oschwartz10612.Poppler';   Purpose = 'PDF text extraction' }
-    @{ Names = @('tesseract');               Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images' }
+    @{ Names = @('tesseract');               Winget = 'UB-Mannheim.TesseractOCR'; Purpose = 'OCR for scanned documents and images'; Admin = $true }
 )
+
+# `Admin` marks the one package whose winget installer is machine-wide:
+# UB-Mannheim.TesseractOCR writes to C:\Program Files, so Windows shows a
+# permission prompt, and a missed or declined prompt fails the install. ripgrep
+# and Poppler are portable zips and Python installs per-user, so none of them
+# prompts. internal/onboard marks the same package (WindowsNeedsAdmin), pinned by
+# packaging/hosttools_agreement_test.go.
 
 function Test-Command {
     param([string]$Name)
@@ -201,13 +208,29 @@ function Install-HostTools {
         return
     }
 
+    # Said BEFORE installing: the permission prompt can open behind this window,
+    # and a prompt nobody expected is the one that gets dismissed.
+    $elevated = @($missing | Where-Object { $_.Admin })
+    if ($elevated.Count -gt 0) {
+        $names = ($elevated | ForEach-Object { $_.Names[0] }) -join ', '
+        Write-Warn "$names installs for all users, so Windows will ask for administrator permission."
+        Write-Host "  Accept the prompt when it appears - it may open behind this window."
+    }
+
     foreach ($t in $missing) {
         Write-Host "  installing $($t.Winget)..."
         # --accept-*-agreements keeps winget from blocking on a prompt this
         # script has no way to answer.
         & winget install -e --id $t.Winget --accept-source-agreements --accept-package-agreements --silent
         if ($LASTEXITCODE -ne 0) {
-            Write-Warn "winget failed for $($t.Winget) — run it yourself: winget install -e --id $($t.Winget)"
+            if ($t.Admin) {
+                Write-Warn "winget failed for $($t.Winget). It needs administrator permission; the prompt was probably missed or declined."
+                Write-Host "  To install it, open PowerShell with 'Run as administrator' and run:"
+                Write-Host "    winget install -e --id $($t.Winget) --accept-source-agreements --accept-package-agreements"
+                Write-Host "  Rookery works without it; only OCR of scanned documents and images is affected."
+            } else {
+                Write-Warn "winget failed for $($t.Winget) - run it yourself: winget install -e --id $($t.Winget)"
+            }
         }
     }
     # winget writes its shims to a directory the CURRENT process resolved PATH

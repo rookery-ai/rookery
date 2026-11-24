@@ -52,6 +52,18 @@ type HostTool struct {
 	// the bug this file is fixing — the guardrail self-skips silently, whereas
 	// re-offering an installed tool is at least visible.
 	VerifyByRunning bool
+
+	// WindowsNeedsAdmin marks a tool whose winget package installs machine-wide
+	// and therefore raises a Windows permission (UAC) prompt.
+	//
+	// Set for tesseract alone: UB-Mannheim.TesseractOCR is an NSIS installer
+	// writing to C:\Program Files, while ripgrep and Poppler are portable zips
+	// unpacked into the user's profile and python.org's Python installs
+	// per-user. A missed or declined prompt fails the install, and before this
+	// flag nothing said a prompt was coming or why the install had failed.
+	// install.ps1 carries the same marker, pinned by
+	// packaging/hosttools_agreement_test.go.
+	WindowsNeedsAdmin bool
 }
 
 // Bins returns the candidate names for this tool on goos, in preference order.
@@ -74,7 +86,7 @@ var HostTools = []HostTool{
 	},
 	{Bin: "rg", Purpose: "fast knowledge-base search (a slower pure-Go fallback is used without it)"},
 	{Bin: "pdftotext", Purpose: "PDF text extraction (a weaker pure-Go fallback is used without it)"},
-	{Bin: "tesseract", Purpose: "OCR for scanned documents and images"},
+	{Bin: "tesseract", Purpose: "OCR for scanned documents and images", WindowsNeedsAdmin: true},
 }
 
 // LookPath is the probe, indirected so tests can describe a host they are not
@@ -199,14 +211,40 @@ func DetectManager(look LookPath) Manager {
 // while every other manager gets a single line. Returning a slice rather than
 // one string keeps that difference from having to be special-cased by callers.
 func InstallCommands(m Manager, tools []HostTool) []string {
+	steps := InstallSteps(m, tools)
+	if len(steps) == 0 {
+		return nil
+	}
+	out := make([]string, len(steps))
+	for i, s := range steps {
+		out[i] = s.Command
+	}
+	return out
+}
+
+// InstallStep is one command and what it installs.
+type InstallStep struct {
+	Command string
+	Tools   []HostTool
+	// NeedsAdmin means Windows will show a permission prompt for this step,
+	// and it fails if the prompt is missed or declined.
+	NeedsAdmin bool
+}
+
+// InstallSteps is InstallCommands with each command's tools attached, so a
+// caller can warn about an elevated install before running it and explain a
+// failure afterwards. Order and commands are identical to InstallCommands.
+func InstallSteps(m Manager, tools []HostTool) []InstallStep {
 	if m == ManagerNone || len(tools) == 0 {
 		return nil
 	}
 
+	byPkg := map[string]HostTool{}
 	var pkgs []string
 	for _, t := range tools {
 		if name, ok := PackageFor(m, t.Bin); ok {
 			pkgs = append(pkgs, name)
+			byPkg[name] = t
 		}
 	}
 	if len(pkgs) == 0 {
@@ -214,26 +252,39 @@ func InstallCommands(m Manager, tools []HostTool) []string {
 	}
 	sort.Strings(pkgs)
 
+	all := make([]HostTool, len(pkgs))
+	for i, p := range pkgs {
+		all[i] = byPkg[p]
+	}
+	one := func(cmd string) []InstallStep {
+		return []InstallStep{{Command: cmd, Tools: all}}
+	}
+
 	switch m {
 	case ManagerWinget:
-		out := make([]string, 0, len(pkgs))
+		out := make([]InstallStep, 0, len(pkgs))
 		for _, p := range pkgs {
-			out = append(out, "winget install -e --id "+p+
-				" --accept-source-agreements --accept-package-agreements")
+			t := byPkg[p]
+			out = append(out, InstallStep{
+				Command: "winget install -e --id " + p +
+					" --accept-source-agreements --accept-package-agreements",
+				Tools:      []HostTool{t},
+				NeedsAdmin: t.WindowsNeedsAdmin,
+			})
 		}
 		return out
 	case ManagerBrew:
 		// Homebrew must not be run under sudo; it refuses, and doing it anyway
 		// leaves root-owned files in the prefix that break later installs.
-		return []string{"brew install " + join(pkgs)}
+		return one("brew install " + join(pkgs))
 	case ManagerPacman:
-		return []string{"sudo pacman -S --needed --noconfirm " + join(pkgs)}
+		return one("sudo pacman -S --needed --noconfirm " + join(pkgs))
 	case ManagerAPT:
-		return []string{"sudo apt-get update && sudo apt-get install -y " + join(pkgs)}
+		return one("sudo apt-get update && sudo apt-get install -y " + join(pkgs))
 	case ManagerZypper:
-		return []string{"sudo zypper install -y " + join(pkgs)}
+		return one("sudo zypper install -y " + join(pkgs))
 	default: // dnf
-		return []string{"sudo dnf install -y " + join(pkgs)}
+		return one("sudo dnf install -y " + join(pkgs))
 	}
 }
 
