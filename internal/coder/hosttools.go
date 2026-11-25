@@ -109,6 +109,9 @@ type hostToolSet struct {
 	// See vault.WriteJournal for why this is a per-write journal rather than a
 	// snapshot diff around the whole run.
 	journal *vault.WriteJournal
+	// scratchDir is the run's private TMPDIR for bash and run_script; "" keeps
+	// the workspace home's shared tmp/. See Coder.WithScratchDir.
+	scratchDir string
 
 	// searcher overrides the exact-match Searcher used by search_files. Nil in
 	// production, where it always falls back to h.vlt.NewSearcher() — this
@@ -1418,7 +1421,7 @@ func (h *hostToolSet) runScript(ctx context.Context, rel string, scriptArgs []st
 	// coder's buildEnv) instead of the shared system /tmp, which the sandbox
 	// deliberately does not grant RW on.
 	homeDir := h.userHomeDir()
-	tmpDir := filepath.Join(homeDir, "tmp")
+	tmpDir := tempDirFor(homeDir, h.scratchDir)
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return "", fmt.Errorf("prepare script tmp dir: %w", err)
 	}
@@ -1954,7 +1957,7 @@ func (h *hostToolSet) runBash(ctx context.Context, command string) (string, erro
 		return "", fmt.Errorf("command is required")
 	}
 	homeDir := h.userHomeDir()
-	tmpDir := filepath.Join(homeDir, "tmp")
+	tmpDir := tempDirFor(homeDir, h.scratchDir)
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return "", fmt.Errorf("prepare tmp dir: %w", err)
 	}
