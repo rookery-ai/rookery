@@ -2402,7 +2402,7 @@ conformance.
 
 Two pools of skills, both surfaced to the agent designer and the runner as `[]prompts.SkillRef`:
 
-- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 22 bundled skills. File Processing: csv, pdf, docx, pptx, xlsx, markdown, image-ocr. Agent Behaviour: kb-curation, change-detection, notification-writing, agent-collaboration, resilient-runs, time-and-timezones. Web & Research: web-research. Development: git-and-github, cli-tool-installer. Productivity: email-triage, calendar-scheduling. Integrations: api-integration, ssh. Meta: skill-creator, skill-vetter. (web-search + web-scraper merged into web-research, and github-integration became git-and-github, because all three duplicated native tools or the GitHub connector.) **A core skill ships SKILL.md only — never a `scripts/` directory**: CoreSkillContent returns the embedded markdown and nothing else, and nothing materializes the embed to disk, so a shipped script would reference a file that never reaches the agent's working dir. Core skills teach through inline snippets; USER skills, which live on disk in the vault, may ship scripts. Pinned by `skilllibrary.TestCoreSkillsShipNoScripts` and the rest of `catalog_test.go` (frontmatter parses, name == directory, description carries triggers, referenced `scripts/` paths exist). (The Composio-based composio-toolkit + google-workspace skills were removed; connected services are reached via native connector tools.) **`playwright-browser` was removed in 2026-08** when the native `browser_*` tools landed: it taught a model to hand-write Playwright in Python, which is exactly what the weak models this platform runs cannot do, and a skill competing with a tool for the same job makes their choice worse. `skilllibrary.TestRemovedSkillsStayRemoved` pins it (the obvious fix for "the playwright skill is missing" is to write the file back), a sibling test bans any surviving skill from referencing it, and migration 019 sweeps the `agent_skills` rows that named it — that table is keyed by NAME with no foreign key, so a dangling row does not error, it just silently costs the agent a capability it believes it has.
+- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 23 bundled skills. File Processing: csv, pdf, docx, pptx, xlsx, markdown, image-ocr. Agent Behaviour: kb-curation, change-detection, notification-writing, agent-collaboration, resilient-runs, run-hygiene, time-and-timezones. Web & Research: web-research. Development: git-and-github, cli-tool-installer. Productivity: email-triage, calendar-scheduling. Integrations: api-integration, ssh. Meta: skill-creator, skill-vetter. (web-search + web-scraper merged into web-research, and github-integration became git-and-github, because all three duplicated native tools or the GitHub connector.) **A core skill ships SKILL.md only — never a `scripts/` directory**: CoreSkillContent returns the embedded markdown and nothing else, and nothing materializes the embed to disk, so a shipped script would reference a file that never reaches the agent's working dir. Core skills teach through inline snippets; USER skills, which live on disk in the vault, may ship scripts. Pinned by `skilllibrary.TestCoreSkillsShipNoScripts` and the rest of `catalog_test.go` (frontmatter parses, name == directory, description carries triggers, referenced `scripts/` paths exist). (The Composio-based composio-toolkit + google-workspace skills were removed; connected services are reached via native connector tools.) **`playwright-browser` was removed in 2026-08** when the native `browser_*` tools landed: it taught a model to hand-write Playwright in Python, which is exactly what the weak models this platform runs cannot do, and a skill competing with a tool for the same job makes their choice worse. `skilllibrary.TestRemovedSkillsStayRemoved` pins it (the obvious fix for "the playwright skill is missing" is to write the file back), a sibling test bans any surviving skill from referencing it, and migration 019 sweeps the `agent_skills` rows that named it — that table is keyed by NAME with no foreign key, so a dangling row does not error, it just silently costs the agent a capability it believes it has.
 
 **That removal stated a rule the project then failed to apply four more times, which is what the 2026-09 skill rewrite fixed.** The rule is in `removed_test.go`: *a skill and a tool competing for the same job is worse than either alone*, because the small models this platform runs pick badly between them — and the skill, being the more specific instruction, usually wins with the weaker implementation. `csv` went on teaching pandas after `kb_table_query` shipped; `docx`, `pptx`, `xlsx` and `pdf` went on teaching python-docx, markitdown, openpyxl and pdfplumber after `rookery kb convert` shipped. Zero of the 21 skills mentioned `kb_table_query`, `kb_file_map`, `search_files`, `glob`, `get_state`/`set_state`, the `browser_*` acting tools, `save_to_kb`, `connector exec` or MCP; exactly one mentioned `web_fetch`.
 
@@ -2795,6 +2795,42 @@ only for `undefined`.
 
 The vault run note gains a `## Tool calls` section from the same collector
 (`progressLines`), since that note is the durable copy an agent can read.
+
+### Run retention and per-run scratch
+
+**Every agent keeps the full record of its last 15 runs and no more — a hard cap, not a
+setting** (`prompts.RunHistoryKeep`, which `agentrunner.RunHistoryKeep` aliases because the
+run prompt states the same number). A deferred `pruneRunHistory` runs after every run on every
+exit path, and `Runner.PruneAllRunHistory` applies it once at `serve` startup so an agent that
+rarely runs is covered too. Four things are load-bearing:
+
+- **Old rows are SLIMMED, never deleted** (`db.PruneAgentRuns`): they lose `transcript`,
+  `stdout` and `stderr` and keep timestamps, status and usage. Day and month spending limits sum
+  `agent_runs` usage since the period start (`AgentSpendSince`), so deleting rows would let an
+  agent that runs every few minutes forget what it spent this month. Slim rows need no hiding:
+  run history lists 10 rows and Home takes a workspace's 10 newest, and a pruned row by
+  definition has 15 newer runs of its own agent. A row with `finished_at IS NULL` is never
+  touched; `rowid` breaks same-second `started_at` ties.
+- **The database decides the kept set and the vault deletes everything outside it**
+  (`Reflector.PruneAgentRuns`): run notes beyond the newest 15 by file name (a UTC stamp, so
+  lexical = chronological), and this agent's `agent_runs` sidecars not in the kept set. So when
+  the database step fails the vault step is SKIPPED — an empty keep set would read as "keep
+  nothing" and delete every sidecar. Nothing else in `agents/<id>/` is touched: the platform
+  deletes only files it writes itself, never a folder a model invented.
+- **Each run gets `TMPDIR = <workspace home>/tmp/run-<run id>`** (`Coder.WithScratchDir`, read by
+  `buildEnv`, `runBash` and `runScript`), deleted by a deferred `os.RemoveAll` when the run ends.
+  It used to be one `tmp/` shared by every run of every agent in the workspace and never emptied.
+  It sits inside the workspace home, which the sandbox already grants read-write. A server killed
+  mid-run leaves its folder, so `coder.SweepRunScratch` removes every `tmp/run-*` at startup,
+  BEFORE the scheduler and web server can start a run. Chat, builds and dry runs set no scratch
+  dir and keep `<home>/tmp`.
+- **Agents are told, whatever skills they declare.** `<skill_environment>` no longer advertises
+  `<home>/tmp` as the scratch path; it says `$TMPDIR` is private to the run and deleted afterwards,
+  that fetched pages and parse output never go into the knowledge base or the agent's folder, and
+  that `logs/` keeps the last 15 runs. The `run-hygiene` core skill carries the fuller guidance.
+  A shell-scraping agent that saved pages under its own folder put untrusted third-party HTML into
+  nightly backups and into `search_files` results (ripgrep searches every file type), which is
+  what prompted this.
 
 ### Stopping a run
 
