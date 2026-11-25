@@ -707,6 +707,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		readOnly:         c.readOnlyTools,
 		agentName:        c.agentName,
 		journal:          c.kbJournal,
+		scratchDir:       c.scratchDir,
 		// Enforce script self-verification only during an agent BUILD (the caller sets
 		// ROOKERY_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
