@@ -20,12 +20,16 @@ func lockEnv(envDir string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	// The handle exists only to hold the flock: nothing is ever written through it,
+	// so a Close error cannot lose data and is deliberately discarded. It stays
+	// O_RDWR because flock on NFS is emulated with fcntl locks, where an exclusive
+	// lock needs a descriptor open for writing.
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = f.Close()
 	}, nil
 }

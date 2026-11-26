@@ -30,6 +30,27 @@ func TestSkillEnvBlockReadyEnv(t *testing.T) {
 	}
 }
 
+// Every run is told its scratch space is private and temporary, and that fetched
+// pages and parse output stay out of the knowledge base and out of logs/.
+func TestSkillEnvBlockStatesTheScratchAndLogsRules(t *testing.T) {
+	out := SkillEnvBlock(nil, nil, "/h", "/v", "rookery")
+	for _, want := range []string{
+		"$TMPDIR",
+		"NEVER /tmp",
+		"private to this run and deleted when the run ends",
+		"Never save fetched web pages, downloads or parse output into the knowledge base",
+		"logs/ belongs to the platform",
+		"last 15 runs",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("skill environment is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "=/h/tmp") {
+		t.Errorf("still advertises the shared workspace tmp as the scratch path:\n%s", out)
+	}
+}
+
 func TestSkillEnvBlockEmpty(t *testing.T) {
 	if got := SkillEnvBlock(nil, nil, "/h", "", "rookery"); got != "" {
 		t.Errorf("nothing to say, got %q", got)
