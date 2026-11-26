@@ -450,6 +450,16 @@ func serveCmd() *cli.Command {
 						WithSecretsLookup(secretsLookup)
 				})
 
+			// Before anything can start a run (the scheduler and the web server come
+			// later): a run's scratch folder left by a killed server is swept, and every
+			// agent is brought under the run-history cap, including ones that rarely run.
+			if n, err := coder.SweepRunScratch(homesDir); err != nil {
+				slog.Warn("sweep run scratch folders", "err", err)
+			} else if n > 0 {
+				slog.Info("leftover run scratch folders removed", "folders", n)
+			}
+			runner.PruneAllRunHistory()
+
 			// Conversational skill-creator: same shape as the agent designer.
 			// Core skills are embedded (always-on) and need no seeding; the saver
 			// writes user-created skills into the user's vault.

@@ -146,6 +146,7 @@ type Coder struct {
 	// kbJournal records a rehearsal's knowledge-base writes so its caller can
 	// undo them. Nil for every ordinary surface. See WithKBJournal.
 	kbJournal    *vault.WriteJournal
+	scratchDir   string // per-run TMPDIR; "" = <home>/tmp. See WithScratchDir.
 	workDir      string // when non-empty, overrides cmd.Dir (default: per-user home)
 	agentName    string // name for the API engine's state.md tools (cosmetic; see WithAgentName)
 	allowedTools string // when non-empty, passed as --allowedTools <value>
@@ -979,7 +980,7 @@ func (c *Coder) ensureUserHome(workspaceID string, backend CoderBackend) (string
 // buildEnv constructs the subprocess environment. System overrides (HOME plus
 // any backend-specific vars) always take precedence over c.extraEnv.
 func (c *Coder) buildEnv(homeDir string, backend CoderBackend) []string {
-	tmpDir := filepath.Join(homeDir, "tmp")
+	tmpDir := tempDirFor(homeDir, c.scratchDir)
 	overrides := map[string]string{
 		"HOME":   homeDir,
 		"TMPDIR": tmpDir,

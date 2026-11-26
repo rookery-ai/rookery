@@ -3144,6 +3144,12 @@ func skillPyEnvLines(envs []SkillPyEnv, rookeryBin string) string {
 	return sb.String()
 }
 
+// RunHistoryKeep is how many of an agent's runs keep their full record (run note,
+// transcript, output). The agent runner enforces it (agentrunner.RunHistoryKeep is
+// this constant); it lives here because the run prompt states it, and one number
+// in two places is how a prompt ends up promising what the code does not do.
+const RunHistoryKeep = 15
+
 // SkillEnvBlock builds the <skill_environment> block injected into an agent run
 // alongside <skill_instructions>. For each declared tool it states the resolved
 // absolute path (or "missing — install via the cli-tool-installer skill") plus
@@ -3179,12 +3185,16 @@ func SkillEnvBlock(bins []SkillBin, envs []SkillPyEnv, homeDir, vaultRoot, rooke
 	sb.WriteString(fmt.Sprintf(`Conventions:
 - Installed CLI tools live at %s/.local/bin/ — ALWAYS invoke them by absolute path
   (e.g. %s/.local/bin/pandoc), never the bare name: the inherited PATH points elsewhere.
-- Use $TMPDIR (=%s/tmp) for scratch, NEVER /tmp.
+- Use $TMPDIR for scratch, NEVER /tmp.
+  It is private to this run and deleted when the run ends, so keep anything the next
+  run needs in your state, not in a file.
+- Never save fetched web pages, downloads or parse output into the knowledge base or
+  your own folder. logs/ belongs to the platform: it keeps only the last %d runs.
 - Secrets are environment variables — read from os.environ, never hardcode.
 - The user's knowledge base root is: %s — read it for context and write durable
   knowledge back into notes/ or memory/.
 </skill_environment>
-`, homeDir, homeDir, homeDir, vaultRoot))
+`, homeDir, homeDir, RunHistoryKeep, vaultRoot))
 	return sb.String()
 }
 

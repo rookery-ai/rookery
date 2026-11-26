@@ -685,6 +685,21 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	}); err != nil {
 		return fmt.Errorf("create run record: %w", err)
 	}
+	// Deferred, so it runs on every exit path below and after the row is finished
+	// and the note reflected: this run is then one of the 15 it keeps.
+	defer r.pruneRunHistory(input.WorkspaceID, input.AgentID)
+
+	// A scratch folder private to this run, deleted when the run ends whatever the
+	// model did: nothing it downloads or parses outlives it, and two agents in one
+	// workspace no longer share TMPDIR. Under the workspace home, which the sandbox
+	// already grants read-write. A leftover from a killed server is swept at startup.
+	scratchDir := filepath.Join(coderSvc.UserHomeDir(input.WorkspaceID), "tmp", coder.RunScratchPrefix+runID)
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		slog.Warn("agentrunner: create run scratch dir", "run_id", runID, "err", err)
+	} else {
+		coderSvc = coderSvc.WithScratchDir(scratchDir)
+		defer os.RemoveAll(scratchDir) //nolint:errcheck // best-effort; swept at startup
+	}
 
 	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
