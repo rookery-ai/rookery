@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.3](https://github.com/rookery-ai/rookery/compare/v0.24.2...v0.24.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **agentrunner:** keep only each agent's last 15 runs and wipe run scratch ([#441](https://github.com/rookery-ai/rookery/issues/441)) ([1891a2b](https://github.com/rookery-ai/rookery/commit/1891a2b788827956d551ed366bf9eaddfe915e97))
+
+
+### Refactoring
+
+* **skilldeps:** discard the lock handle's close error explicitly ([#443](https://github.com/rookery-ai/rookery/issues/443)) ([924ea96](https://github.com/rookery-ai/rookery/commit/924ea9609eb1a2e481f618b7886eec4a1dcee35b))
+
 ## [0.24.2](https://github.com/rookery-ai/rookery/compare/v0.24.1...v0.24.2) (2026-11-24)
 
 
